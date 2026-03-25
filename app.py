@@ -160,7 +160,7 @@ def calc(df, current_price, chg24, vol24):
                     MA50=round(m50,4) if not np.isnan(m50) else 'N/A',
                     MA200=round(m200,4) if not np.isnan(m200) else 'N/A',
                     ADX=round(adx,1),ZScore=round(z,2),VolSrg=round(vs,2),
-                    ATR=atr,Chg24H=round(p1*100,2),Chg7D=round(p7*100,2),
+                    ATR=atr,Chg24=round(p1*100,2),Chg7D=round(p7*100,2),
                     Chg30D=round(p30*100,2),Miro=miro,Signal=sig)
     except Exception:
         return None
@@ -247,8 +247,6 @@ if 'res' in st.session_state:
     df['Qty'] = (risk/(df['Price']-df['StopLoss'])).replace([np.inf,-np.inf],0).fillna(0).round(0).astype(int)
     T = st.tabs(['🎯 Miro Flow','📈 Trend & ADX','🔄 Reversion','💎 Weekly Sniper','📂 AI Audit','🧠 Council Debate'])
 
-    def safe_cols(frame, cols):
-        return [c for c in cols if c in frame.columns]
 
     def tbl(frame,cols):
         cols = safe_cols(frame, cols)
@@ -258,7 +256,7 @@ if 'res' in st.session_state:
         st.subheader('🎯 Miro Momentum Leaderboard')
         st.caption('Hot-money detection — coins with institutional flow NOW')
         tbl(df.sort_values('Miro',ascending=False),
-            ['Ticker','Name','Price','Signal','Miro','VolSrg','Chg7D','Chg30D'])
+            ['Ticker','Name','Price','Signal','Miro','VolSrg','Chg24','Chg7D','Chg30D'])
         with st.expander('📘 Tactical Logic'):
             st.markdown('**Miro 2-10:** hot-money velocity index. **VolSrg>2:** mass institutional accumulation. **Edge:** early breakout warning for swing entries.')
     with T[1]:
@@ -279,7 +277,7 @@ if 'res' in st.session_state:
         st.subheader('💎 Weekly Institutional Flow')
         st.caption('Where whales are building walls — sorted by volume surge')
         tbl(df.sort_values('VolSrg',ascending=False),
-            ['Ticker','Name','Price','Signal','VolSrg','Chg7D','Chg30D'])
+            ['Ticker','Name','Price','Signal','VolSrg','Chg24','Chg7D','Chg30D'])
         with st.expander('📘 Tactical Logic'):
             st.markdown('**VolSrg>2:** institution absorbing all sellers. Small price + huge vol = violent breakout incoming.')
     with T[4]:
