@@ -238,7 +238,7 @@ if 'crypto_res' in st.session_state:
         st.subheader("🎯 Miro Momentum Leaderboard")
         st.caption("Hot-money institutional detection — coins with smart money flowing in NOW")
         mf = df[["Ticker","Name","Price","Recommendation","Miro_Score","Vol_Surge","7D%","30D%"]].sort_values("Miro_Score", ascending=False)
-        st.dataframe(mf.style.applymap(highlight_reco, subset=['Recommendation']), hide_index=True, use_container_width=True)
+        st.dataframe(mf.style.map(highlight_reco, subset=['Recommendation']), hide_index=True, use_container_width=True)
         with st.expander("📘 TACTICAL LOGIC: Miro Flow"):
             st.markdown("""
 **Logic:** Detects Hot Money entering a crypto asset before the crowd.
@@ -251,7 +251,7 @@ if 'crypto_res' in st.session_state:
         st.subheader("📈 Trend Strength Leaderboard")
         st.caption("ADX > 25 = strong trend. ADX > 40 = explosive trend.")
         tf = df[["Ticker","Name","Price","MA 20","MA 50","MA 200","ADX","Recommendation","Sector"]].sort_values("ADX", ascending=False)
-        st.dataframe(tf.style.applymap(highlight_reco, subset=['Recommendation']), hide_index=True, use_container_width=True)
+        st.dataframe(tf.style.map(highlight_reco, subset=['Recommendation']), hide_index=True, use_container_width=True)
         with st.expander("📘 TACTICAL LOGIC: Trend & ADX"):
             st.markdown("""
 **Logic:** ADX measures trend strength regardless of direction.
@@ -264,7 +264,7 @@ if 'crypto_res' in st.session_state:
         st.subheader("🔄 Mean Reversion Opportunities")
         st.caption("Z-Score < -2.2 = statistically oversold — snap-back candidates")
         rf = df[["Ticker","Name","Price","MA 20","Z-Score","ATR","Recommendation"]].sort_values("Z-Score", ascending=True)
-        st.dataframe(rf.style.applymap(highlight_reco, subset=['Recommendation']), hide_index=True, use_container_width=True)
+        st.dataframe(rf.style.map(highlight_reco, subset=['Recommendation']), hide_index=True, use_container_width=True)
         with st.expander("📘 TACTICAL LOGIC: Reversion"):
             st.markdown("""
 **Logic:** Z-Score measures deviation from the 20-day mean.
@@ -276,7 +276,7 @@ if 'crypto_res' in st.session_state:
         st.subheader("💎 Weekly Institutional Flow")
         st.caption("Tracking where Whales and Funds are Building a Wall")
         wf = df[["Ticker","Name","Price","Recommendation","Vol_Surge","7D%","30D%","Sector"]].sort_values("Vol_Surge", ascending=False)
-        st.dataframe(wf.style.applymap(highlight_reco, subset=['Recommendation']), hide_index=True, use_container_width=True)
+        st.dataframe(wf.style.map(highlight_reco, subset=['Recommendation']), hide_index=True, use_container_width=True)
         with st.expander("📘 TACTICAL LOGIC: Weekly Sniper"):
             st.markdown("""
 **Logic:** Tracks where Whales and On-Chain funds are Building a Wall.
