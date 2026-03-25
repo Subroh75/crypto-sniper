@@ -246,14 +246,19 @@ if 'res' in st.session_state:
     df['StopLoss'] = df['Price']-2.0*df['ATR']
     df['Qty'] = (risk/(df['Price']-df['StopLoss'])).replace([np.inf,-np.inf],0).fillna(0).round(0).astype(int)
     T = st.tabs(['🎯 Miro Flow','📈 Trend & ADX','🔄 Reversion','💎 Weekly Sniper','📂 AI Audit','🧠 Council Debate'])
+
+    def safe_cols(frame, cols):
+        return [c for c in cols if c in frame.columns]
+
     def tbl(frame,cols):
+        cols = safe_cols(frame, cols)
         st.dataframe(frame[cols].style.map(highlight_reco,subset=['Signal']),
                      hide_index=True,use_container_width=True)
     with T[0]:
         st.subheader('🎯 Miro Momentum Leaderboard')
         st.caption('Hot-money detection — coins with institutional flow NOW')
         tbl(df.sort_values('Miro',ascending=False),
-            ['Ticker','Name','Price','Signal','Miro','VolSrg','Chg24H','Chg7D','Chg30D'])
+            ['Ticker','Name','Price','Signal','Miro','VolSrg','Chg7D','Chg30D'])
         with st.expander('📘 Tactical Logic'):
             st.markdown('**Miro 2-10:** hot-money velocity index. **VolSrg>2:** mass institutional accumulation. **Edge:** early breakout warning for swing entries.')
     with T[1]:
@@ -274,7 +279,7 @@ if 'res' in st.session_state:
         st.subheader('💎 Weekly Institutional Flow')
         st.caption('Where whales are building walls — sorted by volume surge')
         tbl(df.sort_values('VolSrg',ascending=False),
-            ['Ticker','Name','Price','Signal','VolSrg','Chg24H','Chg7D','Chg30D'])
+            ['Ticker','Name','Price','Signal','VolSrg','Chg7D','Chg30D'])
         with st.expander('📘 Tactical Logic'):
             st.markdown('**VolSrg>2:** institution absorbing all sellers. Small price + huge vol = violent breakout incoming.')
     with T[4]:
