@@ -1,21 +1,24 @@
 import streamlit as st
 import ccxt
 import pandas as pd
-import time
 
 # --- CONFIGURATION ---
 st.set_page_config(page_title="Crypto 500 Sniper", layout="wide")
 
-# Initialize Exchange (Binance is best for volume depth)
-exchange = ccxt.binance()
+# Using Bybit instead of Binance to avoid 'Restricted Location' errors
+exchange = ccxt.bybit()
 
 def fetch_top_500_tickers():
-    """Fetches top 500 pairs by 24h volume to mimic Nifty 500 depth"""
+    """Fetches top 500 pairs by 24h volume from Bybit"""
     try:
+        # Load markets to get symbols
+        exchange.load_markets()
         tickers = exchange.fetch_tickers()
-        # Filter for USDT pairs and sort by quoteVolume (24h Volume in USDT)
-        usdt_pairs = [t for t in tickers.values() if '/USDT' in t['symbol']]
+        
+        # Filter for USDT pairs and sort by 24h Volume
+        usdt_pairs = [t for t in tickers.values() if t['symbol'].endswith('/USDT')]
         sorted_pairs = sorted(usdt_pairs, key=lambda x: x['quoteVolume'] or 0, reverse=True)
+        
         return sorted_pairs[:500]
     except Exception as e:
         st.error(f"Error fetching data: {e}")
@@ -23,45 +26,42 @@ def fetch_top_500_tickers():
 
 # --- UI LAYOUT ---
 st.title("🎯 Crypto 500 Sniper")
-st.subheader("Real-time Momentum Scanner for Top 500 Crypto Assets")
+st.subheader("Real-time Momentum Scanner (Powered by Bybit Data)")
 
 if st.button("Start Scan"):
-    with st.spinner("Sniper is scanning the Top 500 markets..."):
+    with st.spinner("Scanning 500+ pairs for high-conviction setups..."):
         data = fetch_top_500_tickers()
         
         if data:
             results = []
             for coin in data:
-                # SNIPER LOGIC: High Volume + Price Action
-                # Mimicking the logic of your Nifty volume scan
+                # Logic: Percentage change and last price
                 change = coin.get('percentage', 0)
                 price = coin.get('last', 0)
                 volume = coin.get('quoteVolume', 0)
                 
-                # Filter: Looking for coins up > 3% with significant activity
-                if change > 3.0:
+                # SNIPER FILTER: Up more than 3% (Bullish momentum)
+                if change and change > 3.0:
                     results.append({
-                        "Ticker": coin['symbol'].replace('/USDT', ''),
+                        "Ticker": coin['symbol'].split(':')[0].replace('/USDT', ''),
                         "Price": f"${price:,.4f}",
                         "24h Change": f"{change:.2f}%",
                         "24h Volume": f"${volume:,.0f}",
                         "Signal": "🔥 BULLISH MOMENTUM"
                     })
             
-            # Sort by highest percentage change for the 'Sniper' feel
+            # Sort by highest gainers
             results = sorted(results, key=lambda x: float(x['24h Change'].replace('%','')), reverse=True)
             
             st.divider()
-            st.write(f"### Top 5 Sniper Picks") # As per your 5-result preference
+            st.write(f"### Top 5 Sniper Picks")
             
             if results:
-                # Display only top 5 as requested
                 df = pd.DataFrame(results[:5])
                 st.table(df)
             else:
-                st.warning("No high-momentum setups found in the Top 500 right now.")
+                st.warning("No 3%+ breakouts found in the Top 500 right now.")
         
     st.success("Scan Complete.")
 
-# --- FOOTER ---
-st.caption("Logic: Scanning Top 500 USDT pairs by Volume | Data: Binance via CCXT")
+st.caption("Deployment Tip: If GitHub says 'File could not be edited', create a NEW file named 'crypto_sniper.py' instead.")
