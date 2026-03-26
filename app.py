@@ -153,8 +153,6 @@ def live_prices():
 btc_p,eth_p = live_prices()
 st.sidebar.table(pd.DataFrame({'Metric':['BTC ($)','ETH ($)'],'Value':[str(btc_p),str(eth_p)]}))
 scan_n = st.sidebar.slider('Scan Depth',10,500,50)
-st.sidebar.caption('⚡ CryptoCompare: 100 coins/call bulk + 366d OHLCV per coin')
-st.sidebar.caption('📡 No auth required · public-apis sourced')
 
 # ── SCAN ────────────────────────────────────────────────────────────────────
 if st.sidebar.button('🚀 EXECUTE FULL CRYPTO AUDIT'):
