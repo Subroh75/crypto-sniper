@@ -153,6 +153,8 @@ def live_prices():
 btc_p,eth_p = live_prices()
 st.sidebar.table(pd.DataFrame({'Metric':['BTC ($)','ETH ($)'],'Value':[str(btc_p),str(eth_p)]}))
 scan_n = st.sidebar.slider('Scan Depth',10,500,50)
+st.sidebar.caption('⚡ CryptoCompare: 100 coins/call bulk + 366d OHLCV per coin')
+st.sidebar.caption('📡 No auth required · public-apis sourced')
 
 # ── SCAN ────────────────────────────────────────────────────────────────────
 if st.sidebar.button('🚀 EXECUTE FULL CRYPTO AUDIT'):
@@ -278,19 +280,4 @@ if 'res' in st.session_state:
                 [cols[i%3].metric(k,v) for i,(k,v) in enumerate(row2.items())]
 else:
     st.info('Scanner Ready. Set Scan Depth and click **EXECUTE FULL CRYPTO AUDIT**.')
-    st.markdown('''---
-### 🪙 Crypto Sniper Elite v1.0 — CryptoCompare Edition
-Nifty Sniper v16.0 logic rebuilt for the top 500 crypto markets.
 
-**📡 Data source:** CryptoCompare (from public-apis list) — No auth required.
-- `/top/mktcapfull` — 100 coins per call with live price, volume, 24h change
-- `/v2/histoday` — 366 days daily OHLCV (open/high/low/close/volume) per coin
-
-| Signal | Meaning |
-|--------|---------|
-| 🚀 STRONG BUY | Price surge + volume — institutional entry NOW |
-| 🔴 STRONG SELL | Dump + volume — distribution phase |
-| 🔄 REVERSION BUY | Z-Score < -2.2 — snap-back imminent |
-| ✅ ACCUMULATE | Above MA200 + ADX>25 — confirmed uptrend |
-| 🟡 NEUTRAL | No clear directional edge — stand aside |
-''')
