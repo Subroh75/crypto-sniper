@@ -19,7 +19,7 @@ def get_ai_client():
     try:
         if GENAI_AVAILABLE and 'GEMINI_API_KEY' in st.secrets:
             genai.configure(api_key=st.secrets['GEMINI_API_KEY'])
-            return genai.GenerativeModel('gemini-1.5-flash')
+            return genai.GenerativeModel('gemini-2.5-flash-preview-04-17')
         return None
     except Exception:
         return None
