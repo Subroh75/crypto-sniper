@@ -358,7 +358,8 @@ def signal_chip(s):
         "CAUTION":    "chip-hold",
         "STRONG SELL":"chip-sell",
     }
-    return f'<span class="signal-chip {m.get(s, \"chip-hold\")}">{s}</span>'
+    css = m.get(s, "chip-hold")
+    return f'<span class="signal-chip {css}">{s}</span>'
 
 # ── Gemini AI ─────────────────────────────────────────────────────────────────
 def run_gemini(prompt: str) -> str:
