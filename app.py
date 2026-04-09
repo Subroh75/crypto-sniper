@@ -199,7 +199,10 @@ SENTIMENT: [BULLISH/BEARISH/NEUTRAL]
             json={"model": "claude-haiku-4-5-20251001", "max_tokens": 800, "messages": [{"role": "user", "content": prompt}]},
             timeout=20,
         )
-        text = resp.json()["content"][0]["text"]
+        data = resp.json()
+        if "error" in data or "content" not in data:
+            return []
+        text = data["content"][0]["text"]
         # Parse the structured output
         articles = []
         blocks = text.split("---")
@@ -274,7 +277,14 @@ Each section: 2-3 sentences. VERDICT: one clear actionable sentence."""
                   "messages": [{"role": "user", "content": prompt}]},
             timeout=30,
         )
-        return resp.json()["content"][0]["text"], None
+        data = resp.json()
+        if "error" in data:
+            return None, f"API {resp.status_code}: {data['error'].get('message', str(data['error']))}"
+        if "content" not in data:
+            return None, f"Unexpected response ({resp.status_code}): {str(data)[:300]}"
+        return data["content"][0]["text"], None
+    except requests.exceptions.Timeout:
+        return None, "Request timed out. Try again."
     except Exception as e:
         return None, str(e)
 
@@ -469,6 +479,7 @@ else:
 
     if err:
         st.error(f"Council error: {err}")
+        st.info("Check your ANTHROPIC_API_KEY in Streamlit secrets. Get a key at console.anthropic.com")
     elif council_text:
         parsed = parse_council(council_text)
         agents = [
