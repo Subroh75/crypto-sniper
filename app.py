@@ -1,11 +1,15 @@
-# Crypto Sniper Elite v1.0 — CryptoCompare Edition
-# Source: min-api.cryptocompare.com (from public-apis list) — No auth, 366 days OHLCV free
+# ╔══════════════════════════════════════════════════════════════════╗
+# ║  CRYPTO GURU — Intelligence Terminal v2.0                       ║
+# ║  Search any coin → Project overview · News · TA · AI Council   ║
+# ║  Data: CryptoCompare  ·  AI: Gemini  ·  Domain: crypto.guru    ║
+# ╚══════════════════════════════════════════════════════════════════╝
+
 import streamlit as st
 import pandas as pd
 import numpy as np
 import requests
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 
 try:
     import google.generativeai as genai
@@ -13,269 +17,667 @@ try:
 except ImportError:
     GENAI_AVAILABLE = False
 
-st.set_page_config(page_title='Crypto Sniper Elite v1.0', layout='wide')
+# ── Page config ───────────────────────────────────────────────────────────────
+st.set_page_config(
+    page_title="Crypto Guru · Intelligence Terminal",
+    page_icon="🔮",
+    layout="wide",
+    initial_sidebar_state="collapsed",
+)
 
-def get_ai_client():
+# ── CSS — dark terminal, no sidebar ──────────────────────────────────────────
+st.markdown("""
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;600;700&display=swap');
+*, *::before, *::after { box-sizing: border-box; }
+html, body, .stApp { background: #0a0a0f !important; color: #e2e8f0; font-family: 'Inter', sans-serif; }
+section[data-testid="stSidebar"] { display: none !important; }
+.block-container { max-width: 900px; margin: 0 auto; padding: 2rem 1.5rem; }
+
+/* hero */
+.hero {
+    background: linear-gradient(135deg, #0d0d14 0%, #0a1020 100%);
+    border: 1px solid #1e2030;
+    border-radius: 16px;
+    padding: 40px 32px 32px;
+    text-align: center;
+    margin-bottom: 32px;
+    position: relative;
+    overflow: hidden;
+}
+.hero::before {
+    content: '';
+    position: absolute;
+    top: -80px; left: 50%; transform: translateX(-50%);
+    width: 500px; height: 260px;
+    background: radial-gradient(ellipse, #ff660018 0%, transparent 70%);
+    pointer-events: none;
+}
+.hero-title {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 2.4rem; font-weight: 700;
+    background: linear-gradient(135deg, #ff6600, #ff9d00);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    margin-bottom: 8px;
+}
+.hero-sub { font-size: 1rem; color: #64748b; margin-bottom: 28px; }
+
+/* search */
+.stTextInput > div > div > input {
+    background: #0d1117 !important;
+    border: 1px solid #2a2d3e !important;
+    border-radius: 12px !important;
+    color: #e2e8f0 !important;
+    font-family: 'JetBrains Mono', monospace !important;
+    font-size: 1.1rem !important;
+    padding: 14px 20px !important;
+    text-align: center;
+    transition: border-color .2s;
+}
+.stTextInput > div > div > input:focus {
+    border-color: #ff6600 !important;
+    box-shadow: 0 0 0 3px #ff660020 !important;
+}
+.stTextInput > div > div > input::placeholder { color: #475569 !important; }
+.stTextInput label { display: none !important; }
+
+/* buttons */
+.stButton > button {
+    background: linear-gradient(135deg, #ff6600, #ff8c00) !important;
+    color: #fff !important; border: none !important;
+    border-radius: 10px !important; font-weight: 600 !important;
+    padding: 10px 28px !important;
+    transition: opacity .15s;
+}
+.stButton > button:hover { opacity: .88 !important; }
+
+/* section cards */
+.section-card {
+    background: #0d1117;
+    border: 1px solid #1e2030;
+    border-radius: 14px;
+    padding: 24px 28px;
+    margin-bottom: 20px;
+}
+.section-title {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: .75rem; font-weight: 700;
+    letter-spacing: .12em; text-transform: uppercase;
+    color: #ff6600; margin-bottom: 16px;
+}
+
+/* coin hero card */
+.coin-hero {
+    display: flex; align-items: center; gap: 20px;
+    margin-bottom: 20px;
+}
+.coin-logo { width: 64px; height: 64px; border-radius: 50%; }
+.coin-name { font-size: 1.8rem; font-weight: 700; color: #e2e8f0; }
+.coin-symbol { font-family: 'JetBrains Mono', monospace; font-size: 1rem; color: #64748b; }
+.coin-price { font-family: 'JetBrains Mono', monospace; font-size: 2rem; font-weight: 700; color: #e2e8f0; }
+.chg-pos { color: #22c55e; } .chg-neg { color: #ef4444; }
+
+/* metric grid */
+.metric-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 12px; }
+.metric-box { background: #131620; border: 1px solid #1e2030; border-radius: 10px; padding: 14px 16px; }
+.metric-label { font-size: .7rem; color: #64748b; text-transform: uppercase; letter-spacing: .08em; margin-bottom: 4px; }
+.metric-val { font-family: 'JetBrains Mono', monospace; font-size: 1.1rem; font-weight: 600; color: #e2e8f0; }
+
+/* news */
+.news-item {
+    border-left: 3px solid #ff6600;
+    padding: 12px 16px;
+    margin-bottom: 12px;
+    background: #131620;
+    border-radius: 0 8px 8px 0;
+}
+.news-title { font-size: .95rem; font-weight: 500; color: #e2e8f0; margin-bottom: 4px; }
+.news-meta { font-size: .75rem; color: #475569; }
+.sentiment-pos { color: #22c55e; } .sentiment-neg { color: #ef4444; } .sentiment-neu { color: #94a3b8; }
+
+/* signal chip */
+.signal-chip {
+    display: inline-block; padding: 6px 16px;
+    border-radius: 20px; font-family: 'JetBrains Mono', monospace;
+    font-size: .8rem; font-weight: 700; letter-spacing: .08em;
+}
+.chip-buy { background: #14532d; color: #4ade80; border: 1px solid #166534; }
+.chip-sell { background: #450a0a; color: #f87171; border: 1px solid #7f1d1d; }
+.chip-hold { background: #1c1917; color: #fbbf24; border: 1px solid #44403c; }
+.chip-acc { background: #0c1a2e; color: #60a5fa; border: 1px solid #1e3a5f; }
+
+/* TA bars */
+.ta-row { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+.ta-label { font-size: .8rem; color: #94a3b8; width: 120px; flex-shrink: 0; }
+.ta-bar-bg { flex: 1; height: 6px; background: #1e2030; border-radius: 3px; }
+.ta-bar-fill { height: 100%; border-radius: 3px; }
+.ta-val { font-family: 'JetBrains Mono', monospace; font-size: .8rem; color: #e2e8f0; width: 60px; text-align: right; }
+
+/* agent debate */
+.agent-block { border: 1px solid #1e2030; border-radius: 12px; padding: 18px 20px; margin-bottom: 12px; }
+.agent-name { font-size: .75rem; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; margin-bottom: 8px; }
+.agent-text { font-size: .9rem; color: #94a3b8; line-height: 1.6; }
+.verdict-banner {
+    background: linear-gradient(135deg, #0f1f10, #0a1f0a);
+    border: 1px solid #166534; border-radius: 12px;
+    padding: 20px 24px; text-align: center; margin-top: 16px;
+}
+.verdict-label { font-size: .7rem; color: #4ade80; text-transform: uppercase; letter-spacing: .12em; margin-bottom: 8px; }
+.verdict-text { font-size: 1.1rem; font-weight: 600; color: #e2e8f0; }
+
+/* loader */
+.stSpinner > div { border-top-color: #ff6600 !important; }
+
+hr { border-color: #1e2030 !important; }
+</style>
+""", unsafe_allow_html=True)
+
+# ── Constants ─────────────────────────────────────────────────────────────────
+CC_BASE = "https://min-api.cryptocompare.com/data"
+CC_KEY  = st.secrets.get("CRYPTOCOMPARE_API_KEY", "")
+GEMINI_KEY = st.secrets.get("GEMINI_API_KEY", "")
+
+def cc_headers():
+    h = {"Content-Type": "application/json"}
+    if CC_KEY:
+        h["authorization"] = f"Apikey {CC_KEY}"
+    return h
+
+# ── Data helpers ──────────────────────────────────────────────────────────────
+@st.cache_data(ttl=120)
+def get_coin_price(symbol: str) -> dict:
     try:
-        if GENAI_AVAILABLE and 'GEMINI_API_KEY' in st.secrets:
-            genai.configure(api_key=st.secrets['GEMINI_API_KEY'])
-            return genai.GenerativeModel('gemini-2.5-flash')
-        return None
+        url = f"{CC_BASE}/pricemultifull?fsyms={symbol}&tsyms=USD"
+        r = requests.get(url, headers=cc_headers(), timeout=8)
+        raw = r.json().get("RAW", {}).get(symbol, {}).get("USD", {})
+        return {
+            "price":      raw.get("PRICE", 0),
+            "chg24":      raw.get("CHANGEPCT24HOUR", 0),
+            "chg7d":      raw.get("CHANGE7DAYSPCT", 0),
+            "high24":     raw.get("HIGH24HOUR", 0),
+            "low24":      raw.get("LOW24HOUR", 0),
+            "vol24":      raw.get("VOLUME24HOURTO", 0),
+            "mktcap":     raw.get("MKTCAP", 0),
+            "supply":     raw.get("SUPPLY", 0),
+            "imgurl":     "https://www.cryptocompare.com" + raw.get("IMAGEURL", ""),
+            "fullname":   raw.get("FROMSYMBOL", symbol),
+        }
     except Exception:
-        return None
-client = get_ai_client()
+        return {}
 
-def highlight_reco(val):
-    c = {'STRONG BUY':'#2ecc71','STRONG SELL':'#e74c3c',
-         'REVERSION BUY':'#f39c12','ACCUMULATE':'#27ae60','NEUTRAL':'#f1c40f'}
-    for k,v in c.items():
-        if k in str(val): return f'background-color:{v};color:black;font-weight:bold'
-    return ''
-
-def safe_cols(frame, cols):
-    return [c for c in cols if c in frame.columns]
-
-CC = 'https://min-api.cryptocompare.com/data'
-HDR = {'Accept':'application/json','User-Agent':'CryptoSniper/1.0'}
-
-def cc_get(path, params=None, retries=3):
-    for i in range(retries):
-        try:
-            r = requests.get(f'{CC}{path}', params=params, headers=HDR, timeout=20)
-            if r.status_code == 200:
-                d = r.json()
-                if d.get('Response') == 'Error':
-                    return None
-                return d
-        except Exception:
-            pass
-        time.sleep(1.5 * (i+1))
-    return None
-
-# ── STEP 1: TOP-500 UNIVERSE via CryptoCompare /top/mktcapfull ─────────────
-# 100 coins per call with live price, 24h change, volume — 5 calls = 500 coins
 @st.cache_data(ttl=300)
-def get_universe(scan_n):
-    coins = []
-    pages = (min(scan_n, 500) + 99) // 100
-    for page in range(pages):
-        d = cc_get('/top/mktcapfull', {'limit':100,'tsym':'USD','page':page})
-        if d and 'Data' in d:
-            for c in d['Data']:
-                info = c.get('CoinInfo', {})
-                raw  = c.get('RAW', {}).get('USD', {})
-                sym  = info.get('Name', '')
-                if not sym or not raw.get('PRICE'): continue
-                coins.append({
-                    'sym':   sym,
-                    'name':  info.get('FullName', sym),
-                    'price': float(raw.get('PRICE') or 0),
-                    'vol24': float(raw.get('VOLUME24HOURTO') or 0),
-                    'chg24': float(raw.get('CHANGEPCT24HOUR') or 0),
-                    'mcap':  float(raw.get('MKTCAP') or 0),
-                })
-        time.sleep(0.5)
-    return coins
-
-# ── STEP 2: 366-DAY DAILY OHLCV via CryptoCompare /v2/histoday ─────────────
-# Confirmed working: returns open,high,low,close,volumefrom free, no auth
-def fetch_ohlcv(sym):
-    d = cc_get('/v2/histoday', {'fsym':sym,'tsym':'USD','limit':365})
-    if not d or 'Data' not in d: return None
-    candles = d['Data'].get('Data', [])
-    if len(candles) < 30: return None
-    df = pd.DataFrame(candles)
-    df = df[df['close'] > 0].copy()
-    df['close']  = pd.to_numeric(df['close'],  errors='coerce')
-    df['high']   = pd.to_numeric(df['high'],   errors='coerce')
-    df['low']    = pd.to_numeric(df['low'],    errors='coerce')
-    df['volume'] = pd.to_numeric(df['volumefrom'], errors='coerce').fillna(1)
-    df = df.dropna(subset=['close']).reset_index(drop=True)
-    return df if len(df) >= 30 else None
-
-# ── MATH ENGINE ─────────────────────────────────────────────────────────────
-def calc(df, live_price, chg24, vol24):
+def get_coin_info(symbol: str) -> dict:
     try:
-        c = df['close'].values.astype(float)
-        h = df['high'].values.astype(float)
-        l = df['low'].values.astype(float)
-        v = df['volume'].values.astype(float)
-        n = min(len(c),len(h),len(l),len(v))
-        c,h,l,v = c[-n:],h[-n:],l[-n:],v[-n:]
-        if n < 30: return None
-        c[-1] = live_price
-        def sma(a,w): return float(pd.Series(a).rolling(w).mean().iloc[-1])
-        m20  = sma(c,20)
-        m50  = sma(c,50)  if n>=50  else float('nan')
-        m200 = sma(c,200) if n>=200 else float('nan')
-        tr   = np.maximum(h[1:]-l[1:],np.maximum(np.abs(h[1:]-c[:-1]),np.abs(l[1:]-c[:-1])))
-        atr  = round(float(pd.Series(tr).rolling(14).mean().iloc[-1]),6)
-        pdm  = np.where((h[1:]-h[:-1])>(l[:-1]-l[1:]),np.maximum(h[1:]-h[:-1],0),0)
-        mdm  = np.where((l[:-1]-l[1:])>(h[1:]-h[:-1]),np.maximum(l[:-1]-l[1:],0),0)
-        trs  = pd.Series(tr).rolling(14).mean()
-        pdi  = 100*(pd.Series(pdm).rolling(14).mean()/(trs+1e-9))
-        mdi  = 100*(pd.Series(mdm).rolling(14).mean()/(trs+1e-9))
-        adx  = float((np.abs(pdi-mdi)/(pdi+mdi+1e-9)*100).rolling(14).mean().iloc[-1])
-        z    = float((c[-1]-m20)/(np.std(c[-20:])+1e-9))
-        vs   = float(v[-1]/(np.mean(v[-20:])+1e-9)) if v.mean()>0 else 1.0
-        vs   = min(max(vs,0.1),20.0)
-        p1   = chg24/100
-        p7   = float((c[-1]-c[-7])/(c[-7]+1e-9))  if n>=7  else 0.0
-        p30  = float((c[-1]-c[-30])/(c[-30]+1e-9)) if n>=30 else 0.0
-        miro = 2+(5 if vs>2.0 else 0)+(3 if p1>0.01 else 0)
-        if   p1> 0.02 and vs>1.5: sig='STRONG BUY'
-        elif p1<-0.02 and vs>1.5: sig='STRONG SELL'
-        elif z <-2.2:              sig='REVERSION BUY'
-        elif not np.isnan(m200) and c[-1]>m200 and adx>25: sig='ACCUMULATE'
-        else:                      sig='NEUTRAL'
-        return dict(Price=round(float(c[-1]),6),MA20=round(m20,4),
-                    MA50=round(m50,4) if not np.isnan(m50) else 'N/A',
-                    MA200=round(m200,4) if not np.isnan(m200) else 'N/A',
-                    ADX=round(adx,1),ZScore=round(z,2),VolSrg=round(vs,2),
-                    ATR=atr,Chg24=round(p1*100,2),Chg7D=round(p7*100,2),
-                    Chg30D=round(p30*100,2),Miro=miro,Signal=sig)
-    except Exception: return None
+        url = f"https://min-api.cryptocompare.com/data/coin/generalinfo?fsym={symbol}&tsym=USD"
+        r = requests.get(url, headers=cc_headers(), timeout=8)
+        data = r.json().get("Data", {})
+        ci = data.get("CoinInfo", {})
+        return {
+            "name":        ci.get("FullName", symbol),
+            "algorithm":   ci.get("Algorithm", "N/A"),
+            "proof_type":  ci.get("ProofType", "N/A"),
+            "launch_date": ci.get("AssetLaunchDate", "N/A"),
+            "description": ci.get("Description", "No description available."),
+            "website":     ci.get("Website", ""),
+            "whitepaper":  ci.get("TechnicalDoc", ""),
+            "twitter":     ci.get("Twitter", ""),
+            "reddit":      ci.get("Reddit", ""),
+            "github":      ci.get("Github", ""),
+        }
+    except Exception:
+        return {}
 
-# ── SIDEBAR ─────────────────────────────────────────────────────────────────
-st.sidebar.title('Crypto Sniper v1.0')
-st.sidebar.subheader(f"📅 {datetime.now().strftime('%b %d, %Y')} Pulse")
+@st.cache_data(ttl=300)
+def get_ohlcv(symbol: str, limit: int = 100) -> pd.DataFrame:
+    try:
+        url = f"{CC_BASE}/v2/histoday?fsym={symbol}&tsym=USD&limit={limit}"
+        r = requests.get(url, headers=cc_headers(), timeout=10)
+        data = r.json().get("Data", {}).get("Data", [])
+        if not data:
+            return pd.DataFrame()
+        df = pd.DataFrame(data)
+        df["time"] = pd.to_datetime(df["time"], unit="s")
+        df = df.set_index("time")
+        return df[["open", "high", "low", "close", "volumeto"]].rename(
+            columns={"volumeto": "volume"})
+    except Exception:
+        return pd.DataFrame()
 
-@st.cache_data(ttl=60)
-def live_prices():
-    d = cc_get('/price', {'fsym':'BTC','tsyms':'USD,ETH'})
-    if d:
-        btc = round(float(d.get('USD',0)),2)
-        d2  = cc_get('/price', {'fsym':'ETH','tsyms':'USD'})
-        eth = round(float((d2 or {}).get('USD',0)),2)
-        return btc, eth
-    return 'N/A','N/A'
+@st.cache_data(ttl=180)
+def get_news(symbol: str) -> list:
+    try:
+        url = f"{CC_BASE}/v2/news/?categories={symbol}&lang=EN&sortOrder=latest"
+        r = requests.get(url, headers=cc_headers(), timeout=8)
+        return r.json().get("Data", [])[:8]
+    except Exception:
+        return []
 
-btc_p,eth_p = live_prices()
-st.sidebar.table(pd.DataFrame({'Metric':['BTC ($)','ETH ($)'],'Value':[str(btc_p),str(eth_p)]}))
-scan_n = st.sidebar.slider('Scan Depth',10,500,50)
+# ── Technical Analysis ────────────────────────────────────────────────────────
+def compute_ta(df: pd.DataFrame) -> dict:
+    if df.empty or len(df) < 20:
+        return {}
+    c = df["close"]
+    v = df["volume"]
 
-# ── SCAN ────────────────────────────────────────────────────────────────────
-if st.sidebar.button('🚀 EXECUTE FULL CRYPTO AUDIT'):
-    bar  = st.progress(0.0, text='⚡ Fetching top coins from CryptoCompare…')
-    stat = st.empty()
-    universe = get_universe(scan_n)
-    if not universe:
-        st.error('CryptoCompare unavailable. Try again in 30s.')
-        st.stop()
-    coins = universe[:scan_n]
-    bar.progress(0.1, text=f'✅ Got {len(coins)} coins! Fetching OHLCV for technicals…')
-    rows, skipped = [], 0
-    for i, coin in enumerate(coins):
-        pct  = 0.1 + 0.9*((i+1)/len(coins))
-        sym  = coin['sym']
-        name = coin['name']
-        price= coin['price']
-        chg24= coin['chg24']
-        vol24= coin['vol24']
-        bar.progress(pct, text=f'🔬 {sym} ({i+1}/{len(coins)}) | {len(rows)} signals | {skipped} skipped')
-        if price <= 0: skipped+=1; continue
-        df = fetch_ohlcv(sym)
-        time.sleep(0.3)
-        if df is not None:
-            m = calc(df, price, chg24, vol24)
-            if m:
-                rows.append({'Ticker':sym,'Name':name,**m})
-                stat.success(f"✅ {sym} → {m['Signal']} | ${price:,.4g} | 24h:{chg24:+.1f}%")
-            else:
-                skipped+=1; stat.warning(f'⚠️ {sym} — calc failed')
+    def ema(s, n): return s.ewm(span=n, adjust=False).mean()
+    def sma(s, n): return s.rolling(n).mean()
+
+    ma20  = sma(c, 20).iloc[-1]
+    ma50  = sma(c, 50).iloc[-1] if len(c) >= 50 else None
+    ma200 = sma(c, 200).iloc[-1] if len(c) >= 200 else None
+    price = c.iloc[-1]
+
+    # RSI
+    delta = c.diff()
+    gain = delta.clip(lower=0).rolling(14).mean()
+    loss = (-delta.clip(upper=0)).rolling(14).mean()
+    rs   = gain / loss.replace(0, np.nan)
+    rsi  = float((100 - 100 / (1 + rs)).iloc[-1])
+
+    # MACD
+    macd_line   = ema(c, 12) - ema(c, 26)
+    signal_line = ema(macd_line, 9)
+    macd_val    = float(macd_line.iloc[-1])
+    macd_sig    = float(signal_line.iloc[-1])
+
+    # Bollinger
+    bb_mid = sma(c, 20)
+    bb_std = c.rolling(20).std()
+    bb_up  = float((bb_mid + 2 * bb_std).iloc[-1])
+    bb_lo  = float((bb_mid - 2 * bb_std).iloc[-1])
+
+    # ATR
+    hl = df["high"] - df["low"]
+    hc = (df["high"] - c.shift()).abs()
+    lc = (df["low"]  - c.shift()).abs()
+    atr = float(pd.concat([hl, hc, lc], axis=1).max(axis=1).rolling(14).mean().iloc[-1])
+
+    # ADX
+    plus_dm  = (df["high"].diff().clip(lower=0))
+    minus_dm = (-df["low"].diff().clip(upper=0))
+    tr14     = hl.rolling(14).sum()
+    adx_raw  = abs(plus_dm.rolling(14).sum() - minus_dm.rolling(14).sum()) / tr14.replace(0, np.nan) * 100
+    adx      = float(adx_raw.rolling(14).mean().iloc[-1]) if not adx_raw.empty else 0
+
+    # Vol surge
+    avg_vol  = float(v.rolling(20).mean().iloc[-1])
+    last_vol = float(v.iloc[-1])
+    vol_ratio = last_vol / avg_vol if avg_vol > 0 else 1
+
+    # Z-score
+    zscore = float((price - float(sma(c, 20).iloc[-1])) / float(c.rolling(20).std().iloc[-1]))
+
+    # Signal
+    score = 0
+    if price > ma20: score += 1
+    if ma50 and price > ma50: score += 1
+    if ma200 and price > ma200: score += 1
+    if rsi < 30: score += 2
+    elif rsi > 70: score -= 2
+    if macd_val > macd_sig: score += 1
+    if vol_ratio > 1.5: score += 1
+    if zscore < -1.5: score += 1
+    elif zscore > 1.5: score -= 1
+
+    if score >= 5:   signal = "STRONG BUY"
+    elif score >= 3: signal = "ACCUMULATE"
+    elif score <= -3: signal = "STRONG SELL"
+    elif score <= -1: signal = "CAUTION"
+    else:            signal = "NEUTRAL"
+
+    return {
+        "price": price, "ma20": ma20, "ma50": ma50, "ma200": ma200,
+        "rsi": rsi, "macd": macd_val, "macd_sig": macd_sig,
+        "bb_up": bb_up, "bb_lo": bb_lo, "atr": atr, "adx": adx,
+        "vol_ratio": vol_ratio, "zscore": zscore,
+        "signal": signal, "score": score,
+    }
+
+# ── Format helpers ────────────────────────────────────────────────────────────
+def fmt_price(n):
+    if n >= 1000: return f"${n:,.2f}"
+    if n >= 1:    return f"${n:.4f}"
+    return f"${n:.8f}"
+
+def fmt_large(n):
+    if n >= 1e12: return f"${n/1e12:.2f}T"
+    if n >= 1e9:  return f"${n/1e9:.2f}B"
+    if n >= 1e6:  return f"${n/1e6:.2f}M"
+    return f"${n:,.0f}"
+
+def chg_html(v):
+    cls = "chg-pos" if v >= 0 else "chg-neg"
+    sign = "+" if v >= 0 else ""
+    return f'<span class="{cls}">{sign}{v:.2f}%</span>'
+
+def signal_chip(s):
+    m = {
+        "STRONG BUY": "chip-buy",
+        "ACCUMULATE": "chip-acc",
+        "NEUTRAL":    "chip-hold",
+        "CAUTION":    "chip-hold",
+        "STRONG SELL":"chip-sell",
+    }
+    return f'<span class="signal-chip {m.get(s, \"chip-hold\")}">{s}</span>'
+
+# ── Gemini AI ─────────────────────────────────────────────────────────────────
+def run_gemini(prompt: str) -> str:
+    if not GENAI_AVAILABLE or not GEMINI_KEY:
+        return "_Gemini API key not configured. Add GEMINI_API_KEY to Streamlit secrets._"
+    try:
+        genai.configure(api_key=GEMINI_KEY)
+        model = genai.GenerativeModel("gemini-1.5-flash")
+        resp  = model.generate_content(prompt)
+        return resp.text
+    except Exception as e:
+        return f"_AI unavailable: {e}_"
+
+# ── Hero ──────────────────────────────────────────────────────────────────────
+st.markdown("""
+<div class="hero">
+  <div class="hero-title">🔮 CRYPTO GURU</div>
+  <div class="hero-sub">Intelligence Terminal · Enter any crypto asset to begin</div>
+</div>
+""", unsafe_allow_html=True)
+
+# ── Search ────────────────────────────────────────────────────────────────────
+col_s, col_b = st.columns([5, 1])
+with col_s:
+    query = st.text_input("", placeholder="Enter ticker or name (e.g. BTC, ETH, SOL, DOGE...)", key="search")
+with col_b:
+    go = st.button("Analyse", use_container_width=True)
+
+symbol = query.strip().upper() if query else ""
+
+if not symbol:
+    st.markdown("""
+<div style="text-align:center;margin-top:48px;color:#2a2d3e;">
+  <div style="font-size:3rem;">🔮</div>
+  <div style="font-family:'JetBrains Mono',monospace;font-size:.85rem;color:#475569;margin-top:12px;">
+    Enter a crypto ticker above to get started
+  </div>
+</div>
+""", unsafe_allow_html=True)
+    st.stop()
+
+# ── Fetch ─────────────────────────────────────────────────────────────────────
+with st.spinner(f"Fetching intelligence for {symbol}…"):
+    price_data = get_coin_price(symbol)
+    coin_info  = get_coin_info(symbol)
+    df_ohlcv   = get_ohlcv(symbol)
+    news_items = get_news(symbol)
+    ta         = compute_ta(df_ohlcv)
+
+if not price_data or price_data.get("price", 0) == 0:
+    st.error(f"⚠️ Could not find data for **{symbol}**. Check the ticker and try again.")
+    st.stop()
+
+price  = price_data["price"]
+chg24  = price_data["chg24"]
+chg7d  = price_data["chg7d"]
+imgurl = price_data["imgurl"]
+name   = coin_info.get("name") or price_data.get("fullname") or symbol
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SECTION 1 — PROJECT OVERVIEW
+# ─────────────────────────────────────────────────────────────────────────────
+st.markdown('<div class="section-card">', unsafe_allow_html=True)
+st.markdown('<div class="section-title">01 · Project Overview</div>', unsafe_allow_html=True)
+
+coin_hero_html = f"""
+<div class="coin-hero">
+  <img class="coin-logo" src="{imgurl}" onerror="this.style.display='none'" />
+  <div>
+    <div class="coin-name">{name}</div>
+    <div class="coin-symbol">{symbol} · {coin_info.get('algorithm','N/A')} · {coin_info.get('proof_type','N/A')}</div>
+  </div>
+  <div style="margin-left:auto;text-align:right;">
+    <div class="coin-price">{fmt_price(price)}</div>
+    <div>{chg_html(chg24)} 24h &nbsp; {chg_html(chg7d)} 7d</div>
+  </div>
+</div>
+<div class="metric-grid">
+  <div class="metric-box"><div class="metric-label">Market Cap</div><div class="metric-val">{fmt_large(price_data['mktcap'])}</div></div>
+  <div class="metric-box"><div class="metric-label">24h Volume</div><div class="metric-val">{fmt_large(price_data['vol24'])}</div></div>
+  <div class="metric-box"><div class="metric-label">Circulating Supply</div><div class="metric-val">{fmt_large(price_data['supply'])}</div></div>
+  <div class="metric-box"><div class="metric-label">24h High</div><div class="metric-val">{fmt_price(price_data['high24'])}</div></div>
+  <div class="metric-box"><div class="metric-label">24h Low</div><div class="metric-val">{fmt_price(price_data['low24'])}</div></div>
+  <div class="metric-box"><div class="metric-label">Launch Date</div><div class="metric-val">{coin_info.get('launch_date','N/A')}</div></div>
+</div>
+"""
+st.markdown(coin_hero_html, unsafe_allow_html=True)
+
+desc = coin_info.get("description", "")
+if desc:
+    st.markdown(f"<p style='margin-top:16px;font-size:.9rem;color:#94a3b8;line-height:1.7'>{desc[:800]}{'...' if len(desc)>800 else ''}</p>", unsafe_allow_html=True)
+
+links = []
+if coin_info.get("website"):   links.append(f"[🌐 Website]({coin_info['website']})")
+if coin_info.get("whitepaper"):links.append(f"[📄 Whitepaper]({coin_info['whitepaper']})")
+if coin_info.get("twitter"):   links.append(f"[🐦 Twitter]({coin_info['twitter']})")
+if coin_info.get("reddit"):    links.append(f"[🔴 Reddit]({coin_info['reddit']})")
+if links:
+    st.markdown("  ·  ".join(links))
+
+st.markdown('</div>', unsafe_allow_html=True)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SECTION 2 — NEWS & SENTIMENT
+# ─────────────────────────────────────────────────────────────────────────────
+st.markdown('<div class="section-card">', unsafe_allow_html=True)
+st.markdown('<div class="section-title">02 · News & Market Sentiment</div>', unsafe_allow_html=True)
+
+if news_items:
+    for item in news_items:
+        title = item.get("title", "")
+        source = item.get("source_info", {}).get("name", item.get("source", ""))
+        ts = datetime.fromtimestamp(item.get("published_on", 0)).strftime("%b %d, %H:%M")
+        body = item.get("body", "")[:200].replace("<", "&lt;")
+        url  = item.get("url", "#")
+
+        # crude sentiment
+        pos_words = ["surge", "bull", "breakout", "rally", "gain", "high", "rise", "pump", "buy", "adoption"]
+        neg_words = ["crash", "bear", "drop", "fall", "sell", "hack", "fear", "loss", "ban", "dump"]
+        tl = title.lower()
+        if any(w in tl for w in pos_words):
+            sent = '<span class="sentiment-pos">▲ Bullish</span>'
+        elif any(w in tl for w in neg_words):
+            sent = '<span class="sentiment-neg">▼ Bearish</span>'
         else:
-            skipped+=1; stat.info(f'ℹ️ {sym} — no OHLCV (very new coin?)')
-    bar.progress(1.0, text=f'✅ Done — {len(rows)} coins analysed | {skipped} skipped')
-    if rows:
-        st.session_state['res'] = pd.DataFrame(rows)
-        st.session_state['btc'] = btc_p
-        st.session_state['eth'] = eth_p
-        st.rerun()
-    else:
-        st.error('No results. Try again in 30s.')
+            sent = '<span class="sentiment-neu">● Neutral</span>'
 
-# ── RESULTS ─────────────────────────────────────────────────────────────────
-if 'res' in st.session_state:
-    df  = st.session_state['res']
-    bpx = st.session_state.get('btc','N/A')
-    epx = st.session_state.get('eth','N/A')
-    df_n = df.copy()
-    df_n['MA200n'] = pd.to_numeric(df_n['MA200'],errors='coerce')
-    above = (df_n['MA200n'].notna()&(df_n['Price']>df_n['MA200n'])).sum()
-    brd   = above/len(df)*100
-    st.sidebar.markdown('---')
-    st.sidebar.subheader('📊 Market Heatmap')
-    if   brd>60: st.sidebar.success(f'🔥 BULL REGIME {round(brd,1)}%')
-    elif brd<40: st.sidebar.error(  f'🧊 BEAR REGIME {round(brd,1)}%')
-    else:        st.sidebar.warning(f'⚖️ NEUTRAL     {round(brd,1)}%')
-    risk = st.sidebar.number_input('Risk Capital ($)',value=1000,step=100)
-    df['StopLoss'] = df['Price']-2.0*df['ATR']
-    df['Qty'] = (risk/(df['Price']-df['StopLoss'])).replace([np.inf,-np.inf],0).fillna(0).round(0).astype(int)
-
-    T = st.tabs(['🎯 Miro Flow','📈 Trend & ADX','🔄 Reversion','💎 Weekly Sniper','📂 AI Audit','🧠 Council Debate'])
-    def tbl(frame,cols):
-        cols = safe_cols(frame, cols)
-        st.dataframe(frame[cols].style.map(highlight_reco,subset=['Signal']),hide_index=True,use_container_width=True)
-
-    with T[0]:
-        st.subheader('🎯 Miro Momentum Leaderboard')
-        st.caption('Hot-money detection — institutional flow entering NOW')
-        tbl(df.sort_values('Miro',ascending=False),['Ticker','Name','Price','Signal','Miro','VolSrg','Chg24','Chg7D','Chg30D'])
-        with st.expander('📘 Tactical Logic'):
-            st.markdown('**Miro 2-10:** hot-money velocity. **VolSrg>2:** mass accumulation. **Edge:** early breakout warning.')
-    with T[1]:
-        st.subheader('📈 Trend Strength Leaderboard')
-        st.caption('ADX>25 = trending | ADX>40 = explosive')
-        tbl(df.sort_values('ADX',ascending=False),['Ticker','Name','Price','MA20','MA50','MA200','ADX','Signal'])
-        with st.expander('📘 Tactical Logic'):
-            st.markdown('**ADX>25:** ride the wave. **MA Stack 20>50>200:** highest-conviction bull zone.')
-    with T[2]:
-        st.subheader('🔄 Mean Reversion — Snap-Back Candidates')
-        st.caption('Z-Score < -2.2 = statistically oversold')
-        tbl(df.sort_values('ZScore',ascending=True),['Ticker','Name','Price','MA20','ZScore','ATR','Signal'])
-        with st.expander('📘 Tactical Logic'):
-            st.markdown('**Z<-2.2:** rubber band stretched. High prob snap-back to MA20 in 1-3 sessions.')
-    with T[3]:
-        st.subheader('💎 Weekly Institutional Flow')
-        st.caption('Where whales are building walls — sorted by volume surge')
-        tbl(df.sort_values('VolSrg',ascending=False),['Ticker','Name','Price','Signal','VolSrg','Chg24','Chg7D','Chg30D'])
-        with st.expander('📘 Tactical Logic'):
-            st.markdown('**VolSrg>2:** institution absorbing sellers. Small price + massive vol = breakout incoming.')
-    with T[4]:
-        st.subheader('📂 AI Audit')
-        pick = st.selectbox('Select asset',df['Ticker'].tolist(),key='a_pick')
-        row  = df[df['Ticker']==pick].to_dict('records')
-        row  = row[0] if row else {}
-        if st.button('🔍 Run AI Audit',key='btn_audit'):
-            if client:
-                p = (f"Today is {datetime.now().strftime('%B %d, %Y')}. "
-                     f"Senior crypto analyst audit for {row.get('Name',pick)} ({pick}). "
-                     f"Scanner data: {row}. BTC=${bpx}, ETH=${epx}. "
-                     f"Cover: 1)On-chain 2)Macro 3)Technicals 4)Catalysts 5)Institutional. BUY/HOLD/SELL verdict.")
-                with st.spinner('Analysing…'):
-                    try: st.markdown(client.generate_content(p).text)
-                    except Exception as ex: st.error(f'AI error: {ex}')
-            else:
-                st.info('Add GEMINI_API_KEY to Streamlit secrets.')
-                st.json(row)
-    with T[5]:
-        st.subheader('🧠 Council Debate')
-        pick2 = st.selectbox('Select asset',df['Ticker'].tolist(),key='d_pick')
-        row2  = df[df['Ticker']==pick2].to_dict('records')
-        row2  = row2[0] if row2 else {}
-        if st.button('🤖 Summon Council',key='btn_debate'):
-            if client:
-                p2 = (f"Today is {datetime.now().strftime('%B %d, %Y')}. "
-                      f"4-agent debate on {row2.get('Name',pick2)} ({pick2}). "
-                      f"Data: {row2}. BTC=${bpx}, ETH=${epx}. "
-                      f"BULL WHALE | BEAR TRADER | QUANT | RISK MGR. FINAL CONSENSUS required.")
-                with st.spinner('Debating…'):
-                    try: st.markdown(client.generate_content(p2).text)
-                    except Exception as ex: st.error(f'AI error: {ex}')
-            else:
-                st.info('Add GEMINI_API_KEY to Streamlit secrets.')
-                cols=st.columns(3)
-                [cols[i%3].metric(k,v) for i,(k,v) in enumerate(row2.items())]
+        st.markdown(f"""
+<div class="news-item">
+  <div class="news-title"><a href="{url}" target="_blank" style="color:#e2e8f0;text-decoration:none;">{title}</a></div>
+  <div class="news-meta">{source} · {ts} · {sent}</div>
+  <div style="font-size:.82rem;color:#64748b;margin-top:6px;">{body}…</div>
+</div>
+""", unsafe_allow_html=True)
 else:
-    st.info('Scanner Ready. Set Scan Depth and click **EXECUTE FULL CRYPTO AUDIT**.')
+    st.markdown("<p style='color:#475569'>No recent news found for this asset.</p>", unsafe_allow_html=True)
 
+st.markdown('</div>', unsafe_allow_html=True)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SECTION 3 — TECHNICAL ANALYSIS
+# ─────────────────────────────────────────────────────────────────────────────
+st.markdown('<div class="section-card">', unsafe_allow_html=True)
+st.markdown('<div class="section-title">03 · Technical Analysis</div>', unsafe_allow_html=True)
+
+if ta:
+    sig_html = signal_chip(ta["signal"])
+    st.markdown(f"<div style='margin-bottom:20px'>Signal: &nbsp;{sig_html} &nbsp;&nbsp; Score: <code style='color:#ff6600'>{ta['score']:+d}</code></div>", unsafe_allow_html=True)
+
+    col1, col2 = st.columns(2)
+    with col1:
+        st.markdown("**Moving Averages**")
+        for label, val in [("MA 20", ta["ma20"]), ("MA 50", ta.get("ma50")), ("MA 200", ta.get("ma200"))]:
+            if val:
+                above = price > val
+                color = "#22c55e" if above else "#ef4444"
+                tag   = "above" if above else "below"
+                st.markdown(f"<div style='display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #1e2030'><span style='color:#94a3b8'>{label}</span><span style='color:{color}'>{fmt_price(val)} <small>({tag})</small></span></div>", unsafe_allow_html=True)
+
+        st.markdown("<br>**Oscillators**", unsafe_allow_html=True)
+        rsi = ta["rsi"]
+        rsi_color = "#ef4444" if rsi > 70 else "#22c55e" if rsi < 30 else "#94a3b8"
+        rsi_tag   = "Overbought" if rsi > 70 else "Oversold" if rsi < 30 else "Neutral"
+        st.markdown(f"""
+<div class="ta-row">
+  <div class="ta-label">RSI (14)</div>
+  <div class="ta-bar-bg"><div class="ta-bar-fill" style="width:{min(rsi,100):.0f}%;background:{rsi_color}"></div></div>
+  <div class="ta-val" style="color:{rsi_color}">{rsi:.1f}</div>
+</div>""", unsafe_allow_html=True)
+
+        adx = ta["adx"]
+        adx_pct = min(adx, 100)
+        st.markdown(f"""
+<div class="ta-row">
+  <div class="ta-label">ADX (Trend)</div>
+  <div class="ta-bar-bg"><div class="ta-bar-fill" style="width:{adx_pct:.0f}%;background:#818cf8"></div></div>
+  <div class="ta-val">{adx:.1f}</div>
+</div>""", unsafe_allow_html=True)
+
+    with col2:
+        st.markdown("**MACD**")
+        macd_bull = ta["macd"] > ta["macd_sig"]
+        st.markdown(f"""
+<div style='background:#131620;border-radius:10px;padding:14px 16px;margin-bottom:12px'>
+  <div style='display:flex;justify-content:space-between;margin-bottom:6px'>
+    <span style='color:#94a3b8;font-size:.8rem'>MACD Line</span>
+    <span style='font-family:JetBrains Mono,monospace;color:{"#22c55e" if ta["macd"]>0 else "#ef4444"}'>{ta["macd"]:.6f}</span>
+  </div>
+  <div style='display:flex;justify-content:space-between;margin-bottom:6px'>
+    <span style='color:#94a3b8;font-size:.8rem'>Signal Line</span>
+    <span style='font-family:JetBrains Mono,monospace;color:#94a3b8'>{ta["macd_sig"]:.6f}</span>
+  </div>
+  <div style='font-size:.8rem;color:{"#22c55e" if macd_bull else "#ef4444"}'>
+    {"▲ Bullish crossover" if macd_bull else "▼ Bearish crossover"}
+  </div>
+</div>""", unsafe_allow_html=True)
+
+        st.markdown("**Bollinger Bands**")
+        bb_pct = (price - ta["bb_lo"]) / (ta["bb_up"] - ta["bb_lo"]) * 100 if ta["bb_up"] != ta["bb_lo"] else 50
+        bb_pct = max(0, min(100, bb_pct))
+        st.markdown(f"""
+<div style='background:#131620;border-radius:10px;padding:14px 16px;margin-bottom:12px'>
+  <div style='display:flex;justify-content:space-between;margin-bottom:8px'>
+    <span style='color:#94a3b8;font-size:.8rem'>Upper</span><span style='font-family:JetBrains Mono,monospace;font-size:.85rem'>{fmt_price(ta["bb_up"])}</span>
+  </div>
+  <div class="ta-bar-bg"><div class="ta-bar-fill" style="width:{bb_pct:.0f}%;background:#ff6600"></div></div>
+  <div style='display:flex;justify-content:space-between;margin-top:8px'>
+    <span style='color:#94a3b8;font-size:.8rem'>Lower</span><span style='font-family:JetBrains Mono,monospace;font-size:.85rem'>{fmt_price(ta["bb_lo"])}</span>
+  </div>
+</div>""", unsafe_allow_html=True)
+
+        st.markdown("**Volume & Volatility**")
+        vol_color = "#22c55e" if ta["vol_ratio"] > 1.5 else "#94a3b8"
+        st.markdown(f"""
+<div style='display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #1e2030'>
+  <span style='color:#94a3b8;font-size:.85rem'>Vol Surge Ratio</span>
+  <span style='color:{vol_color};font-family:JetBrains Mono,monospace'>{ta["vol_ratio"]:.2f}x</span>
+</div>
+<div style='display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #1e2030'>
+  <span style='color:#94a3b8;font-size:.85rem'>ATR (14)</span>
+  <span style='font-family:JetBrains Mono,monospace;color:#e2e8f0'>{fmt_price(ta["atr"])}</span>
+</div>
+<div style='display:flex;justify-content:space-between;padding:6px 0'>
+  <span style='color:#94a3b8;font-size:.85rem'>Z-Score (20d)</span>
+  <span style='font-family:JetBrains Mono,monospace;color:{"#22c55e" if ta["zscore"]<-1 else "#ef4444" if ta["zscore"]>1 else "#94a3b8"}'>{ta["zscore"]:.2f}</span>
+</div>""", unsafe_allow_html=True)
+
+    # Price chart
+    if not df_ohlcv.empty:
+        st.markdown("<br>**Price Chart (90 days)**", unsafe_allow_html=True)
+        chart_df = df_ohlcv[["close"]].tail(90).copy()
+        chart_df.columns = ["Close Price"]
+        st.line_chart(chart_df, color=["#ff6600"])
+else:
+    st.markdown("<p style='color:#475569'>Not enough OHLCV data for technical analysis.</p>", unsafe_allow_html=True)
+
+st.markdown('</div>', unsafe_allow_html=True)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SECTION 4 — AI AGENT COUNCIL DEBATE
+# ─────────────────────────────────────────────────────────────────────────────
+st.markdown('<div class="section-card">', unsafe_allow_html=True)
+st.markdown('<div class="section-title">04 · AI Agent Council Debate</div>', unsafe_allow_html=True)
+
+ta_summary = ""
+if ta:
+    ta_summary = f"""
+Price: {fmt_price(ta['price'])} | Signal: {ta['signal']} | Score: {ta['score']:+d}
+RSI: {ta['rsi']:.1f} | MACD: {'bullish' if ta['macd']>ta['macd_sig'] else 'bearish'}
+ADX: {ta['adx']:.1f} | Vol surge: {ta['vol_ratio']:.2f}x | Z-score: {ta['zscore']:.2f}
+BB Position: {'upper band' if ta['bb_up'] and price>ta['bb_up'] else 'lower band' if ta['bb_lo'] and price<ta['bb_lo'] else 'mid-range'}
+"""
+
+news_headlines = "\n".join([f"- {n.get('title','')}" for n in news_items[:5]])
+
+ai_prompt = f"""You are running a structured 4-agent crypto investment debate for {name} ({symbol}).
+
+MARKET DATA:
+{ta_summary if ta_summary else "Limited TA data available"}
+
+RECENT HEADLINES:
+{news_headlines if news_headlines else "No recent news"}
+
+Respond in this EXACT format with no extra text:
+
+BULL_WHALE:
+[2-3 sentences from a confident long-term bull — macro thesis, adoption, on-chain strength]
+
+BEAR_TRADER:
+[2-3 sentences from a tactical bear — risks, valuation concerns, macro headwinds]
+
+QUANT_ALGO:
+[2-3 sentences from a data-driven quant — RSI, MACD, volume signals, statistical edge]
+
+RISK_MANAGER:
+[2-3 sentences on position sizing, stop-loss levels, risk/reward ratio]
+
+VERDICT:
+[1 clear sentence: the council's consensus recommendation with a suggested action]
+"""
+
+if st.button("🤖 Run Agent Council Debate", use_container_width=False):
+    with st.spinner("Convening the council…"):
+        ai_output = run_gemini(ai_prompt)
+
+    agents = {
+        "BULL_WHALE":    ("🐋 Bull Whale", "#0c1a2e", "#60a5fa"),
+        "BEAR_TRADER":   ("🐻 Bear Trader", "#1c0a0a", "#f87171"),
+        "QUANT_ALGO":    ("🤖 Quant Algo", "#0d0d1a", "#818cf8"),
+        "RISK_MANAGER":  ("🛡️ Risk Manager", "#0a1a0a", "#4ade80"),
+    }
+
+    for key, (label, bg, color) in agents.items():
+        start = ai_output.find(f"{key}:")
+        end   = min([ai_output.find(f"{k}:", start+1) for k in list(agents.keys())+["VERDICT:"] if ai_output.find(f"{k}:", start+1) > 0] or [len(ai_output)])
+        text  = ai_output[start+len(key)+1:end].strip() if start >= 0 else "No response."
+        st.markdown(f"""
+<div class="agent-block" style="background:{bg};border-color:{color}30">
+  <div class="agent-name" style="color:{color}">{label}</div>
+  <div class="agent-text">{text}</div>
+</div>""", unsafe_allow_html=True)
+
+    # Verdict
+    v_start = ai_output.find("VERDICT:")
+    verdict = ai_output[v_start+8:].strip() if v_start >= 0 else "Council inconclusive."
+    st.markdown(f"""
+<div class="verdict-banner">
+  <div class="verdict-label">⚖️ Council Verdict</div>
+  <div class="verdict-text">{verdict}</div>
+</div>""", unsafe_allow_html=True)
+
+else:
+    st.markdown("<p style='color:#475569;font-size:.9rem'>Click the button above to trigger the AI council debate for {symbol}.</p>".replace("{symbol}", symbol), unsafe_allow_html=True)
+
+st.markdown('</div>', unsafe_allow_html=True)
+
+# ── Footer ────────────────────────────────────────────────────────────────────
+st.markdown("""
+<div style='text-align:center;margin-top:40px;padding-top:20px;border-top:1px solid #1e2030;color:#2a2d3e;font-size:.75rem;font-family:JetBrains Mono,monospace'>
+  🔮 CRYPTO GURU · Not financial advice · DYOR always
+</div>
+""", unsafe_allow_html=True)
