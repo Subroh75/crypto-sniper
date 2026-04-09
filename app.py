@@ -615,75 +615,56 @@ BB Position: {'upper band' if ta['bb_up'] and price>ta['bb_up'] else 'lower band
 
 news_headlines = "\n".join([f"- {n.get('title','')}" for n in news_items[:5]])
 
-ai_prompt = f"""You are a crypto investment council. Analyze {name} ({symbol}) and respond with exactly these 5 sections. Use the exact section headers shown.
+ai_prompt = f"""You are a crypto investment council analyzing {name} ({symbol}).
 
-MARKET DATA: {ta_summary if ta_summary else "Limited data"}
-HEADLINES: {news_headlines if news_headlines else "No recent news"}
+Market data: {ta_summary if ta_summary else "Limited data available"}
+Recent headlines: {news_headlines if news_headlines else "No recent news"}
 
-BULL_WHALE: [Write 2-3 bullish sentences about long-term thesis, adoption, and on-chain strength]
+You MUST respond with ONLY a valid JSON object. No markdown, no explanation, no code fences. Just raw JSON.
 
-BEAR_TRADER: [Write 2-3 bearish sentences about risks, valuation concerns, and macro headwinds]
-
-QUANT_ALGO: [Write 2-3 quantitative sentences about RSI={ta.get('rsi',0):.0f}, MACD trend, volume signals]
-
-RISK_MANAGER: [Write 2-3 sentences on position sizing, suggested stop-loss, and risk/reward ratio]
-
-VERDICT: [Write exactly 1 sentence with a clear buy/sell/hold recommendation and reasoning]"""
-
-def parse_agent(text, key, next_keys):
-    """Robustly extract agent section from AI output."""
-    import re
-    # Try multiple patterns: KEY:, **KEY**:, KEY\n, *KEY*
-    patterns = [
-        rf'{key}:\s*(.*?)(?=(?:{"|".join(next_keys)})[:\s]|\Z)',
-        rf'\*\*{key}\*\*:?\s*(.*?)(?=(?:{"|".join(next_keys)})[:\s*]|\Z)',
-    ]
-    for pat in patterns:
-        m = re.search(pat, text, re.DOTALL | re.IGNORECASE)
-        if m:
-            result = m.group(1).strip()
-            # Clean up markdown artifacts
-            result = re.sub(r'^\[|\]$', '', result).strip()
-            result = re.sub(r'\*\*|\*|__', '', result).strip()
-            if len(result) > 10:
-                return result
-    return None
+{{"bull_whale": "2-3 sentences: long-term bullish thesis, adoption narrative, on-chain strength for {symbol}",
+  "bear_trader": "2-3 sentences: key risks, valuation concerns, macro headwinds for {symbol}",
+  "quant_algo": "2-3 sentences: technical signals — RSI, MACD, volume, statistical edge for {symbol}",
+  "risk_manager": "2-3 sentences: position sizing advice, stop-loss level, risk/reward ratio for {symbol}",
+  "verdict": "1 sentence: clear consensus recommendation — buy/accumulate/hold/reduce/sell with brief reasoning"}}"""
 
 if st.button("🤖 Run Agent Council Debate", use_container_width=False):
     with st.spinner("Convening the council…"):
-        ai_output = run_gemini(ai_prompt)
+        raw = run_gemini(ai_prompt)
 
-    # Debug: show raw output in expander if all agents fail
-    agent_keys = ["BULL_WHALE", "BEAR_TRADER", "QUANT_ALGO", "RISK_MANAGER", "VERDICT"]
+    # Parse JSON — strip any accidental markdown fences
+    import json, re
+    cleaned = re.sub(r'^```(?:json)?\s*|\s*```$', '', raw.strip(), flags=re.MULTILINE).strip()
+    try:
+        data = json.loads(cleaned)
+    except Exception:
+        # Fallback: try to find JSON object anywhere in the response
+        m = re.search(r'\{[\s\S]*\}', cleaned)
+        try:
+            data = json.loads(m.group(0)) if m else {}
+        except Exception:
+            data = {}
 
-    agents = {
-        "BULL_WHALE":   ("🐋 Bull Whale",    "#0c1a2e", "#60a5fa"),
-        "BEAR_TRADER":  ("🐻 Bear Trader",   "#1c0a0a", "#f87171"),
-        "QUANT_ALGO":   ("🤖 Quant Algo",    "#0d0d1a", "#818cf8"),
-        "RISK_MANAGER": ("🛡️ Risk Manager",  "#0a1a0a", "#4ade80"),
-    }
+    agents = [
+        ("bull_whale",   "🐋 Bull Whale",   "#0c1a2e", "#60a5fa"),
+        ("bear_trader",  "🐻 Bear Trader",  "#1c0a0a", "#f87171"),
+        ("quant_algo",   "🤖 Quant Algo",   "#0d0d1a", "#818cf8"),
+        ("risk_manager", "🛡️ Risk Manager", "#0a1a0a", "#4ade80"),
+    ]
 
-    any_found = False
-    for i, (key, (label, bg, color)) in enumerate(agents.items()):
-        next_keys = agent_keys[i+1:]
-        text = parse_agent(ai_output, key, next_keys)
-        if text:
-            any_found = True
-        else:
-            text = "_Agent did not respond._"
+    for key, label, bg, color in agents:
+        text = data.get(key, "").strip()
+        if not text:
+            text = "_No response from this agent._"
         st.markdown(f"""
 <div class="agent-block" style="background:{bg};border-color:{color}30">
   <div class="agent-name" style="color:{color}">{label}</div>
   <div class="agent-text">{text}</div>
 </div>""", unsafe_allow_html=True)
 
-    # Verdict
-    import re
-    vm = re.search(r'VERDICT:?\s*(.*?)(?:\Z)', ai_output, re.DOTALL | re.IGNORECASE)
-    verdict = vm.group(1).strip().split('\n')[0].strip() if vm else ""
-    verdict = re.sub(r'^\[|\]$|\*\*|\*', '', verdict).strip()
+    verdict = data.get("verdict", "").strip()
     if not verdict:
-        verdict = "The council could not reach a consensus — review the individual positions above."
+        verdict = "Council could not reach consensus — check individual agent positions above."
 
     st.markdown(f"""
 <div class="verdict-banner">
@@ -691,13 +672,12 @@ if st.button("🤖 Run Agent Council Debate", use_container_width=False):
   <div class="verdict-text">{verdict}</div>
 </div>""", unsafe_allow_html=True)
 
-    # Show raw AI output if parsing completely failed
-    if not any_found:
-        with st.expander("⚠️ Raw AI output (parsing failed)"):
-            st.text(ai_output)
+    if not data:
+        with st.expander("⚠️ Raw AI output (JSON parse failed)"):
+            st.text(raw)
 
 else:
-    st.markdown(f"<p style='color:#475569;font-size:.9rem'>Click the button above to trigger the AI council debate for {symbol}.</p>", unsafe_allow_html=True)
+    st.markdown(f"<p style='color:#475569;font-size:.9rem'>Click the button above to run the AI council debate for {symbol}.</p>", unsafe_allow_html=True)
 
 st.markdown('</div>', unsafe_allow_html=True)
 
