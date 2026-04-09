@@ -11,11 +11,7 @@ import requests
 import time
 from datetime import datetime, timedelta
 
-try:
-    import google.generativeai as genai
-    GENAI_AVAILABLE = True
-except ImportError:
-    GENAI_AVAILABLE = False
+
 
 # ── Page config ───────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -175,7 +171,7 @@ hr { border-color: #1e2030 !important; }
 # ── Constants ─────────────────────────────────────────────────────────────────
 CC_BASE = "https://min-api.cryptocompare.com/data"
 CC_KEY  = st.secrets.get("CRYPTOCOMPARE_API_KEY", "")
-GEMINI_KEY = st.secrets.get("GEMINI_API_KEY", "")
+ANTHROPIC_KEY = st.secrets.get("ANTHROPIC_API_KEY", "")
 
 def cc_headers():
     h = {"Content-Type": "application/json"}
@@ -361,17 +357,29 @@ def signal_chip(s):
     css = m.get(s, "chip-hold")
     return f'<span class="signal-chip {css}">{s}</span>'
 
-# ── Gemini AI ─────────────────────────────────────────────────────────────────
-def run_gemini(prompt: str) -> str:
-    if not GENAI_AVAILABLE or not GEMINI_KEY:
-        return "_Gemini API key not configured. Add GEMINI_API_KEY to Streamlit secrets._"
+# ── Anthropic AI ──────────────────────────────────────────────────────────────
+def run_ai(prompt: str) -> str:
+    if not ANTHROPIC_KEY:
+        return "_Add ANTHROPIC_API_KEY to Streamlit secrets to enable AI council._"
     try:
-        genai.configure(api_key=GEMINI_KEY)
-        model = genai.GenerativeModel("gemini-1.5-flash")
-        resp  = model.generate_content(prompt)
-        return resp.text
+        resp = requests.post(
+            "https://api.anthropic.com/v1/messages",
+            headers={
+                "x-api-key": ANTHROPIC_KEY,
+                "anthropic-version": "2023-06-01",
+                "content-type": "application/json",
+            },
+            json={
+                "model": "claude-haiku-4-5-20251001",
+                "max_tokens": 1024,
+                "messages": [{"role": "user", "content": prompt}],
+            },
+            timeout=30,
+        )
+        data = resp.json()
+        return data["content"][0]["text"]
     except Exception as e:
-        return f"_AI unavailable: {e}_"
+        return f"_AI error: {e}_"
 
 # ── Hero ──────────────────────────────────────────────────────────────────────
 st.markdown("""
@@ -630,7 +638,7 @@ You MUST respond with ONLY a valid JSON object. No markdown, no explanation, no 
 
 if st.button("🤖 Run Agent Council Debate", use_container_width=False):
     with st.spinner("Convening the council…"):
-        raw = run_gemini(ai_prompt)
+        raw = run_ai(ai_prompt)
 
     # Parse JSON — strip any accidental markdown fences
     import json, re
