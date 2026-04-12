@@ -1,506 +1,1284 @@
-# ╔══════════════════════════════════════════════════════════════════╗
-# ║  CRYPTO GURU — Intelligence Terminal v3.0                       ║
-# ║  Search → Overview · News · TA · AI Council (auto-runs)        ║
-# ║  Data: CryptoCompare · News: RSS + AI  ·  AI: Anthropic Claude ║
-# ╚══════════════════════════════════════════════════════════════════╝
+# app.py
+from __future__ import annotations
+
+import base64
+import io
+import math
+from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
+from typing import Dict, List, Tuple
 
 import streamlit as st
-import pandas as pd
-import numpy as np
-import requests
-import xml.etree.ElementTree as ET
-from datetime import datetime
+from reportlab.lib import colors
+from reportlab.lib.enums import TA_LEFT, TA_RIGHT
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+from reportlab.lib.units import mm
+from reportlab.pdfbase.pdfmetrics import stringWidth
+from reportlab.platypus import (
+    SimpleDocTemplate,
+    Paragraph,
+    Spacer,
+    Table,
+    TableStyle,
+    Image as RLImage,
+)
 
+
+# =========================
+# PAGE CONFIG
+# =========================
 st.set_page_config(
-    page_title="Crypto Guru · Intelligence Terminal",
-    page_icon="🔮",
+    page_title="crypto.guru",
+    page_icon="🟢",
     layout="wide",
     initial_sidebar_state="collapsed",
 )
 
-st.markdown("""
-<style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;600;700&display=swap');
-html, body, .stApp { background: #0a0a0f !important; color: #e2e8f0; font-family: 'Inter', sans-serif; }
-section[data-testid="stSidebar"] { display: none !important; }
-.block-container { max-width: 960px; margin: 0 auto; padding: 2rem 1.5rem; }
-.hero { background: #0d0d14; border: 1px solid #1e2030; border-radius: 16px; padding: 36px 32px 28px; text-align: center; margin-bottom: 28px; }
-.hero-title { font-family: 'JetBrains Mono', monospace; font-size: 2.2rem; font-weight: 700; color: #ff6600; margin-bottom: 6px; }
-.hero-sub { font-size: 0.95rem; color: #64748b; }
-.stTextInput > div > div > input { background: #0d1117 !important; border: 1px solid #2a2d3e !important; border-radius: 10px !important; color: #e2e8f0 !important; font-family: 'JetBrains Mono', monospace !important; font-size: 1.05rem !important; padding: 12px 18px !important; text-align: center; }
-.stTextInput > div > div > input:focus { border-color: #ff6600 !important; box-shadow: 0 0 0 3px #ff660020 !important; }
-.stTextInput label { display: none !important; }
-.stButton > button { background: linear-gradient(135deg, #ff6600, #ff8c00) !important; color: #fff !important; border: none !important; border-radius: 8px !important; font-weight: 600 !important; padding: 10px 24px !important; }
-.card { background: #0d1117; border: 1px solid #1e2030; border-radius: 12px; padding: 20px 24px; margin-bottom: 16px; }
-.sec-title { font-family: 'JetBrains Mono', monospace; font-size: 0.7rem; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: #ff6600; margin-bottom: 14px; }
-.coin-name { font-size: 1.6rem; font-weight: 700; color: #e2e8f0; }
-.coin-price { font-family: 'JetBrains Mono', monospace; font-size: 1.8rem; font-weight: 700; color: #e2e8f0; }
-.chg-pos { color: #22c55e; } .chg-neg { color: #ef4444; }
-.metric-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 10px; }
-.metric-box { background: #131620; border: 1px solid #1e2030; border-radius: 8px; padding: 12px 14px; }
-.metric-label { font-size: 0.65rem; color: #64748b; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 3px; }
-.metric-val { font-family: 'JetBrains Mono', monospace; font-size: 1rem; font-weight: 600; color: #e2e8f0; }
-.news-item { border-left: 3px solid #ff6600; padding: 10px 14px; margin-bottom: 10px; background: #131620; border-radius: 0 8px 8px 0; }
-.news-title a { color: #e2e8f0; text-decoration: none; font-size: 0.9rem; font-weight: 500; }
-.news-title a:hover { color: #ff6600; }
-.news-meta { font-size: 0.72rem; color: #475569; margin-top: 3px; }
-.sent-pos { color: #22c55e; } .sent-neg { color: #ef4444; } .sent-neu { color: #94a3b8; }
-.sig-chip { display: inline-block; padding: 5px 14px; border-radius: 20px; font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; font-weight: 700; letter-spacing: 0.08em; }
-.chip-buy { background: #14532d; color: #4ade80; border: 1px solid #166534; }
-.chip-sell { background: #450a0a; color: #f87171; border: 1px solid #7f1d1d; }
-.chip-hold { background: #1c1917; color: #fbbf24; border: 1px solid #44403c; }
-.chip-acc { background: #0c1a2e; color: #60a5fa; border: 1px solid #1e3a5f; }
-.ta-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
-.ta-label { font-size: 0.75rem; color: #94a3b8; width: 110px; flex-shrink: 0; }
-.ta-bar-bg { flex: 1; height: 5px; background: #1e2030; border-radius: 3px; }
-.ta-bar-fill { height: 100%; border-radius: 3px; }
-.ta-val { font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; color: #e2e8f0; width: 55px; text-align: right; }
-.agent-msg { background: #0d1117; border-left: 3px solid #ff6600; border-radius: 0 8px 8px 0; padding: 12px 16px; margin-bottom: 10px; color: #cccccc; font-size: 0.875rem; line-height: 1.7; }
-.agent-name { font-size: 0.68rem; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 6px; font-family: 'JetBrains Mono', monospace; }
-.verdict-box { background: #0f1f10; border: 1px solid #166534; border-radius: 10px; padding: 16px 20px; text-align: center; margin-top: 14px; }
-.verdict-label { font-size: 0.65rem; color: #4ade80; text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px; }
-.verdict-text { font-size: 1rem; font-weight: 600; color: #e2e8f0; line-height: 1.5; }
-hr { border-color: #1e2030 !important; }
-.stSpinner > div { border-top-color: #ff6600 !important; }
-</style>
-""", unsafe_allow_html=True)
 
-# ── Constants ─────────────────────────────────────────────────────────────────
-CC_BASE       = "https://min-api.cryptocompare.com/data"
-CC_KEY        = st.secrets.get("CRYPTOCOMPARE_API_KEY", "")
-ANTHROPIC_KEY = st.secrets.get("ANTHROPIC_API_KEY", "")
+# =========================
+# DATA MODELS
+# =========================
+@dataclass
+class TokenContext:
+    token_name: str
+    symbol: str
+    chain: str
+    timeframe: str
+    price: float
+    timestamp: str
 
-def cc_headers():
-    h = {"Content-Type": "application/json"}
-    if CC_KEY:
-        h["authorization"] = f"Apikey {CC_KEY}"
-    return h
 
-# ── Price / Info / OHLCV (unchanged) ─────────────────────────────────────────
-@st.cache_data(ttl=120)
-def get_price(symbol):
-    try:
-        r = requests.get(f"{CC_BASE}/pricemultifull?fsyms={symbol}&tsyms=USD", headers=cc_headers(), timeout=8)
-        raw = r.json().get("RAW", {}).get(symbol, {}).get("USD", {})
-        return {
-            "price": raw.get("PRICE", 0), "chg24": raw.get("CHANGEPCT24HOUR", 0),
-            "chg7d": raw.get("CHANGE7DAYSPCT", 0), "high24": raw.get("HIGH24HOUR", 0),
-            "low24": raw.get("LOW24HOUR", 0), "vol24": raw.get("VOLUME24HOURTO", 0),
-            "mktcap": raw.get("MKTCAP", 0), "supply": raw.get("SUPPLY", 0),
-            "imgurl": "https://www.cryptocompare.com" + raw.get("IMAGEURL", ""),
-        }
-    except: return {}
+@dataclass
+class MiroScoreBreakdown:
+    volume_expansion: int         # 0-5
+    volatility_expansion: int     # 0-3
+    range_control: int            # 0-2
+    trend_quality: int            # 0-3
+    onchain_confirmation: int     # 0-4
+    risk_penalty: int             # 0-5
 
-@st.cache_data(ttl=300)
-def get_info(symbol):
-    try:
-        r = requests.get(f"https://min-api.cryptocompare.com/data/coin/generalinfo?fsym={symbol}&tsym=USD", headers=cc_headers(), timeout=8)
-        ci = r.json().get("Data", {}).get("CoinInfo", {})
-        return {
-            "name": ci.get("FullName", symbol), "algorithm": ci.get("Algorithm", "N/A"),
-            "proof": ci.get("ProofType", "N/A"), "launch": ci.get("AssetLaunchDate", "N/A"),
-            "desc": ci.get("Description", ""), "website": ci.get("Website", ""),
-            "twitter": ci.get("Twitter", ""), "reddit": ci.get("Reddit", ""),
-        }
-    except: return {}
 
-@st.cache_data(ttl=300)
-def get_ohlcv(symbol, limit=100):
-    try:
-        r = requests.get(f"{CC_BASE}/v2/histoday?fsym={symbol}&tsym=USD&limit={limit}", headers=cc_headers(), timeout=10)
-        data = r.json().get("Data", {}).get("Data", [])
-        if not data: return pd.DataFrame()
-        df = pd.DataFrame(data)
-        df["time"] = pd.to_datetime(df["time"], unit="s")
-        return df.set_index("time")[["open", "high", "low", "close", "volumeto"]].rename(columns={"volumeto": "volume"})
-    except: return pd.DataFrame()
+@dataclass
+class SmartMoneySnapshot:
+    smart_wallets_active: int
+    repeat_buyers_detected: bool
+    net_flow: str
+    holder_growth_24h: float
+    note: str
 
-# ── News: RSS feeds (no key needed) + AI summary fallback ────────────────────
-RSS_FEEDS = [
-    ("CoinDesk",    "https://www.coindesk.com/arc/outboundfeeds/rss/"),
-    ("CoinTelegraph","https://cointelegraph.com/rss"),
-    ("Decrypt",     "https://decrypt.co/feed"),
-    ("The Block",   "https://www.theblock.co/rss.xml"),
-    ("Bitcoin Mag", "https://bitcoinmagazine.com/feed"),
-]
 
-@st.cache_data(ttl=300)
-def get_news(symbol, coin_name=""):
-    """Parse RSS feeds, filter by symbol/name, fallback to AI-generated context."""
-    articles = []
-    search_terms = [symbol.lower(), coin_name.lower()] if coin_name else [symbol.lower()]
-    # Add common aliases
-    aliases = {"XRP": ["ripple", "xrp"], "BTC": ["bitcoin", "btc"], "ETH": ["ethereum", "eth"],
-               "SOL": ["solana", "sol"], "DOGE": ["dogecoin", "doge"], "ADA": ["cardano", "ada"],
-               "DOT": ["polkadot", "dot"], "MATIC": ["polygon", "matic"], "AVAX": ["avalanche", "avax"],
-               "LINK": ["chainlink", "link"], "UNI": ["uniswap", "uni"], "BNB": ["binance", "bnb"]}
-    search_terms = list(set(search_terms + aliases.get(symbol.upper(), [])))
+@dataclass
+class KronosSnapshot:
+    regime: str
+    bias: str
+    confidence: int
+    note: str
 
-    for source_name, feed_url in RSS_FEEDS:
-        if len(articles) >= 8:
-            break
-        try:
-            r = requests.get(feed_url, timeout=6, headers={"User-Agent": "Mozilla/5.0"})
-            if r.status_code != 200:
-                continue
-            root = ET.fromstring(r.content)
-            ns = {"atom": "http://www.w3.org/2005/Atom"}
-            # Try RSS format
-            items = root.findall(".//item")
-            # Try Atom format
-            if not items:
-                items = root.findall(".//atom:entry", ns)
-            for item in items:
-                title = (item.findtext("title") or item.findtext("atom:title", namespaces=ns) or "").strip()
-                link  = (item.findtext("link") or item.findtext("atom:link", namespaces=ns) or "").strip()
-                pub   = (item.findtext("pubDate") or item.findtext("atom:published", namespaces=ns) or "").strip()
-                desc  = (item.findtext("description") or item.findtext("atom:summary", namespaces=ns) or "").strip()
-                # Filter to relevant articles
-                combined = (title + " " + desc).lower()
-                if any(term in combined for term in search_terms):
-                    # Parse date
-                    pub_fmt = ""
-                    for fmt in ["%a, %d %b %Y %H:%M:%S %z", "%a, %d %b %Y %H:%M:%S %Z", "%Y-%m-%dT%H:%M:%S%z"]:
-                        try:
-                            pub_fmt = datetime.strptime(pub[:25], fmt[:len(pub[:25])]).strftime("%b %d, %H:%M")
-                            break
-                        except: pass
-                    articles.append({
-                        "title": title, "url": link, "source": source_name,
-                        "published": pub_fmt or pub[:16], "body": desc[:200].replace("<p>","").replace("</p>","").strip(),
-                    })
-                if len(articles) >= 8:
-                    break
-        except: continue
 
-    return articles
+@dataclass
+class CouncilAgent:
+    title: str
+    emoji: str
+    text: str
 
-def get_ai_news(symbol, coin_name, price_data, anthropic_key):
-    """Use Claude to generate current news context when RSS finds nothing."""
-    if not anthropic_key:
-        return []
-    pr = price_data.get("price", 0)
-    c24 = price_data.get("chg24", 0)
-    prompt = f"""You are a crypto market analyst. Today is {datetime.now().strftime('%B %d, %Y')}.
 
-{coin_name} ({symbol}) is currently trading at ${pr:,.4f}, {'+' if c24>=0 else ''}{c24:.2f}% in 24h.
+@dataclass
+class RiskSummary:
+    liquidity: str
+    concentration: str
+    distribution_signals: str
+    warnings: str
 
-List 5 recent news headlines and brief summaries about {symbol} that would be relevant to traders right now. Include regulatory news, adoption, technical developments, and market sentiment. Format each as:
 
-HEADLINE: [title]
-SOURCE: [news source name]
-SUMMARY: [1-2 sentence summary]
-SENTIMENT: [BULLISH/BEARISH/NEUTRAL]
----"""
-    try:
-        resp = requests.post(
-            "https://api.anthropic.com/v1/messages",
-            headers={"x-api-key": anthropic_key, "anthropic-version": "2023-06-01", "content-type": "application/json"},
-            json={"model": "claude-haiku-4-5-20251001", "max_tokens": 800, "messages": [{"role": "user", "content": prompt}]},
-            timeout=20,
-        )
-        data = resp.json()
-        if "error" in data or "content" not in data:
-            return []
-        text = data["content"][0]["text"]
-        # Parse the structured output
-        articles = []
-        blocks = text.split("---")
-        for block in blocks:
-            if "HEADLINE:" not in block: continue
-            lines = {l.split(":", 1)[0].strip(): l.split(":", 1)[1].strip() for l in block.strip().split("\n") if ":" in l}
-            title = lines.get("HEADLINE", "")
-            if title:
-                articles.append({
-                    "title": title, "url": "#", "source": lines.get("SOURCE", "AI Analysis"),
-                    "published": datetime.now().strftime("%b %d"), "body": lines.get("SUMMARY", ""),
-                    "ai_sentiment": lines.get("SENTIMENT", "NEUTRAL"),
-                })
-        return articles[:6]
-    except: return []
+@dataclass
+class ReportPayload:
+    token: TokenContext
+    miro_total: float
+    status_label: str
+    breakdown: MiroScoreBreakdown
+    smart_money: SmartMoneySnapshot
+    kronos: KronosSnapshot
+    council: List[CouncilAgent]
+    risk: RiskSummary
+    verdict_title: str
+    verdict_bullets: List[str]
+    verdict_action: str
+    client_name: str
 
-# ── Technical Analysis ────────────────────────────────────────────────────────
-def compute_ta(df):
-    if df.empty or len(df) < 20: return {}
-    c, v = df["close"], df["volume"]
-    sma = lambda s, n: s.rolling(n).mean()
-    ema = lambda s, n: s.ewm(span=n, adjust=False).mean()
-    price = c.iloc[-1]
-    ma20  = float(sma(c, 20).iloc[-1])
-    ma50  = float(sma(c, 50).iloc[-1]) if len(c) >= 50 else None
-    ma200 = float(sma(c, 200).iloc[-1]) if len(c) >= 200 else None
-    delta = c.diff(); gain = delta.clip(lower=0).rolling(14).mean(); loss = (-delta.clip(upper=0)).rolling(14).mean()
-    rsi   = float((100 - 100 / (1 + gain / loss.replace(0, 0.000001))).iloc[-1])
-    ml = ema(c, 12) - ema(c, 26); sl = ema(ml, 9)
-    macd = float(ml.iloc[-1]); msig = float(sl.iloc[-1])
-    bb_std = c.rolling(20).std()
-    bb_up = float((sma(c, 20) + 2*bb_std).iloc[-1]); bb_lo = float((sma(c, 20) - 2*bb_std).iloc[-1])
-    hl = df["high"]-df["low"]; hc = (df["high"]-c.shift()).abs(); lc = (df["low"]-c.shift()).abs()
-    atr  = float(pd.concat([hl,hc,lc],axis=1).max(axis=1).rolling(14).mean().iloc[-1])
-    pdm  = df["high"].diff().clip(lower=0); mdm = -df["low"].diff().clip(upper=0)
-    adx  = float((abs(pdm.rolling(14).sum()-mdm.rolling(14).sum())/hl.rolling(14).sum().replace(0,0.000001)*100).rolling(14).mean().iloc[-1])
-    avg_v = float(v.rolling(20).mean().iloc[-1]); vr = float(v.iloc[-1])/avg_v if avg_v>0 else 1
-    z    = float((price-float(sma(c,20).iloc[-1]))/float(c.rolling(20).std().iloc[-1]))
-    score = int(price>ma20)+int(bool(ma50) and price>ma50)+int(bool(ma200) and price>ma200)
-    if rsi<30: score+=2
-    elif rsi>70: score-=2
-    score += int(macd>msig)+int(vr>1.5)+int(z<-1.5); score -= int(z>1.5)
-    sig = "STRONG BUY" if score>=5 else "ACCUMULATE" if score>=3 else "STRONG SELL" if score<=-3 else "CAUTION" if score<=-1 else "NEUTRAL"
-    return {"price":price,"ma20":ma20,"ma50":ma50,"ma200":ma200,"rsi":rsi,"macd":macd,"msig":msig,
-            "bb_up":bb_up,"bb_lo":bb_lo,"atr":atr,"adx":adx,"vr":vr,"z":z,"signal":sig,"score":score}
 
-# ── AI Council ────────────────────────────────────────────────────────────────
-def run_council(name, symbol, ta, news_items):
-    if not ANTHROPIC_KEY:
-        return None, "Add ANTHROPIC_API_KEY to Streamlit secrets."
-    ta_str = f"Price: ${ta['price']:,.4f} | Signal: {ta['signal']} | Score: {ta['score']:+d} | RSI: {ta['rsi']:.1f} | MACD: {'bullish' if ta['macd']>ta['msig'] else 'bearish'} | ADX: {ta['adx']:.1f} | Vol surge: {ta['vr']:.2f}x | Z-score: {ta['z']:.2f}" if ta else "Limited data"
-    headlines = " | ".join([n.get("title","") for n in news_items[:5]]) if news_items else "No recent news"
-    prompt = f"""You are a crypto investment council. Analyze {name} ({symbol}) and give each member's view.
+# =========================
+# BRAND CONFIG
+# =========================
+BRAND_NAME = "crypto.guru"
+TAGLINE = "Detect Early. Act Smart."
+APP_BG = "#05070B"
+CARD_BG = "#0C1220"
+CARD_BG_2 = "#0F172A"
+TEXT_PRIMARY = "#E5E7EB"
+TEXT_MUTED = "#8B98A7"
+TEXT_SOFT = "#B8BDC7"
+GREEN = "#7CFF5B"
+GREEN_2 = "#00FF9C"
+AMBER = "#FFB800"
+RED = "#FF5C5C"
+ORANGE = "#FF7A1A"
+BORDER = "#1C2436"
 
-Technical snapshot: {ta_str}
-Recent news: {headlines}
 
-Write each agent's perspective. Use these EXACT labels as section headers (on their own line):
+# =========================
+# UTILITIES
+# =========================
+def safe_float(value: float, digits: int = 2) -> str:
+    return f"{value:.{digits}f}"
 
-BULL WHALE
-BEAR TRADER
-QUANT ALGO
-RISK MANAGER
-VERDICT
 
-Each section: 2-3 sentences. VERDICT: one clear actionable sentence."""
-    try:
-        resp = requests.post(
-            "https://api.anthropic.com/v1/messages",
-            headers={"x-api-key": ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json"},
-            json={"model": "claude-haiku-4-5-20251001", "max_tokens": 900,
-                  "messages": [{"role": "user", "content": prompt}]},
-            timeout=30,
-        )
-        data = resp.json()
-        if "error" in data:
-            return None, f"API {resp.status_code}: {data['error'].get('message', str(data['error']))}"
-        if "content" not in data:
-            return None, f"Unexpected response ({resp.status_code}): {str(data)[:300]}"
-        return data["content"][0]["text"], None
-    except requests.exceptions.Timeout:
-        return None, "Request timed out. Try again."
-    except Exception as e:
-        return None, str(e)
+def score_status(score: float) -> str:
+    if score >= 11:
+        return "⚡ HIGH MOMENTUM"
+    if score >= 8:
+        return "🟡 BUILDING STRENGTH"
+    if score >= 5:
+        return "👁 WATCHLIST"
+    return "• NOISE"
 
-def parse_council(text):
-    labels = ["BULL WHALE", "BEAR TRADER", "QUANT ALGO", "RISK MANAGER", "VERDICT"]
-    result = {}
-    current = None
-    buf = []
-    for line in text.split("\n"):
-        s = line.strip()
-        # Check if line IS a label (exact match or starts with label)
-        matched = next((l for l in labels if s.upper() == l or s.upper().startswith(l + ":") or s.upper().replace("**","").strip() == l), None)
-        if matched:
-            if current and buf:
-                result[current] = " ".join(b for b in buf if b).strip()
-            current = matched
-            # Grab anything after the colon on the same line
-            remainder = s[len(matched):].lstrip(": *").strip()
-            buf = [remainder] if remainder else []
-        elif current and s:
-            buf.append(s)
-    if current and buf:
-        result[current] = " ".join(b for b in buf if b).strip()
-    return result
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
-def fp(n):
-    return f"${n:,.2f}" if n>=1000 else f"${n:.4f}" if n>=1 else f"${n:.8f}"
+def score_color(score: float) -> str:
+    if score >= 11:
+        return GREEN
+    if score >= 8:
+        return AMBER
+    if score >= 5:
+        return "#D6A24A"
+    return RED
 
-def fl(n):
-    if n>=1e12: return f"${n/1e12:.2f}T"
-    if n>=1e9:  return f"${n/1e9:.2f}B"
-    if n>=1e6:  return f"${n/1e6:.2f}M"
-    return f"${n:,.0f}"
 
-def chg_html(v):
-    cls = "chg-pos" if v>=0 else "chg-neg"
-    return f'<span class="{cls}">{("+" if v>=0 else "")}{v:.2f}%</span>'
+def load_logo_base64(logo_path: str = "assets/crypto_guru_logo.png") -> str:
+    """
+    Loads a local logo if available. If not, the app falls back to a text-only header.
+    Put your logo at assets/crypto_guru_logo.png in your GitHub repo.
+    """
+    path = Path(logo_path)
+    if not path.exists():
+        return ""
+    encoded = base64.b64encode(path.read_bytes()).decode("utf-8")
+    return encoded
 
-def sig_chip(s):
-    m = {"STRONG BUY":"chip-buy","ACCUMULATE":"chip-acc","NEUTRAL":"chip-hold","CAUTION":"chip-hold","STRONG SELL":"chip-sell"}
-    css = m.get(s, "chip-hold")
-    return f'<span class="sig-chip {css}">{s}</span>'
 
-def sent_tag(title, ai_sent=None):
-    if ai_sent:
-        if ai_sent == "BULLISH": return '<span class="sent-pos">▲ Bullish</span>'
-        if ai_sent == "BEARISH": return '<span class="sent-neg">▼ Bearish</span>'
-        return '<span class="sent-neu">● Neutral</span>'
-    pos = ["surge","bull","breakout","rally","gain","rise","pump","buy","adoption","approved","launch","partnership","win","ruling","etf"]
-    neg = ["crash","bear","drop","fall","sell","hack","fear","loss","ban","dump","fraud","sued","warning","reject","delay"]
-    tl = title.lower()
-    if any(w in tl for w in pos): return '<span class="sent-pos">▲ Bullish</span>'
-    if any(w in tl for w in neg): return '<span class="sent-neg">▼ Bearish</span>'
-    return '<span class="sent-neu">● Neutral</span>'
+def create_brand_header_html(logo_b64: str) -> str:
+    logo_html = ""
+    if logo_b64:
+        logo_html = f"""
+        <img src="data:image/png;base64,{logo_b64}" class="brand-logo" />
+        """
+    else:
+        logo_html = """
+        <div class="brand-fallback-icon">◉</div>
+        """
 
-# ── UI ────────────────────────────────────────────────────────────────────────
-st.markdown('<div class="hero"><div class="hero-title">🔮 CRYPTO GURU</div><div class="hero-sub">Intelligence Terminal · Enter any crypto ticker to begin</div></div>', unsafe_allow_html=True)
+    return f"""
+    <div class="brand-shell">
+        <div class="brand-left">
+            {logo_html}
+            <div class="brand-copy">
+                <div class="brand-title">
+                    <span class="brand-crypto">crypto</span><span class="brand-dot">.</span><span class="brand-guru">guru</span>
+                </div>
+                <div class="brand-tagline">{TAGLINE}</div>
+            </div>
+        </div>
+    </div>
+    """
 
-col_s, col_b = st.columns([5, 1])
-with col_s:
-    query = st.text_input("", placeholder="BTC · ETH · SOL · XRP · DOGE · PEPE · any ticker...", key="q")
-with col_b:
-    st.button("Analyse", use_container_width=True)
 
-symbol = query.strip().upper() if query else ""
+def inject_css() -> None:
+    st.markdown(
+        f"""
+        <style>
+            .stApp {{
+                background: {APP_BG};
+                color: {TEXT_PRIMARY};
+            }}
 
-if not symbol:
-    st.markdown('<div style="text-align:center;margin-top:60px;color:#1e2030;font-size:3rem;">🔮</div>', unsafe_allow_html=True)
-    st.stop()
+            .block-container {{
+                padding-top: 1.4rem;
+                padding-bottom: 2rem;
+                max-width: 1200px;
+            }}
 
-# ── Fetch ─────────────────────────────────────────────────────────────────────
-with st.spinner(f"Loading {symbol}…"):
-    price_data = get_price(symbol)
-    coin_info  = get_info(symbol)
-    df_ohlcv   = get_ohlcv(symbol)
-    ta         = compute_ta(df_ohlcv)
-    name       = coin_info.get("name") or symbol
-    # News: RSS first, AI fallback if nothing found
-    news_items = get_news(symbol, name)
-    using_ai_news = False
-    if not news_items and ANTHROPIC_KEY:
-        news_items = get_ai_news(symbol, name, price_data, ANTHROPIC_KEY)
-        using_ai_news = True
+            .brand-shell {{
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                background: linear-gradient(180deg, rgba(12,18,32,0.95), rgba(12,18,32,0.78));
+                border: 1px solid {BORDER};
+                border-radius: 18px;
+                padding: 16px 20px;
+                margin-bottom: 18px;
+            }}
 
-if not price_data or price_data.get("price", 0) == 0:
-    st.error(f"⚠️ No data found for **{symbol}**. Check the ticker and try again.")
-    st.stop()
+            .brand-left {{
+                display: flex;
+                align-items: center;
+                gap: 14px;
+            }}
 
-pr  = price_data["price"]
-c24 = price_data["chg24"]
-c7d = price_data["chg7d"]
+            .brand-logo {{
+                width: 58px;
+                height: 58px;
+                object-fit: contain;
+                border-radius: 12px;
+            }}
 
-# ── SECTION 1: Overview ───────────────────────────────────────────────────────
-st.markdown('<div class="card">', unsafe_allow_html=True)
-st.markdown('<div class="sec-title">01 · Project Overview</div>', unsafe_allow_html=True)
-st.markdown(f"""
-<div style="display:flex;align-items:center;gap:18px;margin-bottom:16px">
-  <img src="{price_data['imgurl']}" style="width:56px;height:56px;border-radius:50%" onerror="this.style.display='none'"/>
-  <div>
-    <div class="coin-name">{name}</div>
-    <div style="font-family:'JetBrains Mono',monospace;font-size:.85rem;color:#64748b">{symbol} · {coin_info.get('algorithm','N/A')} · {coin_info.get('proof','N/A')}</div>
-  </div>
-  <div style="margin-left:auto;text-align:right">
-    <div class="coin-price">{fp(pr)}</div>
-    <div>{chg_html(c24)} 24h &nbsp; {chg_html(c7d)} 7d</div>
-  </div>
-</div>
-<div class="metric-grid">
-  <div class="metric-box"><div class="metric-label">Market Cap</div><div class="metric-val">{fl(price_data['mktcap'])}</div></div>
-  <div class="metric-box"><div class="metric-label">24h Volume</div><div class="metric-val">{fl(price_data['vol24'])}</div></div>
-  <div class="metric-box"><div class="metric-label">Supply</div><div class="metric-val">{fl(price_data['supply'])}</div></div>
-  <div class="metric-box"><div class="metric-label">24h High</div><div class="metric-val">{fp(price_data['high24'])}</div></div>
-  <div class="metric-box"><div class="metric-label">24h Low</div><div class="metric-val">{fp(price_data['low24'])}</div></div>
-  <div class="metric-box"><div class="metric-label">Launch</div><div class="metric-val">{coin_info.get('launch','N/A')}</div></div>
-</div>""", unsafe_allow_html=True)
-desc = coin_info.get("desc", "")
-if desc:
-    st.markdown(f"<p style='margin-top:14px;font-size:.88rem;color:#94a3b8;line-height:1.7'>{desc[:700]}{'…' if len(desc)>700 else ''}</p>", unsafe_allow_html=True)
-links = []
-if coin_info.get("website"): links.append(f"[🌐 Website]({coin_info['website']})")
-if coin_info.get("twitter"):  links.append(f"[🐦 Twitter]({coin_info['twitter']})")
-if coin_info.get("reddit"):   links.append(f"[🔴 Reddit]({coin_info['reddit']})")
-if links: st.markdown("  ·  ".join(links))
-st.markdown('</div>', unsafe_allow_html=True)
+            .brand-fallback-icon {{
+                width: 58px;
+                height: 58px;
+                border-radius: 16px;
+                background: radial-gradient(circle at center, rgba(124,255,91,0.18), rgba(124,255,91,0.02));
+                border: 1px solid rgba(124,255,91,0.25);
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                color: {GREEN};
+                font-size: 24px;
+                font-weight: 700;
+            }}
 
-# ── SECTION 2: News ───────────────────────────────────────────────────────────
-st.markdown('<div class="card">', unsafe_allow_html=True)
-news_label = f"02 · News & Sentiment {'· AI-Generated Context' if using_ai_news else '· Live RSS Feeds'}"
-st.markdown(f'<div class="sec-title">{news_label}</div>', unsafe_allow_html=True)
+            .brand-copy {{
+                display: flex;
+                flex-direction: column;
+                line-height: 1.1;
+            }}
 
-if news_items:
-    for item in news_items:
-        title    = item.get("title","")
-        url      = item.get("url","#")
-        src      = item.get("source","")
-        pub      = item.get("published","")
-        body     = item.get("body","")
-        ai_sent  = item.get("ai_sentiment")
-        link_tag = f'<a href="{url}" target="_blank">{title}</a>' if url != "#" else title
-        st.markdown(f"""
-<div class="news-item">
-  <div class="news-title">{link_tag}</div>
-  <div class="news-meta">{src} · {pub} · {sent_tag(title, ai_sent)}</div>
-  {f"<div style='font-size:.78rem;color:#64748b;margin-top:5px'>{body[:200]}</div>" if body else ""}
-</div>""", unsafe_allow_html=True)
-else:
-    st.markdown(f"<p style='color:#475569;font-size:.88rem'>No recent {symbol} news found in RSS feeds. Add ANTHROPIC_API_KEY to secrets to enable AI-generated news context.</p>", unsafe_allow_html=True)
-st.markdown('</div>', unsafe_allow_html=True)
+            .brand-title {{
+                font-size: 32px;
+                font-weight: 800;
+                letter-spacing: -0.5px;
+            }}
 
-# ── SECTION 3: Technical Analysis ─────────────────────────────────────────────
-st.markdown('<div class="card">', unsafe_allow_html=True)
-st.markdown('<div class="sec-title">03 · Technical Analysis</div>', unsafe_allow_html=True)
-if ta:
-    st.markdown(f"<div style='margin-bottom:16px'>Signal: &nbsp;{sig_chip(ta['signal'])} &nbsp;&nbsp; Score: <code style='color:#ff6600'>{ta['score']:+d}/8</code></div>", unsafe_allow_html=True)
-    col1, col2 = st.columns(2)
-    with col1:
-        st.markdown("**Moving Averages**")
-        for lb, val in [("MA 20", ta["ma20"]), ("MA 50", ta.get("ma50")), ("MA 200", ta.get("ma200"))]:
-            if val:
-                ab = pr>val; col = "#22c55e" if ab else "#ef4444"; tag = "above" if ab else "below"
-                st.markdown(f"<div style='display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid #1e2030'><span style='color:#94a3b8;font-size:.82rem'>{lb}</span><span style='color:{col};font-size:.82rem'>{fp(val)} <small>({tag})</small></span></div>", unsafe_allow_html=True)
-        rsi=ta["rsi"]; rc="#ef4444" if rsi>70 else "#22c55e" if rsi<30 else "#94a3b8"
-        st.markdown(f"<br><div class='ta-row'><div class='ta-label'>RSI (14)</div><div class='ta-bar-bg'><div class='ta-bar-fill' style='width:{min(rsi,100):.0f}%;background:{rc}'></div></div><div class='ta-val' style='color:{rc}'>{rsi:.1f}</div></div>", unsafe_allow_html=True)
-        adx=ta["adx"]
-        st.markdown(f"<div class='ta-row'><div class='ta-label'>ADX</div><div class='ta-bar-bg'><div class='ta-bar-fill' style='width:{min(adx,100):.0f}%;background:#818cf8'></div></div><div class='ta-val'>{adx:.1f}</div></div>", unsafe_allow_html=True)
-    with col2:
-        mb=ta["macd"]>ta["msig"]
-        st.markdown(f"**MACD** {'▲ Bullish' if mb else '▼ Bearish'}")
-        st.markdown(f"<div style='background:#131620;border-radius:8px;padding:12px 14px;margin-bottom:10px;font-size:.82rem'><div style='display:flex;justify-content:space-between;margin-bottom:5px'><span style='color:#94a3b8'>MACD</span><span style='color:{'#22c55e' if ta['macd']>0 else '#ef4444'};font-family:monospace'>{ta['macd']:.6f}</span></div><div style='display:flex;justify-content:space-between'><span style='color:#94a3b8'>Signal</span><span style='font-family:monospace;color:#94a3b8'>{ta['msig']:.6f}</span></div></div>", unsafe_allow_html=True)
-        bb_pct=max(0,min(100,(pr-ta["bb_lo"])/(ta["bb_up"]-ta["bb_lo"])*100)) if ta["bb_up"]!=ta["bb_lo"] else 50
-        st.markdown(f"**Bollinger Bands**")
-        st.markdown(f"<div style='background:#131620;border-radius:8px;padding:12px 14px;margin-bottom:10px;font-size:.82rem'><div style='display:flex;justify-content:space-between;margin-bottom:7px'><span style='color:#94a3b8'>Upper</span><span style='font-family:monospace'>{fp(ta['bb_up'])}</span></div><div class='ta-bar-bg'><div class='ta-bar-fill' style='width:{bb_pct:.0f}%;background:#ff6600'></div></div><div style='display:flex;justify-content:space-between;margin-top:7px'><span style='color:#94a3b8'>Lower</span><span style='font-family:monospace'>{fp(ta['bb_lo'])}</span></div></div>", unsafe_allow_html=True)
-        vc="#22c55e" if ta["vr"]>1.5 else "#94a3b8"
-        st.markdown(f"<div style='font-size:.82rem'><div style='display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid #1e2030'><span style='color:#94a3b8'>Vol surge</span><span style='color:{vc};font-family:monospace'>{ta['vr']:.2f}x</span></div><div style='display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid #1e2030'><span style='color:#94a3b8'>ATR (14)</span><span style='font-family:monospace'>{fp(ta['atr'])}</span></div><div style='display:flex;justify-content:space-between;padding:5px 0'><span style='color:#94a3b8'>Z-score</span><span style='color:{'#22c55e' if ta['z']<-1 else '#ef4444' if ta['z']>1 else '#94a3b8'};font-family:monospace'>{ta['z']:.2f}</span></div></div>", unsafe_allow_html=True)
-    if not df_ohlcv.empty:
-        st.markdown("<br>**Price Chart (90 days)**", unsafe_allow_html=True)
-        ch = df_ohlcv[["close"]].tail(90).copy(); ch.columns=["Close"]; st.line_chart(ch, color=["#ff6600"])
-else:
-    st.markdown("<p style='color:#475569'>Insufficient OHLCV data for TA.</p>", unsafe_allow_html=True)
-st.markdown('</div>', unsafe_allow_html=True)
+            .brand-crypto {{
+                color: {TEXT_SOFT};
+            }}
 
-# ── SECTION 4: AI Council (auto-runs) ─────────────────────────────────────────
-st.markdown('<div class="card">', unsafe_allow_html=True)
-st.markdown('<div class="sec-title">04 · AI Agent Council Debate</div>', unsafe_allow_html=True)
+            .brand-dot {{
+                color: {GREEN};
+            }}
 
-if not ANTHROPIC_KEY:
-    st.markdown("<p style='color:#475569;font-size:.88rem'>Add ANTHROPIC_API_KEY to Streamlit secrets to enable the AI council.</p>", unsafe_allow_html=True)
-else:
-    with st.spinner("Convening the council…"):
-        council_text, err = run_council(name, symbol, ta, news_items)
+            .brand-guru {{
+                color: {GREEN};
+            }}
 
-    if err:
-        st.error(f"Council error: {err}")
-        st.info("Check your ANTHROPIC_API_KEY in Streamlit secrets. Get a key at console.anthropic.com")
-    elif council_text:
-        parsed = parse_council(council_text)
-        agents = [
-            ("BULL WHALE",   "🐋 Bull Whale",   "#60a5fa"),
-            ("BEAR TRADER",  "🐻 Bear Trader",  "#f87171"),
-            ("QUANT ALGO",   "🤖 Quant Algo",   "#818cf8"),
-            ("RISK MANAGER", "🛡️ Risk Manager", "#4ade80"),
+            .brand-tagline {{
+                margin-top: 6px;
+                color: {TEXT_MUTED};
+                font-size: 13px;
+                font-weight: 500;
+                letter-spacing: 0.2px;
+            }}
+
+            .token-meta-card {{
+                background: {CARD_BG};
+                border: 1px solid {BORDER};
+                border-radius: 18px;
+                padding: 18px 20px;
+                margin-bottom: 18px;
+            }}
+
+            .section-card {{
+                background: {CARD_BG};
+                border: 1px solid {BORDER};
+                border-radius: 18px;
+                padding: 18px 20px;
+                margin-bottom: 16px;
+            }}
+
+            .section-title {{
+                color: {ORANGE};
+                font-size: 13px;
+                font-weight: 800;
+                text-transform: uppercase;
+                letter-spacing: 3px;
+                margin-bottom: 12px;
+            }}
+
+            .token-line {{
+                display: flex;
+                align-items: baseline;
+                justify-content: space-between;
+                gap: 16px;
+                flex-wrap: wrap;
+            }}
+
+            .token-name {{
+                font-size: 30px;
+                font-weight: 800;
+                color: {TEXT_PRIMARY};
+            }}
+
+            .token-sub {{
+                color: {TEXT_MUTED};
+                font-size: 14px;
+                margin-top: 4px;
+            }}
+
+            .miro-score {{
+                font-size: 34px;
+                font-weight: 900;
+                letter-spacing: -0.7px;
+            }}
+
+            .status-pill {{
+                display: inline-block;
+                margin-top: 8px;
+                padding: 7px 12px;
+                border-radius: 999px;
+                background: rgba(124,255,91,0.08);
+                border: 1px solid rgba(124,255,91,0.20);
+                color: {TEXT_PRIMARY};
+                font-size: 12px;
+                font-weight: 700;
+                letter-spacing: 0.4px;
+            }}
+
+            .metric-row {{
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                padding: 10px 0;
+                border-bottom: 1px solid rgba(255,255,255,0.05);
+                gap: 12px;
+            }}
+
+            .metric-row:last-child {{
+                border-bottom: none;
+            }}
+
+            .metric-label {{
+                color: {TEXT_SOFT};
+                font-size: 14px;
+                font-weight: 500;
+            }}
+
+            .metric-value {{
+                color: {TEXT_PRIMARY};
+                font-size: 15px;
+                font-weight: 700;
+            }}
+
+            .bar-wrap {{
+                display: inline-flex;
+                gap: 4px;
+                vertical-align: middle;
+                margin-right: 10px;
+            }}
+
+            .bar-cell {{
+                width: 14px;
+                height: 8px;
+                border-radius: 999px;
+                background: rgba(255,255,255,0.08);
+            }}
+
+            .bar-on-green {{
+                background: {GREEN};
+            }}
+
+            .bar-on-amber {{
+                background: {AMBER};
+            }}
+
+            .bar-on-red {{
+                background: {RED};
+            }}
+
+            .agent-card {{
+                background: {CARD_BG_2};
+                border: 1px solid {BORDER};
+                border-left: 4px solid {ORANGE};
+                border-radius: 16px;
+                padding: 14px 16px;
+                margin-bottom: 12px;
+            }}
+
+            .agent-title {{
+                font-size: 14px;
+                font-weight: 800;
+                letter-spacing: 2px;
+                text-transform: uppercase;
+                color: {TEXT_SOFT};
+                margin-bottom: 8px;
+            }}
+
+            .agent-body {{
+                color: {TEXT_PRIMARY};
+                font-size: 15px;
+                line-height: 1.55;
+            }}
+
+            .verdict-box {{
+                background: linear-gradient(180deg, rgba(124,255,91,0.07), rgba(124,255,91,0.03));
+                border: 1px solid rgba(124,255,91,0.18);
+                border-radius: 18px;
+                padding: 18px 20px;
+            }}
+
+            .verdict-title {{
+                color: {GREEN};
+                font-size: 22px;
+                font-weight: 900;
+                margin-bottom: 10px;
+            }}
+
+            .verdict-bullet {{
+                color: {TEXT_PRIMARY};
+                font-size: 15px;
+                line-height: 1.65;
+            }}
+
+            .footer-note {{
+                color: {TEXT_MUTED};
+                font-size: 12px;
+                text-align: center;
+                margin-top: 20px;
+                margin-bottom: 14px;
+            }}
+
+            .stDownloadButton button {{
+                width: 100%;
+                background: linear-gradient(180deg, rgba(124,255,91,0.20), rgba(124,255,91,0.10));
+                border: 1px solid rgba(124,255,91,0.28);
+                color: {TEXT_PRIMARY};
+                border-radius: 14px;
+                padding: 0.8rem 1rem;
+                font-weight: 800;
+                letter-spacing: 0.2px;
+            }}
+
+            .stTextInput input, .stNumberInput input, .stSelectbox div[data-baseweb="select"] {{
+                background: {CARD_BG} !important;
+                color: {TEXT_PRIMARY} !important;
+                border-radius: 12px !important;
+            }}
+
+            .stCheckbox label, .stMarkdown, .stCaption, .stRadio label {{
+                color: {TEXT_PRIMARY};
+            }}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_bar(value: int, maximum: int, kind: str = "green") -> str:
+    css_class = {
+        "green": "bar-on-green",
+        "amber": "bar-on-amber",
+        "red": "bar-on-red",
+    }.get(kind, "bar-on-green")
+    cells = []
+    for i in range(maximum):
+        active = css_class if i < value else ""
+        cells.append(f'<span class="bar-cell {active}"></span>')
+    return f'<span class="bar-wrap">{"".join(cells)}</span>'
+
+
+# =========================
+# MOCK / PLACEHOLDER LOGIC
+# Replace these with your real pipeline
+# =========================
+def calculate_miro_v2(
+    relative_volume: float,
+    atr_multiple: float,
+    range_position: float,
+    price_above_ema20: bool,
+    ema20_above_ema50: bool,
+    adx_strength: float,
+    smart_wallets_active: int,
+    repeat_buyers_detected: bool,
+    net_flow_positive: bool,
+    holder_growth_24h: float,
+    low_liquidity_penalty: bool,
+    concentration_penalty: bool,
+    suspicious_volume_penalty: bool,
+) -> MiroScoreBreakdown:
+    # Volume Expansion V: 0-5
+    if relative_volume >= 8:
+        volume_expansion = 5
+    elif relative_volume >= 4:
+        volume_expansion = 3
+    elif relative_volume >= 2:
+        volume_expansion = 2
+    else:
+        volume_expansion = 0
+
+    # Volatility Expansion P: 0-3
+    if atr_multiple >= 4:
+        volatility_expansion = 3
+    elif atr_multiple >= 2.5:
+        volatility_expansion = 2
+    elif atr_multiple >= 1.5:
+        volatility_expansion = 1
+    else:
+        volatility_expansion = 0
+
+    # Range Control R: 0-2
+    if range_position >= 0.85:
+        range_control = 2
+    elif range_position >= 0.70:
+        range_control = 1
+    else:
+        range_control = 0
+
+    # Trend Quality T: 0-3
+    trend_quality = 0
+    if price_above_ema20:
+        trend_quality += 1
+    if ema20_above_ema50:
+        trend_quality += 1
+    if adx_strength >= 20:
+        trend_quality += 1
+
+    # On-chain Confirmation O: 0-4
+    onchain_confirmation = 0
+    if smart_wallets_active >= 2:
+        onchain_confirmation += 2
+    if repeat_buyers_detected:
+        onchain_confirmation += 2
+    if net_flow_positive:
+        onchain_confirmation += 1
+    if holder_growth_24h >= 5:
+        onchain_confirmation += 1
+    onchain_confirmation = min(onchain_confirmation, 4)
+
+    # Risk Penalty X: 0-5
+    risk_penalty = 0
+    if low_liquidity_penalty:
+        risk_penalty += 3
+    if concentration_penalty:
+        risk_penalty += 2
+    if suspicious_volume_penalty:
+        risk_penalty += 3
+    risk_penalty = min(risk_penalty, 5)
+
+    return MiroScoreBreakdown(
+        volume_expansion=volume_expansion,
+        volatility_expansion=volatility_expansion,
+        range_control=range_control,
+        trend_quality=trend_quality,
+        onchain_confirmation=onchain_confirmation,
+        risk_penalty=risk_penalty,
+    )
+
+
+def total_miro_score(b: MiroScoreBreakdown) -> float:
+    score = (
+        b.volume_expansion
+        + b.volatility_expansion
+        + b.range_control
+        + b.trend_quality
+        + b.onchain_confirmation
+        - b.risk_penalty
+    )
+    return round(max(score, 0), 1)
+
+
+def build_kronos_snapshot(
+    atr_multiple: float,
+    adx_strength: float,
+    range_position: float,
+) -> KronosSnapshot:
+    if atr_multiple < 1.5 and adx_strength < 20:
+        regime = "Low Volatility → Expansion Likely"
+        bias = "Mild Bullish" if range_position >= 0.70 else "Neutral"
+        confidence = 64 if range_position >= 0.70 else 56
+        note = "Compression conditions detected with rising probability of directional expansion."
+    elif atr_multiple >= 2.5 and adx_strength >= 20:
+        regime = "Active Expansion"
+        bias = "Bullish"
+        confidence = 72
+        note = "Momentum and volatility conditions support continuation, though follow-through still matters."
+    else:
+        regime = "Mixed Structure"
+        bias = "Neutral"
+        confidence = 58
+        note = "Signals are not fully aligned. Structure remains tradable but not clean."
+    return KronosSnapshot(regime=regime, bias=bias, confidence=confidence, note=note)
+
+
+def build_smart_money_snapshot(
+    smart_wallets_active: int,
+    repeat_buyers_detected: bool,
+    net_flow_positive: bool,
+    holder_growth_24h: float,
+) -> SmartMoneySnapshot:
+    flow = "Positive (Buy > Sell)" if net_flow_positive else "Mixed / Flat"
+    note_parts = []
+    if smart_wallets_active >= 2:
+        note_parts.append("Early accumulation behavior observed")
+    if repeat_buyers_detected:
+        note_parts.append("repeat entries detected")
+    if holder_growth_24h >= 5:
+        note_parts.append("wallet expansion is supportive")
+    note = ", ".join(note_parts).capitalize() + "." if note_parts else "No strong smart money pattern detected yet."
+
+    return SmartMoneySnapshot(
+        smart_wallets_active=smart_wallets_active,
+        repeat_buyers_detected=repeat_buyers_detected,
+        net_flow=flow,
+        holder_growth_24h=holder_growth_24h,
+        note=note,
+    )
+
+
+def build_risk_summary(
+    low_liquidity_penalty: bool,
+    concentration_penalty: bool,
+    suspicious_volume_penalty: bool,
+) -> RiskSummary:
+    liquidity = "Weak" if low_liquidity_penalty else "Strong"
+    concentration = "Elevated" if concentration_penalty else "Moderate / Acceptable"
+    distribution_signals = "Suspicious volume behavior detected" if suspicious_volume_penalty else "None detected"
+    warnings = "Use tighter execution discipline." if any(
+        [low_liquidity_penalty, concentration_penalty, suspicious_volume_penalty]
+    ) else "No critical warning."
+    return RiskSummary(
+        liquidity=liquidity,
+        concentration=concentration,
+        distribution_signals=distribution_signals,
+        warnings=warnings,
+    )
+
+
+def build_council(
+    smart_money: SmartMoneySnapshot,
+    kronos: KronosSnapshot,
+    risk: RiskSummary,
+    breakdown: MiroScoreBreakdown,
+) -> List[CouncilAgent]:
+    bull_text = (
+        f"{smart_money.smart_wallets_active} smart wallets active. "
+        f"{'Repeat buying pattern detected. ' if smart_money.repeat_buyers_detected else ''}"
+        f"→ Early positioning likely."
+    )
+
+    bear_text = (
+        f"Liquidity is {risk.liquidity.lower()} and concentration is {risk.concentration.lower()}. "
+        f"→ Structural risk {'remains' if risk.concentration != 'Moderate / Acceptable' else 'is controlled for now'}."
+    )
+
+    quant_text = (
+        f"{kronos.regime}. Bias: {kronos.bias}. "
+        f"→ Model confidence at {kronos.confidence}%."
+    )
+
+    risk_manager_text = (
+        f"Risk penalty at {breakdown.risk_penalty}/5. "
+        f"→ {'Wait for cleaner confirmation before acting.' if breakdown.risk_penalty >= 2 else 'Conditions are tradable with discipline.'}"
+    )
+
+    return [
+        CouncilAgent(title="Bull Whale", emoji="🐋", text=bull_text),
+        CouncilAgent(title="Bear Risk", emoji="🐻", text=bear_text),
+        CouncilAgent(title="Quant Brain", emoji="🤖", text=quant_text),
+        CouncilAgent(title="Risk Manager", emoji="🛡", text=risk_manager_text),
+    ]
+
+
+def build_verdict(score: float, smart_money: SmartMoneySnapshot, kronos: KronosSnapshot) -> Tuple[str, List[str], str]:
+    if score >= 11:
+        title = "⚡ VERDICT: HIGH-CONVICTION MOMENTUM"
+        bullets = [
+            "Abnormal participation is present.",
+            "Smart accumulation signals are supportive.",
+            "Market structure favors continuation if follow-through appears.",
         ]
-        for key, label, color in agents:
-            text = parsed.get(key, "")
-            if text:
-                st.markdown(f'<div class="agent-msg"><div class="agent-name" style="color:{color}">{label}</div>{text}</div>', unsafe_allow_html=True)
+        action = "Act only on confirmed strength and disciplined risk sizing."
+    elif score >= 8:
+        title = "🟡 VERDICT: WATCH FOR BREAKOUT"
+        bullets = [
+            "Momentum conditions are forming.",
+            "Structure is improving but not fully resolved.",
+            "Smart money behavior adds credibility.",
+        ]
+        action = "Wait for confirmation candle or clean expansion trigger."
+    elif score >= 5:
+        title = "👁 VERDICT: WATCHLIST ONLY"
+        bullets = [
+            "Interesting candidate, but alignment is incomplete.",
+            "Some participation exists, but conviction is not yet strong.",
+            "Structure remains mixed.",
+        ]
+        action = "Monitor, do not force entry."
+    else:
+        title = "• VERDICT: NOISE"
+        bullets = [
+            "Signal quality is low.",
+            "Participation and structure are not strong enough.",
+            "No meaningful edge detected at current state.",
+        ]
+        action = "Ignore until the setup materially improves."
 
-        verdict = parsed.get("VERDICT", "")
-        if verdict:
-            st.markdown(f'<div class="verdict-box"><div class="verdict-label">⚖️ Council Verdict</div><div class="verdict-text">{verdict}</div></div>', unsafe_allow_html=True)
+    return title, bullets, action
 
-        # Only show debug if completely empty
-        if not parsed:
-            st.markdown("**Debug — raw council output:**")
-            st.text(council_text)
 
-st.markdown('</div>', unsafe_allow_html=True)
-st.markdown("<div style='text-align:center;margin-top:32px;color:#1e2030;font-size:.72rem;font-family:JetBrains Mono,monospace'>🔮 CRYPTO GURU · Not financial advice · DYOR</div>", unsafe_allow_html=True)
+def generate_report_payload(
+    token_name: str,
+    symbol: str,
+    chain: str,
+    timeframe: str,
+    price: float,
+    relative_volume: float,
+    atr_multiple: float,
+    range_position: float,
+    adx_strength: float,
+    smart_wallets_active: int,
+    repeat_buyers_detected: bool,
+    net_flow_positive: bool,
+    holder_growth_24h: float,
+    price_above_ema20: bool,
+    ema20_above_ema50: bool,
+    low_liquidity_penalty: bool,
+    concentration_penalty: bool,
+    suspicious_volume_penalty: bool,
+    client_name: str,
+) -> ReportPayload:
+    token = TokenContext(
+        token_name=token_name,
+        symbol=symbol,
+        chain=chain,
+        timeframe=timeframe,
+        price=price,
+        timestamp=datetime.now().strftime("%d %b %Y | %I:%M %p"),
+    )
+
+    breakdown = calculate_miro_v2(
+        relative_volume=relative_volume,
+        atr_multiple=atr_multiple,
+        range_position=range_position,
+        price_above_ema20=price_above_ema20,
+        ema20_above_ema50=ema20_above_ema50,
+        adx_strength=adx_strength,
+        smart_wallets_active=smart_wallets_active,
+        repeat_buyers_detected=repeat_buyers_detected,
+        net_flow_positive=net_flow_positive,
+        holder_growth_24h=holder_growth_24h,
+        low_liquidity_penalty=low_liquidity_penalty,
+        concentration_penalty=concentration_penalty,
+        suspicious_volume_penalty=suspicious_volume_penalty,
+    )
+
+    total = total_miro_score(breakdown)
+    status = score_status(total)
+    smart_money = build_smart_money_snapshot(
+        smart_wallets_active=smart_wallets_active,
+        repeat_buyers_detected=repeat_buyers_detected,
+        net_flow_positive=net_flow_positive,
+        holder_growth_24h=holder_growth_24h,
+    )
+    kronos = build_kronos_snapshot(
+        atr_multiple=atr_multiple,
+        adx_strength=adx_strength,
+        range_position=range_position,
+    )
+    risk = build_risk_summary(
+        low_liquidity_penalty=low_liquidity_penalty,
+        concentration_penalty=concentration_penalty,
+        suspicious_volume_penalty=suspicious_volume_penalty,
+    )
+    council = build_council(
+        smart_money=smart_money,
+        kronos=kronos,
+        risk=risk,
+        breakdown=breakdown,
+    )
+    verdict_title, verdict_bullets, verdict_action = build_verdict(total, smart_money, kronos)
+
+    return ReportPayload(
+        token=token,
+        miro_total=total,
+        status_label=status,
+        breakdown=breakdown,
+        smart_money=smart_money,
+        kronos=kronos,
+        council=council,
+        risk=risk,
+        verdict_title=verdict_title,
+        verdict_bullets=verdict_bullets,
+        verdict_action=verdict_action,
+        client_name=client_name or "Premium Client",
+    )
+
+
+# =========================
+# PDF GENERATION
+# =========================
+def _pdf_styles():
+    styles = getSampleStyleSheet()
+
+    styles.add(
+        ParagraphStyle(
+            name="BrandTitle",
+            fontName="Helvetica-Bold",
+            fontSize=20,
+            leading=22,
+            textColor=colors.HexColor(TEXT_PRIMARY),
+            alignment=TA_LEFT,
+        )
+    )
+    styles.add(
+        ParagraphStyle(
+            name="Tagline",
+            fontName="Helvetica",
+            fontSize=9,
+            leading=11,
+            textColor=colors.HexColor(TEXT_MUTED),
+            alignment=TA_LEFT,
+        )
+    )
+    styles.add(
+        ParagraphStyle(
+            name="ReportTitle",
+            fontName="Helvetica-Bold",
+            fontSize=16,
+            leading=18,
+            textColor=colors.HexColor(TEXT_PRIMARY),
+            alignment=TA_RIGHT,
+        )
+    )
+    styles.add(
+        ParagraphStyle(
+            name="Section",
+            fontName="Helvetica-Bold",
+            fontSize=10,
+            leading=12,
+            textColor=colors.HexColor(ORANGE),
+            alignment=TA_LEFT,
+            spaceAfter=4,
+        )
+    )
+    styles.add(
+        ParagraphStyle(
+            name="BodyDark",
+            fontName="Helvetica",
+            fontSize=10,
+            leading=14,
+            textColor=colors.HexColor("#DCE1E7"),
+            alignment=TA_LEFT,
+        )
+    )
+    styles.add(
+        ParagraphStyle(
+            name="SmallMuted",
+            fontName="Helvetica",
+            fontSize=8,
+            leading=10,
+            textColor=colors.HexColor(TEXT_MUTED),
+            alignment=TA_LEFT,
+        )
+    )
+    styles.add(
+        ParagraphStyle(
+            name="ScoreBig",
+            fontName="Helvetica-Bold",
+            fontSize=24,
+            leading=26,
+            textColor=colors.HexColor(GREEN),
+            alignment=TA_LEFT,
+        )
+    )
+    styles.add(
+        ParagraphStyle(
+            name="Verdict",
+            fontName="Helvetica-Bold",
+            fontSize=14,
+            leading=16,
+            textColor=colors.HexColor(GREEN),
+            alignment=TA_LEFT,
+        )
+    )
+    return styles
+
+
+def build_pdf(report: ReportPayload, logo_path: str = "assets/crypto_guru_logo.png") -> bytes:
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        leftMargin=16 * mm,
+        rightMargin=16 * mm,
+        topMargin=14 * mm,
+        bottomMargin=14 * mm,
+    )
+
+    styles = _pdf_styles()
+    story = []
+
+    # Header block
+    header_left = []
+
+    logo_file = Path(logo_path)
+    if logo_file.exists():
+        header_left.append(RLImage(str(logo_file), width=20 * mm, height=20 * mm))
+
+    brand_text = Paragraph(
+        f'<font color="{TEXT_SOFT}">crypto</font><font color="{GREEN}">.guru</font><br/>'
+        f'<font size="9" color="{TEXT_MUTED}">{TAGLINE}</font>',
+        styles["BrandTitle"],
+    )
+    header_left.append(brand_text)
+
+    left_table = Table([[item] for item in header_left], colWidths=[58 * mm])
+    left_table.setStyle(
+        TableStyle(
+            [
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                ("TOPPADDING", (0, 0), (-1, -1), 0),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+            ]
+        )
+    )
+
+    right_block = Paragraph("CRYPTO INTELLIGENCE REPORT", styles["ReportTitle"])
+
+    header = Table(
+        [[left_table, right_block]],
+        colWidths=[100 * mm, 70 * mm],
+    )
+    header.setStyle(
+        TableStyle(
+            [
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+            ]
+        )
+    )
+    story.append(header)
+
+    meta_line = (
+        f"Token: {report.token.token_name} ({report.token.symbol}) | "
+        f"Chain: {report.token.chain} | "
+        f"Timeframe: {report.token.timeframe} | "
+        f"Generated: {report.token.timestamp} | "
+        f"Prepared for: {report.client_name}"
+    )
+    story.append(Paragraph(meta_line, styles["SmallMuted"]))
+    story.append(Spacer(1, 5 * mm))
+
+    # Score summary
+    story.append(Paragraph("01 · MIRO v2 SCORE", styles["Section"]))
+    story.append(Paragraph(f"{report.miro_total:.1f} / 15 — {report.status_label}", styles["ScoreBig"]))
+    story.append(Spacer(1, 3 * mm))
+
+    score_rows = [
+        ["Volume Expansion", f"{report.breakdown.volume_expansion} / 5"],
+        ["Volatility Expansion", f"{report.breakdown.volatility_expansion} / 3"],
+        ["Range Control", f"{report.breakdown.range_control} / 2"],
+        ["Trend Quality", f"{report.breakdown.trend_quality} / 3"],
+        ["On-Chain Confirmation", f"{report.breakdown.onchain_confirmation} / 4"],
+        ["Risk Penalty", f"-{report.breakdown.risk_penalty}"],
+    ]
+    score_table = Table(score_rows, colWidths=[95 * mm, 35 * mm])
+    score_table.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor(CARD_BG)),
+                ("TEXTCOLOR", (0, 0), (-1, -1), colors.HexColor(TEXT_PRIMARY)),
+                ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
+                ("FONTNAME", (1, 0), (1, -1), "Helvetica-Bold"),
+                ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor(BORDER)),
+                ("INNERGRID", (0, 0), (-1, -1), 0.4, colors.HexColor(BORDER)),
+                ("LEFTPADDING", (0, 0), (-1, -1), 8),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+                ("TOPPADDING", (0, 0), (-1, -1), 6),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+            ]
+        )
+    )
+    story.append(score_table)
+    story.append(Spacer(1, 5 * mm))
+
+    # Smart money
+    story.append(Paragraph("02 · SMART MONEY SNAPSHOT", styles["Section"]))
+    smart_money_text = (
+        f"Active Smart Wallets: {report.smart_money.smart_wallets_active}<br/>"
+        f"Repeat Buyers: {'Detected' if report.smart_money.repeat_buyers_detected else 'No'}<br/>"
+        f"Net Flow: {report.smart_money.net_flow}<br/>"
+        f"Holder Growth (24H): {report.smart_money.holder_growth_24h:.1f}%<br/><br/>"
+        f"{report.smart_money.note}"
+    )
+    story.append(Paragraph(smart_money_text, styles["BodyDark"]))
+    story.append(Spacer(1, 5 * mm))
+
+    # Kronos
+    story.append(Paragraph("03 · MARKET STRUCTURE", styles["Section"]))
+    kronos_text = (
+        f"Regime: {report.kronos.regime}<br/>"
+        f"Directional Bias: {report.kronos.bias}<br/>"
+        f"Confidence: {report.kronos.confidence}%<br/><br/>"
+        f"{report.kronos.note}"
+    )
+    story.append(Paragraph(kronos_text, styles["BodyDark"]))
+    story.append(Spacer(1, 5 * mm))
+
+    # Council
+    story.append(Paragraph("04 · AI COUNCIL", styles["Section"]))
+    for agent in report.council:
+        story.append(
+            Paragraph(
+                f"<b>{agent.emoji} {agent.title}</b><br/>{agent.text}",
+                styles["BodyDark"],
+            )
+        )
+        story.append(Spacer(1, 2.5 * mm))
+
+    story.append(Spacer(1, 2 * mm))
+
+    # Risk
+    story.append(Paragraph("05 · RISK SUMMARY", styles["Section"]))
+    risk_text = (
+        f"Liquidity: {report.risk.liquidity}<br/>"
+        f"Concentration: {report.risk.concentration}<br/>"
+        f"Distribution Signals: {report.risk.distribution_signals}<br/>"
+        f"Warning: {report.risk.warnings}"
+    )
+    story.append(Paragraph(risk_text, styles["BodyDark"]))
+    story.append(Spacer(1, 5 * mm))
+
+    # Verdict
+    story.append(Paragraph("06 · FINAL VERDICT", styles["Section"]))
+    story.append(Paragraph(report.verdict_title, styles["Verdict"]))
+
+    verdict_lines = "<br/>".join([f"• {line}" for line in report.verdict_bullets])
+    story.append(Paragraph(verdict_lines, styles["BodyDark"]))
+    story.append(Spacer(1, 2 * mm))
+    story.append(Paragraph(f"<b>Recommended Action:</b> {report.verdict_action}", styles["BodyDark"]))
+    story.append(Spacer(1, 8 * mm))
+
+    # Footer note
+    story.append(
+        Paragraph(
+            "Generated by crypto.guru · Detect Early. Act Smart. · For informational and research purposes only. Not financial advice.",
+            styles["SmallMuted"],
+        )
+    )
+
+    doc.build(story)
+    pdf = buffer.getvalue()
+    buffer.close()
+    return pdf
+
+
+# =========================
+# UI RENDERING
+# =========================
+def render_metric_row(label: str, value_html: str) -> None:
+    st.markdown(
+        f"""
+        <div class="metric-row">
+            <div class="metric-label">{label}</div>
+            <div class="metric-value">{value_html}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_breakdown_card(b: MiroScoreBreakdown) -> None:
+    st.markdown('<div class="section-card">', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">01 · Miro v2 Breakdown</div>', unsafe_allow_html=True)
+
+    render_metric_row("Volume Expansion", f'{render_bar(b.volume_expansion, 5, "green")} {b.volume_expansion} / 5')
+    render_metric_row("Volatility Expansion", f'{render_bar(b.volatility_expansion, 3, "green")} {b.volatility_expansion} / 3')
+    render_metric_row("Range Control", f'{render_bar(b.range_control, 2, "amber")} {b.range_control} / 2')
+    render_metric_row("Trend Quality", f'{render_bar(b.trend_quality, 3, "amber")} {b.trend_quality} / 3')
+    render_metric_row("On-Chain Confirmation", f'{render_bar(b.onchain_confirmation, 4, "green")} {b.onchain_confirmation} / 4')
+    render_metric_row("Risk Penalty", f'{render_bar(b.risk_penalty, 5, "red")} -{b.risk_penalty}')
+    st.markdown("</div>", unsafe_allow_html=True)
+
+
+def render_smart_money_card(s: SmartMoneySnapshot) -> None:
+    st.markdown('<div class="section-card">', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">02 · Smart Money Snapshot</div>', unsafe_allow_html=True)
+    render_metric_row("Active Smart Wallets", str(s.smart_wallets_active))
+    render_metric_row("Repeat Buyers", "Detected" if s.repeat_buyers_detected else "No")
+    render_metric_row("Net Flow", s.net_flow)
+    render_metric_row("Holder Growth (24H)", f"{s.holder_growth_24h:.1f}%")
+    st.markdown(f'<div class="metric-label" style="margin-top:12px; line-height:1.7;">{s.note}</div>', unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
+
+
+def render_kronos_card(k: KronosSnapshot) -> None:
+    st.markdown('<div class="section-card">', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">03 · Market Structure</div>', unsafe_allow_html=True)
+    render_metric_row("Regime", k.regime)
+    render_metric_row("Bias", k.bias)
+    render_metric_row("Confidence", f"{k.confidence}%")
+    st.markdown(f'<div class="metric-label" style="margin-top:12px; line-height:1.7;">{k.note}</div>', unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
+
+
+def render_council_card(council: List[CouncilAgent]) -> None:
+    st.markdown('<div class="section-card">', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">04 · AI Council</div>', unsafe_allow_html=True)
+
+    for agent in council:
+        st.markdown(
+            f"""
+            <div class="agent-card">
+                <div class="agent-title">{agent.emoji} {agent.title}</div>
+                <div class="agent-body">{agent.text}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    st.markdown("</div>", unsafe_allow_html=True)
+
+
+def render_risk_card(risk: RiskSummary) -> None:
+    st.markdown('<div class="section-card">', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">05 · Risk Summary</div>', unsafe_allow_html=True)
+    render_metric_row("Liquidity", risk.liquidity)
+    render_metric_row("Concentration", risk.concentration)
+    render_metric_row("Distribution Signals", risk.distribution_signals)
+    render_metric_row("Warning", risk.warnings)
+    st.markdown("</div>", unsafe_allow_html=True)
+
+
+def render_verdict_card(title: str, bullets: List[str], action: str) -> None:
+    bullet_html = "".join([f'<div class="verdict-bullet">• {b}</div>' for b in bullets])
+    st.markdown(
+        f"""
+        <div class="verdict-box">
+            <div class="verdict-title">{title}</div>
+            {bullet_html}
+            <div class="verdict-bullet" style="margin-top:10px;"><b>Recommended Action:</b> {action}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+# =========================
+# APP
+# =========================
+def main() -> None:
+    inject_css()
+    logo_b64 = load_logo_base64()
+
+    st.markdown(create_brand_header_html(logo_b64), unsafe_allow_html=True)
+
+    # Sidebar controls for now. Replace later with your live pipeline.
+    with st.sidebar:
+        st.header("Input Controls")
+        token_name = st.text_input("Token Name", value="AAVE")
+        symbol = st.text_input("Symbol", value="AAVE")
+        chain = st.selectbox("Chain", ["Ethereum", "Base", "Solana", "Arbitrum", "BNB Chain"], index=0)
+        timeframe = st.selectbox("Timeframe", ["1H", "4H", "1D"], index=1)
+        price = st.number_input("Price", min_value=0.0, value=171.25, step=0.01)
+
+        st.subheader("Miro v2 Inputs")
+        relative_volume = st.number_input("Relative Volume", min_value=0.0, value=6.2, step=0.1)
+        atr_multiple = st.number_input("ATR Multiple", min_value=0.0, value=2.4, step=0.1)
+        range_position = st.slider("Range Position", min_value=0.0, max_value=1.0, value=0.82, step=0.01)
+        adx_strength = st.number_input("ADX Strength", min_value=0.0, value=18.0, step=0.5)
+
+        st.subheader("On-Chain Inputs")
+        smart_wallets_active = st.number_input("Smart Wallets Active", min_value=0, value=3, step=1)
+        repeat_buyers_detected = st.checkbox("Repeat Buyers Detected", value=True)
+        net_flow_positive = st.checkbox("Net Flow Positive", value=True)
+        holder_growth_24h = st.number_input("Holder Growth 24H (%)", min_value=-100.0, value=6.2, step=0.1)
+
+        st.subheader("Trend Flags")
+        price_above_ema20 = st.checkbox("Price Above EMA20", value=True)
+        ema20_above_ema50 = st.checkbox("EMA20 Above EMA50", value=True)
+
+        st.subheader("Penalty Flags")
+        low_liquidity_penalty = st.checkbox("Low Liquidity Penalty", value=False)
+        concentration_penalty = st.checkbox("Concentration Penalty", value=False)
+        suspicious_volume_penalty = st.checkbox("Suspicious Volume Penalty", value=False)
+
+        st.subheader("Premium PDF")
+        client_name = st.text_input("Client Name", value="Premium Client")
+
+    payload = generate_report_payload(
+        token_name=token_name,
+        symbol=symbol,
+        chain=chain,
+        timeframe=timeframe,
+        price=price,
+        relative_volume=relative_volume,
+        atr_multiple=atr_multiple,
+        range_position=range_position,
+        adx_strength=adx_strength,
+        smart_wallets_active=smart_wallets_active,
+        repeat_buyers_detected=repeat_buyers_detected,
+        net_flow_positive=net_flow_positive,
+        holder_growth_24h=holder_growth_24h,
+        price_above_ema20=price_above_ema20,
+        ema20_above_ema50=ema20_above_ema50,
+        low_liquidity_penalty=low_liquidity_penalty,
+        concentration_penalty=concentration_penalty,
+        suspicious_volume_penalty=suspicious_volume_penalty,
+        client_name=client_name,
+    )
+
+    # Top token card
+    st.markdown('<div class="token-meta-card">', unsafe_allow_html=True)
+    st.markdown(
+        f"""
+        <div class="token-line">
+            <div>
+                <div class="token-name">{payload.token.token_name} <span style="color:{TEXT_MUTED}; font-size:18px;">· {payload.token.chain}</span></div>
+                <div class="token-sub">{payload.token.timestamp} · Timeframe: {payload.token.timeframe} · Price: ${payload.token.price:,.4f}</div>
+            </div>
+            <div style="text-align:right;">
+                <div class="miro-score" style="color:{score_color(payload.miro_total)};">{payload.miro_total:.1f} / 15</div>
+                <div class="status-pill">{payload.status_label}</div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    left, right = st.columns([1.1, 0.9], gap="large")
+
+    with left:
+        render_breakdown_card(payload.breakdown)
+        render_smart_money_card(payload.smart_money)
+        render_kronos_card(payload.kronos)
+
+    with right:
+        render_council_card(payload.council)
+        render_risk_card(payload.risk)
+        render_verdict_card(payload.verdict_title, payload.verdict_bullets, payload.verdict_action)
+
+        pdf_bytes = build_pdf(payload)
+        file_name = f"{payload.token.symbol}_intelligence_report_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf"
+
+        st.download_button(
+            label="Download Intelligence Report (PDF)",
+            data=pdf_bytes,
+            file_name=file_name,
+            mime="application/pdf",
+            use_container_width=True,
+        )
+
+    st.markdown(
+        f"""
+        <div class="footer-note">
+            crypto.guru · {TAGLINE}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+if __name__ == "__main__":
+    main()
