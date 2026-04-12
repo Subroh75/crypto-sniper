@@ -137,6 +137,10 @@ def inject_css() -> None:
             max-width: 1200px;
         }}
 
+        section[data-testid="stSidebar"] {{
+            background-color: #0F141D;
+        }}
+
         div[data-testid="stMetric"] {{
             background: {COLOR_CARD};
             border: 1px solid {COLOR_BORDER};
@@ -234,6 +238,40 @@ def inject_css() -> None:
             font-size: 0.85rem;
             margin-top: 22px;
         }}
+
+        .compact-row {{
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
+            padding: 6px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+            font-size: 0.95rem;
+        }}
+
+        .compact-row:last-child {{
+            border-bottom: none;
+        }}
+
+        .compact-label {{
+            flex: 1;
+            color: {COLOR_TEXT};
+        }}
+
+        .compact-bar {{
+            width: 70px;
+            text-align: center;
+            color: {COLOR_GREEN};
+            font-family: monospace;
+            letter-spacing: 0;
+        }}
+
+        .compact-value {{
+            width: 52px;
+            text-align: right;
+            color: {COLOR_SUBTEXT};
+            font-size: 0.92rem;
+        }}
         </style>
         """,
         unsafe_allow_html=True,
@@ -268,9 +306,8 @@ def clamp_score(value: int, low: int, high: int) -> int:
 
 
 def make_bar(value: int, max_value: int) -> str:
-    filled = "█" * value
-    empty = "░" * (max_value - value)
-    return filled + empty
+    value = max(0, min(value, max_value))
+    return ("█" * value) + ("░" * (max_value - value))
 
 
 # =========================
@@ -291,7 +328,6 @@ def calculate_miro_v2(
     concentration_penalty: bool,
     suspicious_volume_penalty: bool,
 ) -> MiroBreakdown:
-    # Volume expansion
     if relative_volume >= 8:
         volume_expansion = 5
     elif relative_volume >= 4:
@@ -301,7 +337,6 @@ def calculate_miro_v2(
     else:
         volume_expansion = 0
 
-    # Volatility expansion
     if atr_multiple >= 4:
         volatility_expansion = 3
     elif atr_multiple >= 2.5:
@@ -311,7 +346,6 @@ def calculate_miro_v2(
     else:
         volatility_expansion = 0
 
-    # Range control
     if range_position >= 0.85:
         range_control = 2
     elif range_position >= 0.70:
@@ -319,7 +353,6 @@ def calculate_miro_v2(
     else:
         range_control = 0
 
-    # Trend quality
     trend_quality = 0
     if price_above_ema20:
         trend_quality += 1
@@ -328,7 +361,6 @@ def calculate_miro_v2(
     if adx_strength >= 20:
         trend_quality += 1
 
-    # On-chain confirmation
     onchain_confirmation = 0
     if smart_wallets_active >= 2:
         onchain_confirmation += 2
@@ -340,7 +372,6 @@ def calculate_miro_v2(
         onchain_confirmation += 1
     onchain_confirmation = clamp_score(onchain_confirmation, 0, 4)
 
-    # Penalty
     risk_penalty = 0
     if low_liquidity_penalty:
         risk_penalty += 3
@@ -679,7 +710,6 @@ def build_pdf(report: ReportData) -> bytes:
 
     story = []
 
-    # Header
     logo_exists = Path(LOGO_PATH).exists()
 
     if logo_exists:
@@ -731,7 +761,6 @@ def build_pdf(report: ReportData) -> bytes:
     )
     story.append(Spacer(1, 5 * mm))
 
-    # Score
     story.append(Paragraph("01 · MIRO v2 SCORE", section_style))
     story.append(
         Paragraph(
@@ -743,12 +772,12 @@ def build_pdf(report: ReportData) -> bytes:
 
     score_table = Table(
         [
-            ["Volume Expansion", f"{report.breakdown.volume_expansion} / 5"],
-            ["Volatility Expansion", f"{report.breakdown.volatility_expansion} / 3"],
-            ["Range Control", f"{report.breakdown.range_control} / 2"],
-            ["Trend Quality", f"{report.breakdown.trend_quality} / 3"],
-            ["On-Chain Confirmation", f"{report.breakdown.onchain_confirmation} / 4"],
-            ["Risk Penalty", f"-{report.breakdown.risk_penalty}"],
+            ["Volume", f"{report.breakdown.volume_expansion} / 5"],
+            ["Volatility", f"{report.breakdown.volatility_expansion} / 3"],
+            ["Range", f"{report.breakdown.range_control} / 2"],
+            ["Trend", f"{report.breakdown.trend_quality} / 3"],
+            ["On-Chain", f"{report.breakdown.onchain_confirmation} / 4"],
+            ["Risk", f"-{report.breakdown.risk_penalty}"],
         ],
         colWidths=[95 * mm, 30 * mm],
     )
@@ -769,7 +798,6 @@ def build_pdf(report: ReportData) -> bytes:
     story.append(score_table)
     story.append(Spacer(1, 5 * mm))
 
-    # Smart Money
     story.append(Paragraph("02 · SMART MONEY SNAPSHOT", section_style))
     story.append(
         Paragraph(
@@ -785,7 +813,6 @@ def build_pdf(report: ReportData) -> bytes:
     )
     story.append(Spacer(1, 4 * mm))
 
-    # Kronos
     story.append(Paragraph("03 · MARKET STRUCTURE", section_style))
     story.append(
         Paragraph(
@@ -800,7 +827,6 @@ def build_pdf(report: ReportData) -> bytes:
     )
     story.append(Spacer(1, 4 * mm))
 
-    # Council
     story.append(Paragraph("04 · AI COUNCIL", section_style))
     for agent in report.council:
         story.append(Paragraph(f"<b>{agent.emoji} {agent.name}</b><br/>{agent.text}", body_style))
@@ -808,7 +834,6 @@ def build_pdf(report: ReportData) -> bytes:
 
     story.append(Spacer(1, 3 * mm))
 
-    # Risk
     story.append(Paragraph("05 · RISK SUMMARY", section_style))
     story.append(
         Paragraph(
@@ -823,7 +848,6 @@ def build_pdf(report: ReportData) -> bytes:
     )
     story.append(Spacer(1, 4 * mm))
 
-    # Verdict
     story.append(Paragraph("06 · FINAL VERDICT", section_style))
     story.append(Paragraph(report.verdict_title, verdict_style))
     bullet_html = "<br/>".join([f"• {point}" for point in report.verdict_points])
@@ -832,7 +856,6 @@ def build_pdf(report: ReportData) -> bytes:
     story.append(Paragraph(f"<b>Recommended Action:</b> {report.action_note}", body_style))
     story.append(Spacer(1, 8 * mm))
 
-    # Footer
     story.append(
         Paragraph(
             "Generated by crypto.guru · Detect Early. Act Smart. · For informational and research purposes only. Not financial advice.",
@@ -887,23 +910,31 @@ def render_token_header(report: ReportData) -> None:
 def render_breakdown(report: ReportData) -> None:
     b = report.breakdown
     rows = [
-        ("Volume Expansion", make_bar(b.volume_expansion, 5), f"{b.volume_expansion} / 5"),
-        ("Volatility Expansion", make_bar(b.volatility_expansion, 3), f"{b.volatility_expansion} / 3"),
-        ("Range Control", make_bar(b.range_control, 2), f"{b.range_control} / 2"),
-        ("Trend Quality", make_bar(b.trend_quality, 3), f"{b.trend_quality} / 3"),
-        ("On-Chain Confirmation", make_bar(b.onchain_confirmation, 4), f"{b.onchain_confirmation} / 4"),
-        ("Risk Penalty", make_bar(b.risk_penalty, 5), f"-{b.risk_penalty}"),
+        ("Volume", make_bar(b.volume_expansion, 5), f"{b.volume_expansion}/5"),
+        ("Volatility", make_bar(b.volatility_expansion, 3), f"{b.volatility_expansion}/3"),
+        ("Range", make_bar(b.range_control, 2), f"{b.range_control}/2"),
+        ("Trend", make_bar(b.trend_quality, 3), f"{b.trend_quality}/3"),
+        ("On-Chain", make_bar(b.onchain_confirmation, 4), f"{b.onchain_confirmation}/4"),
+        ("Risk", make_bar(b.risk_penalty, 5), f"-{b.risk_penalty}"),
     ]
 
     st.markdown(
         '<div class="section-box"><div class="section-label">01 · Miro v2 Breakdown</div>',
         unsafe_allow_html=True,
     )
+
     for name, bar, value in rows:
-        c1, c2, c3 = st.columns([2.2, 1.2, 1.0])
-        c1.write(name)
-        c2.code(bar, language=None)
-        c3.write(value)
+        st.markdown(
+            f"""
+            <div class="compact-row">
+                <div class="compact-label">{name}</div>
+                <div class="compact-bar">{bar}</div>
+                <div class="compact-value">{value}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
     st.markdown("</div>", unsafe_allow_html=True)
 
 
