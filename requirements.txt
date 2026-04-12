@@ -3,3 +3,5 @@ pandas
 numpy
 requests
 google-generativeai
+streamlit>=1.33.0
+reportlab>=4.1.0
