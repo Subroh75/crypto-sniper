@@ -1,9 +1,15 @@
+import io
 import re
 import time
 from dataclasses import dataclass
 from typing import Dict, List
 
 import streamlit as st
+from reportlab.lib.colors import HexColor
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.units import mm
+from reportlab.pdfbase.pdfmetrics import stringWidth
+from reportlab.pdfgen import canvas
 
 
 # =========================================================
@@ -18,7 +24,7 @@ st.set_page_config(
 
 # =========================================================
 # BRANDING
-# Replace these with your exact previous logo/tagline if needed
+# Replace with your exact prior brand assets/text
 # =========================================================
 APP_LOGO = "🔮"
 APP_HEADING = "Crypto Guru"
@@ -46,6 +52,9 @@ class FinalResponse:
     risk: str
     action: str
     reasons: List[str]
+    miro_score: float
+    kronos_score: float
+    debate_score: float
 
 
 # =========================================================
@@ -181,17 +190,21 @@ def inject_styles() -> None:
                 color: #95a3bc;
             }
 
-            .stButton button {
+            .stButton > button,
+            .stDownloadButton > button {
                 width: 100%;
-                border-radius: 14px;
+                min-height: 2.45rem;
+                border-radius: 12px;
                 font-weight: 700;
+                font-size: 0.92rem;
                 border: 1px solid rgba(255,255,255,0.08);
                 background: linear-gradient(180deg, #7c9cff 0%, #6486ff 100%);
                 color: white;
-                padding: 0.72rem 1rem;
+                padding: 0.35rem 0.7rem;
             }
 
-            .stButton button:hover {
+            .stButton > button:hover,
+            .stDownloadButton > button:hover {
                 color: white;
                 border: 1px solid rgba(255,255,255,0.10);
             }
@@ -232,6 +245,7 @@ def init_state() -> None:
         "last_coin": "",
         "last_response": None,
         "last_signals": None,
+        "last_pdf": None,
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -242,8 +256,7 @@ def init_state() -> None:
 # HELPERS
 # =========================================================
 def normalize_coin(raw: str) -> str:
-    cleaned = re.sub(r"[^A-Za-z0-9]", "", raw.strip().upper())
-    return cleaned
+    return re.sub(r"[^A-Za-z0-9]", "", raw.strip().upper())
 
 
 def pseudo_score(seed_text: str, modifier: int) -> float:
@@ -273,47 +286,76 @@ def score_to_confidence(score: float) -> str:
 
 
 # =========================================================
-# ENGINES
-# Swap these with your real engine logic
+# ENGINE ORDER
+# 1. MIRO
+# 2. KRONOS
+# 3. AI DEBATE
 # =========================================================
-def run_ai_lab(coin: str) -> EngineSignal:
-    score = pseudo_score(coin + "ai_lab", 11)
-    return EngineSignal(
-        label="AI Lab",
-        bias=score_to_bias(score),
-        confidence=score_to_confidence(score),
-        score=score,
-        summary=f"AI Lab reads {coin} as {score_to_bias(score)} from a structure and reasoning perspective.",
-    )
-
-
-def run_miro(coin: str) -> EngineSignal:
-    score = pseudo_score(coin + "miro", 19)
+def run_miro_logic(coin: str) -> EngineSignal:
+    score = pseudo_score(coin + "miro_logic", 19)
     return EngineSignal(
         label="Miro",
         bias=score_to_bias(score),
         confidence=score_to_confidence(score),
         score=score,
-        summary=f"Miro sees the momentum profile on {coin} as {score_to_bias(score)}.",
+        summary=(
+            f"Miro logic reads {coin} through momentum and structure as "
+            f"{score_to_bias(score)}."
+        ),
     )
 
 
-def run_kronos(coin: str) -> EngineSignal:
-    score = pseudo_score(coin + "kronos", 7)
+def run_kronos_logic(coin: str) -> EngineSignal:
+    score = pseudo_score(coin + "kronos_logic", 7)
     return EngineSignal(
         label="Kronos",
         bias=score_to_bias(score),
         confidence=score_to_confidence(score),
         score=score,
-        summary=f"Kronos rates the timing quality on {coin} as {score_to_bias(score)}.",
+        summary=(
+            f"Kronos logic reads the timing quality on {coin} as "
+            f"{score_to_bias(score)}."
+        ),
+    )
+
+
+def run_ai_debate(coin: str, miro: EngineSignal, kronos: EngineSignal) -> EngineSignal:
+    blended_seed = (
+        f"{coin}|{miro.score:.1f}|{miro.bias}|{kronos.score:.1f}|{kronos.bias}|ai_debate"
+    )
+    score = pseudo_score(blended_seed, 13)
+
+    if miro.score >= 7.2 and kronos.score >= 7.2:
+        score = min(9.4, round(score + 0.4, 1))
+    elif miro.score < 6.0 and kronos.score < 6.0:
+        score = max(4.8, round(score - 0.4, 1))
+
+    debate_bias = score_to_bias(score)
+    debate_confidence = score_to_confidence(score)
+
+    summary = (
+        f"AI Debate weighs Miro ({miro.bias}) against Kronos ({kronos.bias}) "
+        f"and concludes {coin} is {debate_bias}."
+    )
+
+    return EngineSignal(
+        label="AI Debate",
+        bias=debate_bias,
+        confidence=debate_confidence,
+        score=score,
+        summary=summary,
     )
 
 
 def run_engines(coin: str) -> Dict[str, EngineSignal]:
+    miro = run_miro_logic(coin)
+    kronos = run_kronos_logic(coin)
+    ai_debate = run_ai_debate(coin, miro, kronos)
+
     return {
-        "ai_lab": run_ai_lab(coin),
-        "miro": run_miro(coin),
-        "kronos": run_kronos(coin),
+        "miro": miro,
+        "kronos": kronos,
+        "ai_debate": ai_debate,
     }
 
 
@@ -327,29 +369,29 @@ def compose_response(coin: str, signals: Dict[str, EngineSignal]) -> FinalRespon
 
     if bias == "strong bullish":
         action = "Strong watch"
-        risk = "Overextension risk if momentum gets crowded."
+        risk = "Overextension risk if the move gets crowded."
     elif bias == "bullish":
         action = "Watch closely"
-        risk = "Pullback risk if confirmation weakens."
+        risk = "Pullback risk if timing weakens."
     elif bias == "constructive":
         action = "Early watch"
-        risk = "Still not a clean high-conviction confirmation."
+        risk = "Still not a full confirmation."
     elif bias == "neutral":
         action = "Stay selective"
-        risk = "Direction is not strong enough yet."
+        risk = "Direction is not yet strong enough."
     else:
         action = "Avoid forcing"
-        risk = "Weak structure and false signal risk remain high."
+        risk = "Weak setup and false signal risk remain elevated."
 
     answer = (
-        f"{coin} currently reads as {bias} with {confidence} confidence across "
-        f"AI Lab, Miro, and Kronos."
+        f"{coin} currently reads as {bias} with {confidence} confidence after "
+        f"Miro logic, Kronos logic, and the final AI debate."
     )
 
     reasons = [
-        f"AI Lab: {signals['ai_lab'].summary}",
         f"Miro: {signals['miro'].summary}",
         f"Kronos: {signals['kronos'].summary}",
+        f"AI Debate: {signals['ai_debate'].summary}",
     ]
 
     return FinalResponse(
@@ -360,7 +402,188 @@ def compose_response(coin: str, signals: Dict[str, EngineSignal]) -> FinalRespon
         risk=risk,
         action=action,
         reasons=reasons,
+        miro_score=signals["miro"].score,
+        kronos_score=signals["kronos"].score,
+        debate_score=signals["ai_debate"].score,
     )
+
+
+# =========================================================
+# PDF GENERATION
+# =========================================================
+def wrap_text(text: str, font_name: str, font_size: int, max_width: float) -> List[str]:
+    words = text.split()
+    lines: List[str] = []
+    current = ""
+
+    for word in words:
+        test = word if not current else f"{current} {word}"
+        if stringWidth(test, font_name, font_size) <= max_width:
+            current = test
+        else:
+            if current:
+                lines.append(current)
+            current = word
+
+    if current:
+        lines.append(current)
+
+    return lines
+
+
+def draw_wrapped_text(
+    pdf: canvas.Canvas,
+    text: str,
+    x: float,
+    y: float,
+    max_width: float,
+    font_name: str = "Helvetica",
+    font_size: int = 11,
+    line_gap: int = 15,
+    color: HexColor = HexColor("#EAF0FF"),
+) -> float:
+    pdf.setFillColor(color)
+    pdf.setFont(font_name, font_size)
+
+    for line in wrap_text(text, font_name, font_size, max_width):
+        pdf.drawString(x, y, line)
+        y -= line_gap
+
+    return y
+
+
+def generate_pdf(response: FinalResponse) -> bytes:
+    buffer = io.BytesIO()
+    pdf = canvas.Canvas(buffer, pagesize=A4)
+    width, height = A4
+
+    margin_x = 18 * mm
+    y = height - 22 * mm
+    content_width = width - (2 * margin_x)
+
+    # Background
+    pdf.setFillColor(HexColor("#08101F"))
+    pdf.rect(0, 0, width, height, fill=1, stroke=0)
+
+    # Header
+    pdf.setFillColor(HexColor("#FFFFFF"))
+    pdf.setFont("Helvetica-Bold", 22)
+    pdf.drawString(margin_x, y, f"{APP_HEADING}")
+    y -= 8 * mm
+
+    pdf.setFillColor(HexColor("#A6B3C8"))
+    pdf.setFont("Helvetica", 11)
+    pdf.drawString(margin_x, y, APP_TAGLINE)
+    y -= 12 * mm
+
+    # Coin title
+    pdf.setFillColor(HexColor("#FFFFFF"))
+    pdf.setFont("Helvetica-Bold", 16)
+    pdf.drawString(margin_x, y, f"{response.coin} Signal Output")
+    y -= 8 * mm
+
+    # Answer
+    y = draw_wrapped_text(
+        pdf,
+        response.answer,
+        margin_x,
+        y,
+        content_width,
+        font_name="Helvetica",
+        font_size=11,
+        line_gap=15,
+        color=HexColor("#EAF0FF"),
+    )
+    y -= 5 * mm
+
+    # Summary box
+    pdf.setFillColor(HexColor("#101A2C"))
+    pdf.roundRect(margin_x, y - 32 * mm, content_width, 30 * mm, 8, fill=1, stroke=0)
+
+    stat_y = y - 7 * mm
+    stats = [
+        ("Bias", response.bias.title()),
+        ("Confidence", response.confidence.title()),
+        ("Risk", response.risk),
+        ("Action", response.action),
+    ]
+
+    col_width = content_width / 2
+    row_gap = 15 * mm
+
+    for i, (label, value) in enumerate(stats):
+        col = i % 2
+        row = i // 2
+        x = margin_x + (col * col_width) + 5 * mm
+        sy = stat_y - (row * row_gap)
+
+        pdf.setFillColor(HexColor("#A6B3C8"))
+        pdf.setFont("Helvetica", 9)
+        pdf.drawString(x, sy, label)
+
+        pdf.setFillColor(HexColor("#FFFFFF"))
+        pdf.setFont("Helvetica-Bold", 10)
+        value_lines = wrap_text(value, "Helvetica-Bold", 10, col_width - 12 * mm)
+        for idx, line in enumerate(value_lines[:2]):
+            pdf.drawString(x, sy - 5 - (idx * 11), line)
+
+    y -= 40 * mm
+
+    # Engine scores
+    pdf.setFillColor(HexColor("#FFFFFF"))
+    pdf.setFont("Helvetica-Bold", 13)
+    pdf.drawString(margin_x, y, "Engine Scores")
+    y -= 8 * mm
+
+    score_lines = [
+        f"Miro: {response.miro_score:.1f} / 10",
+        f"Kronos: {response.kronos_score:.1f} / 10",
+        f"AI Debate: {response.debate_score:.1f} / 10",
+    ]
+    for line in score_lines:
+        y = draw_wrapped_text(
+            pdf,
+            line,
+            margin_x,
+            y,
+            content_width,
+            font_name="Helvetica",
+            font_size=11,
+            line_gap=15,
+            color=HexColor("#EAF0FF"),
+        )
+
+    y -= 4 * mm
+
+    # Why
+    pdf.setFillColor(HexColor("#FFFFFF"))
+    pdf.setFont("Helvetica-Bold", 13)
+    pdf.drawString(margin_x, y, "Why")
+    y -= 8 * mm
+
+    for reason in response.reasons:
+        y = draw_wrapped_text(
+            pdf,
+            f"• {reason}",
+            margin_x,
+            y,
+            content_width,
+            font_name="Helvetica",
+            font_size=11,
+            line_gap=15,
+            color=HexColor("#EAF0FF"),
+        )
+        y -= 1 * mm
+
+        if y < 25 * mm:
+            pdf.showPage()
+            pdf.setFillColor(HexColor("#08101F"))
+            pdf.rect(0, 0, width, height, fill=1, stroke=0)
+            y = height - 22 * mm
+
+    pdf.save()
+    buffer.seek(0)
+    return buffer.getvalue()
 
 
 # =========================================================
@@ -390,10 +613,10 @@ def render_search() -> None:
         key="coin_input_widget",
     )
 
-    col1, col2 = st.columns([5, 1])
-    with col1:
-        analyze_clicked = st.button("Run Signal", use_container_width=True)
+    col1, col2, col3 = st.columns([3.2, 1.2, 1.2])
     with col2:
+        analyze_clicked = st.button("Run Signal", use_container_width=True)
+    with col3:
         clear_clicked = st.button("Clear", use_container_width=True)
 
     st.markdown("</div>", unsafe_allow_html=True)
@@ -403,6 +626,7 @@ def render_search() -> None:
         st.session_state.last_coin = ""
         st.session_state.last_response = None
         st.session_state.last_signals = None
+        st.session_state.last_pdf = None
         st.rerun()
 
     if analyze_clicked:
@@ -415,12 +639,14 @@ def render_search() -> None:
         st.session_state.last_coin = clean_coin
 
         with st.spinner("Running engines..."):
-            time.sleep(0.35)
+            time.sleep(0.3)
             signals = run_engines(clean_coin)
             response = compose_response(clean_coin, signals)
+            pdf_bytes = generate_pdf(response)
 
         st.session_state.last_signals = signals
         st.session_state.last_response = response
+        st.session_state.last_pdf = pdf_bytes
         st.rerun()
 
 
@@ -458,9 +684,21 @@ def render_output(response: FinalResponse, signals: Dict[str, EngineSignal]) -> 
             st.markdown(f'<div class="why-line">• {reason}</div>', unsafe_allow_html=True)
 
     with st.expander("Engine Scores"):
-        for key in ["ai_lab", "miro", "kronos"]:
-            signal = signals[key]
-            st.write(f"{signal.label}: {signal.score:.1f} / 10 · {signal.confidence.title()}")
+        st.write(f"Miro: {signals['miro'].score:.1f} / 10 · {signals['miro'].confidence.title()}")
+        st.write(f"Kronos: {signals['kronos'].score:.1f} / 10 · {signals['kronos'].confidence.title()}")
+        st.write(
+            f"AI Debate: {signals['ai_debate'].score:.1f} / 10 · "
+            f"{signals['ai_debate'].confidence.title()}"
+        )
+
+    if st.session_state.last_pdf:
+        st.download_button(
+            label="Download PDF",
+            data=st.session_state.last_pdf,
+            file_name=f"{response.coin.lower()}_signal_output.pdf",
+            mime="application/pdf",
+            use_container_width=False,
+        )
 
 
 # =========================================================
