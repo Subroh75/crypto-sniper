@@ -1,68 +1,321 @@
-"""
-Crypto Sniper App
-=================
-Combines a multi-factor scoring engine (V, P, R, T) with the Kronos
-time-series foundation model for forward OHLCV prediction.
 
+
+
+All tasks
+Crypto Sniper App Logic in Python
+
+app
+,
++1
+1 min ago
+Crypto Sniper App Logic in Python
+I am building a crypto sniper app with the below logic V =
+0 if RV < 2
+2 if 2 <= RV < 4
+3 if 4 <= RV < 8
+5 if RV >= 8
+
+P =
+0 if close_now <= close_prev
+0 if ATR_move < 1.5
+1 if 1.5 <= ATR_move < 2.5
+2 if 2.5 <= ATR_move < 4
+3 if ATR_move >= 4
+
+R =
+0 if range_pos < 0.70
+1 if 0.70 <= range_pos < 0.85
+2 if range_pos >= 0.85
+
+T =
+1 if close_now > EMA20
++1 if EMA20 > EMA50
++1 if ADX14 >= 20
+and also looking to implement this https://github.com/shiyu-coder/Kronos to this app. design this app in python and give me entire code as app.py
+
+Let me fetch the Kronos repository directly to understand its structure and API.
+
+
+Fetch Kronos repo
+Claude Sonnet 4.6
+Here is the complete extraction of the Kronos repository:
+
+1. Repository File Structure (Complete)
+text
+Kronos/
+├── .gitignore
+├── LICENSE
+├── README.md
+├── requirements.txt
+├── model/                         ⭐ Core library
+│   ├── __init__.py                Exports: KronosTokenizer, Kronos, KronosPredictor
+│   ├── kronos.py                  Main classes + inference logic (662 lines)
+│   └── module.py                  Building blocks (570 lines)
+├── examples/
+│   ├── prediction_example.py
+│   ├── prediction_batch_example.py
+│   ├── prediction_wo_vol_example.py
+│   ├── prediction_akshare_2024-2025.py
+│   ├── prediction_cn_markets_day.py
+│   ├── prediction_new.py / prediction_new_GUI.py
+│   ├── run_backtest_kronos.py
+│   └── yuce/ (JSON/PNG outputs + historical_backtest.py)
+├── finetune/                      Qlib-based finetuning pipeline
+│   ├── config.py
+│   ├── dataset.py
+│   ├── qlib_data_preprocess.py
+│   ├── qlib_test.py (backtest)
+│   ├── train_predictor.py
+│   ├── train_tokenizer.py
+│   └── utils/
+├── finetune_csv/                  CSV-based finetuning alternative
+│   ├── config_loader.py, configs/*.yaml
+│   ├── finetune_base_model.py
+│   ├── finetune_tokenizer.py
+│   └── train_sequential.py
+├── tests/
+│   ├── test_kronos_regression.py
+│   └── data/ (regression_input.csv, outputs)
+└── webui/
+    ├── app.py, run.py, start.sh
+    └── templates/index.html
+2. Three Key Classes in model/kronos.py
+KronosTokenizer (nn.Module + PyTorchModelHubMixin)
+Encoder-Decoder Transformer with Binary Spherical Quantization (BSQ) that converts OHLCV data into hierarchical discrete tokens.
+
+.from_pretrained("NeoQuasar/Kronos-Tokenizer-base") — loads from HuggingFace
+
+.encode(x, half=True) → returns (s1_indices, s2_indices) tuple
+
+.decode(indices, half=True) → reconstructs OHLCV values
+
+Kronos (the autoregressive LLM-style model)
+Stacked Transformer with HierarchicalEmbedding + TemporalEmbedding + DualHead.
+
+.from_pretrained("NeoQuasar/Kronos-small") / Kronos-mini / Kronos-base
+
+.decode_s1(s1_ids, s2_ids, stamp) → (s1_logits, context) — predicts coarse tokens
+
+.decode_s2(context, s1_ids) → s2_logits — predicts fine tokens conditioned on s1
+
+KronosPredictor (high-level API)
+python
+predictor = KronosPredictor(model, tokenizer, max_context=512)
+3. How to Use Programmatically
+python
+import pandas as pd
+from model import Kronos, KronosTokenizer, KronosPredictor
+
+# Load from HuggingFace
+tokenizer = KronosTokenizer.from_pretrained("NeoQuasar/Kronos-Tokenizer-base")
+model = Kronos.from_pretrained("NeoQuasar/Kronos-small")
+
+# KronosPredictor auto-detects CUDA → MPS → CPU
+predictor = KronosPredictor(model, tokenizer, max_context=512)
+
+# Prepare your OHLCV DataFrame (volume/amount optional)
+df = pd.read_csv("data.csv")
+df['timestamps'] = pd.to_datetime(df['timestamps'])
+
+lookback, pred_len = 400, 120  # lookback must be ≤ 512
+
+pred_df = predictor.predict(
+    df=df.loc[:lookback-1, ['open','high','low','close','volume','amount']],
+    x_timestamp=df.loc[:lookback-1, 'timestamps'],
+    y_timestamp=df.loc[lookback:lookback+pred_len-1, 'timestamps'],
+    pred_len=pred_len,
+    T=1.0,       # temperature
+    top_p=0.9,   # nucleus sampling
+    sample_count=1
+)
+# pred_df has columns: open, high, low, close, volume, amount, indexed by y_timestamp
+For batch prediction (all series must have equal lookback & pred_len):
+
+python
+pred_dfs = predictor.predict_batch(df_list, x_ts_list, y_ts_list, pred_len=120)
+4. Architecture Key Points
+Component	Detail
+Tokenizer	BSQ quantizes OHLCV into s1 (coarse) + s2 (fine) binary tokens
+Model	Decoder-only Transformer, max context 512 tokens
+Inference	Autoregressive generation with sliding buffer; two-stage: predict s1 → condition to predict s2
+Temporal features	minute, hour, weekday, day, month embedded via TemporalEmbedding
+Normalization	Per-series Z-score normalization (μ, σ per column), clipped to ±5
+Attention	Causal self-attention with RoPE, SwiGLU FFN, RMSNorm
+The full analysis with all file contents has been saved to kronos_analysis.md.
+
+
+
+Now I have everything I need. Let me build the full app.
+
+
+
+app.py
+Python
+
+
+
+
+
+app.py
+Python
+Here's your complete app.py — 755 lines, fully self-contained.
+
+Architecture
+The app is split into 7 clean sections:
+
+Scoring Engine
+All four signals are implemented exactly as specified:
+
+Signal	Max	Logic
+V (Volume)	5	RV = current vol / 20-period vol MA
+P (Price momentum)	3	ATR-normalised move, only if close > prev close
+R (Range position)	2	(close − low) / (high − low)
+T (Trend alignment)	3	EMA20/50 stack + ADX ≥ 20
+Total	13	V + P + R + T
+Kronos Integration
+The app loads KronosPredictor from HuggingFace (NeoQuasar/Kronos-small by default) as a singleton and calls predictor.predict() on the top-scoring symbols. The forecast summary includes expected close, % change, high/low targets, and bullish candle ratio.
+
+Install
+bash
+pip install ccxt pandas numpy pandas-ta rich torch huggingface_hub
+pip install git+https://github.com/shiyu-coder/Kronos.git
 Usage
------
-    # Live scan (default: top USDT pairs on Binance)
-    python app.py
+bash
+# Auto-scan top 30 USDT pairs on Binance
+python app.py
 
-    # Single symbol with Kronos forecast
-    python app.py --symbol BTCUSDT --interval 1h --kronos
+# Single symbol with Kronos forecast (24 candles ahead)
+python app.py --symbol BTCUSDT --interval 1h --kronos
 
-    # Scan with custom watchlist + Kronos
-    python app.py --watchlist BTC ETH SOL BNB --interval 15m --kronos
+# Custom watchlist + Kronos, show top 5 only
+python app.py --watchlist BTC ETH SOL BNB AVAX --interval 15m --kronos --top 5
 
-    # Top-N ranked output only
-    python app.py --top 10
+# Filter: only show signals with score ≥ 7
+python app.py --min-score 7
 
-Requirements
-------------
-    pip install ccxt pandas numpy pandas-ta rich torch huggingface_hub
-    pip install git+https://github.com/shiyu-coder/Kronos.git   # or local clone
+# Load from local CSV
+python app.py --csv mydata.csv --kronos
+
+# Use larger Kronos model variant
+python app.py --kronos --kronos-model NeoQuasar/Kronos-base
+Key design notes
+ccxt, pandas_ta, and rich all degrade gracefully if not installed — the core scoring engine works with just pandas and numpy
+
+Kronos is loaded once and cached for multi-symbol scans
+
+The --lookback flag controls how many historical candles (up to 512) are fed as Kronos context; --pred-len sets how many candles to forecast ahead
+
+
+app.py
+Python
+Oh no.
+Error running app. If you need help, try the Streamlit docs and forums.
+Could you paste the full error traceback? That will tell me exactly which line is failing and why.
+
+this is the only thing visible in streamlit
+The error message suggests it's being run via Streamlit, but the app was built as a plain CLI script — not a Streamlit app. Let me rebuild it as a proper Streamlit app.
+
+
+
+
+app.py
+Python
+
+
+
+
+
+app.py
+Python
+The app has been fully rebuilt as a native Streamlit app. Run it with:
+
+bash
+streamlit run app.py
+What's in the UI
+Sidebar controls
+
+Data source: live exchange (Binance/Bybit/OKX/KuCoin) or upload a CSV
+
+Interval, candle limit, auto top-N pairs or custom watchlist
+
+Score filter and top-N display
+
+Kronos toggle with model variant, forecast length, and lookback sliders
+
+Results table
+
+All symbols ranked by composite score (colour-coded: green ≥ 9, yellow ≥ 5)
+
+Columns: Close, RV, ATR Move, ADX, RSI, V, P, R, T, Score
+
+Detail view (select any symbol)
+
+Score metrics row + indicator metrics row
+
+Candlestick chart with EMA20/50 overlays + Kronos forecast line
+
+Volume bar chart with 20-period MA
+
+Signal radar chart (V/P/R/T as % of max)
+
+Kronos panel with forecast close, % change, high target, bullish candle %, and a full forward chart
+
+Install dependencies
+bash
+pip install streamlit ccxt pandas numpy pandas-ta plotly torch huggingface_hub
+# For Kronos AI forecast (optional):
+pip install git+https://github.com/shiyu-coder/Kronos.git
+
+app.py
+Python
+Follow-up
+
+Add error logging to the Streamlit app so any failed symbol fetch or Kronos inference shows a visible warning instead of silently breaking
+app
+"""
+Crypto Sniper — Streamlit App
+==============================
+Multi-factor scoring engine (V, P, R, T) + optional Kronos AI forecast.
+
+Run:
+    streamlit run app.py
+
+Install:
+    pip install streamlit ccxt pandas numpy pandas-ta plotly torch huggingface_hub
+    pip install git+https://github.com/shiyu-coder/Kronos.git   # optional
 """
 
-import argparse
-import sys
 import warnings
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Optional
 
 import numpy as np
 import pandas as pd
+import streamlit as st
 
 warnings.filterwarnings("ignore")
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Optional imports — graceful degradation when not installed
+# Optional imports
 # ──────────────────────────────────────────────────────────────────────────────
 try:
     import ccxt
     HAS_CCXT = True
 except ImportError:
     HAS_CCXT = False
-    print("[WARN] ccxt not installed — live data unavailable. Use --csv to load local data.")
 
 try:
     import pandas_ta as ta
     HAS_TA = True
 except ImportError:
     HAS_TA = False
-    print("[WARN] pandas_ta not installed — falling back to manual indicator calculations.")
 
 try:
-    from rich.console import Console
-    from rich.table import Table
-    from rich.panel import Panel
-    from rich import box
-    HAS_RICH = True
-    console = Console()
+    import plotly.graph_objects as go
+    import plotly.express as px
+    HAS_PLOTLY = True
 except ImportError:
-    HAS_RICH = False
-    console = None
+    HAS_PLOTLY = False
 
 try:
     import torch
@@ -73,164 +326,128 @@ except ImportError:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# SECTION 1 — INDICATOR ENGINE
+# PAGE CONFIG
+# ══════════════════════════════════════════════════════════════════════════════
+
+st.set_page_config(
+    page_title="Crypto Sniper",
+    page_icon="🎯",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
+
+st.markdown("""
+<style>
+    .score-pill {
+        display: inline-block;
+        padding: 2px 10px;
+        border-radius: 999px;
+        font-weight: 700;
+        font-size: 1rem;
+    }
+    .score-high  { background:#16a34a; color:#fff; }
+    .score-med   { background:#ca8a04; color:#fff; }
+    .score-low   { background:#374151; color:#9ca3af; }
+    .metric-card {
+        background: #1e293b;
+        border-radius: 10px;
+        padding: 14px 18px;
+        text-align: center;
+    }
+    .metric-label { font-size:0.78rem; color:#94a3b8; margin-bottom:4px; }
+    .metric-value { font-size:1.4rem; font-weight:700; color:#f1f5f9; }
+</style>
+""", unsafe_allow_html=True)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# INDICATORS
 # ══════════════════════════════════════════════════════════════════════════════
 
 def compute_indicators(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Compute all indicators required by the scoring system.
-
-    Expected input columns: open, high, low, close, volume
-    Added columns: ema20, ema50, atr14, adx14, rsi14
-    """
-    df = df.copy()
-    df.sort_values("timestamp", inplace=True)
-    df.reset_index(drop=True, inplace=True)
+    df = df.copy().sort_values("timestamp").reset_index(drop=True)
 
     if HAS_TA:
-        # EMA
-        df["ema20"] = ta.ema(df["close"], length=20)
-        df["ema50"] = ta.ema(df["close"], length=50)
-
-        # ATR (14-period)
-        atr = ta.atr(df["high"], df["low"], df["close"], length=14)
-        df["atr14"] = atr
-
-        # ADX (14-period)
-        adx_df = ta.adx(df["high"], df["low"], df["close"], length=14)
-        df["adx14"] = adx_df[f"ADX_14"] if adx_df is not None else np.nan
-
-        # RSI (14-period) — used for relative volume baseline context
-        df["rsi14"] = ta.rsi(df["close"], length=14)
-
-        # Rolling volume (20-period mean)
+        df["ema20"]    = ta.ema(df["close"], length=20)
+        df["ema50"]    = ta.ema(df["close"], length=50)
+        df["atr14"]    = ta.atr(df["high"], df["low"], df["close"], length=14)
+        adx_df         = ta.adx(df["high"], df["low"], df["close"], length=14)
+        df["adx14"]    = adx_df["ADX_14"] if adx_df is not None else np.nan
+        df["rsi14"]    = ta.rsi(df["close"], length=14)
         df["vol_ma20"] = ta.sma(df["volume"], length=20)
-
     else:
-        # ── Manual EMA ──────────────────────────────────────────────────────
-        df["ema20"] = df["close"].ewm(span=20, adjust=False).mean()
-        df["ema50"] = df["close"].ewm(span=50, adjust=False).mean()
+        df["ema20"]    = df["close"].ewm(span=20, adjust=False).mean()
+        df["ema50"]    = df["close"].ewm(span=50, adjust=False).mean()
 
-        # ── Manual ATR ──────────────────────────────────────────────────────
         hl = df["high"] - df["low"]
         hc = (df["high"] - df["close"].shift(1)).abs()
-        lc = (df["low"] - df["close"].shift(1)).abs()
+        lc = (df["low"]  - df["close"].shift(1)).abs()
         tr = pd.concat([hl, hc, lc], axis=1).max(axis=1)
-        df["atr14"] = tr.ewm(span=14, adjust=False).mean()
+        df["atr14"]    = tr.ewm(span=14, adjust=False).mean()
 
-        # ── Manual ADX ──────────────────────────────────────────────────────
-        up_move = df["high"].diff()
-        down_move = -df["low"].diff()
-        plus_dm = np.where((up_move > down_move) & (up_move > 0), up_move, 0.0)
-        minus_dm = np.where((down_move > up_move) & (down_move > 0), down_move, 0.0)
-        plus_dm_s = pd.Series(plus_dm).ewm(span=14, adjust=False).mean()
-        minus_dm_s = pd.Series(minus_dm).ewm(span=14, adjust=False).mean()
-        plus_di = 100 * plus_dm_s / df["atr14"]
-        minus_di = 100 * minus_dm_s / df["atr14"]
-        dx = 100 * (plus_di - minus_di).abs() / (plus_di + minus_di).replace(0, np.nan)
-        df["adx14"] = dx.ewm(span=14, adjust=False).mean()
+        up   = df["high"].diff()
+        down = -df["low"].diff()
+        pdm  = pd.Series(np.where((up > down) & (up > 0), up, 0.0))
+        mdm  = pd.Series(np.where((down > up) & (down > 0), down, 0.0))
+        pdi  = 100 * pdm.ewm(span=14, adjust=False).mean() / df["atr14"]
+        mdi  = 100 * mdm.ewm(span=14, adjust=False).mean() / df["atr14"]
+        dx   = 100 * (pdi - mdi).abs() / (pdi + mdi).replace(0, np.nan)
+        df["adx14"]    = dx.ewm(span=14, adjust=False).mean()
 
-        # ── Manual RSI ──────────────────────────────────────────────────────
         delta = df["close"].diff()
-        gain = delta.clip(lower=0).ewm(span=14, adjust=False).mean()
-        loss = (-delta.clip(upper=0)).ewm(span=14, adjust=False).mean()
-        rs = gain / loss.replace(0, np.nan)
-        df["rsi14"] = 100 - (100 / (1 + rs))
+        gain  = delta.clip(lower=0).ewm(span=14, adjust=False).mean()
+        loss  = (-delta.clip(upper=0)).ewm(span=14, adjust=False).mean()
+        df["rsi14"]    = 100 - (100 / (1 + gain / loss.replace(0, np.nan)))
 
-        # ── Rolling volume ────────────────────────────────────────────────
         df["vol_ma20"] = df["volume"].rolling(20).mean()
 
     return df
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# SECTION 2 — SCORING ENGINE  (V, P, R, T)
+# SCORING
 # ══════════════════════════════════════════════════════════════════════════════
 
 def score_V(rv: float) -> int:
-    """
-    Volume Score (V)
-    RV = relative volume = current_volume / rolling_vol_ma20
-    """
-    if rv < 2:
-        return 0
-    elif rv < 4:
-        return 2
-    elif rv < 8:
-        return 3
-    else:
-        return 5
-
+    if rv < 2:   return 0
+    elif rv < 4: return 2
+    elif rv < 8: return 3
+    else:        return 5
 
 def score_P(close_now: float, close_prev: float, atr_move: float) -> int:
-    """
-    Price Momentum Score (P)
-    atr_move = (close_now - close_prev) / atr14
-    """
-    if close_now <= close_prev:
-        return 0
-    if atr_move < 1.5:
-        return 0
-    elif atr_move < 2.5:
-        return 1
-    elif atr_move < 4.0:
-        return 2
-    else:
-        return 3
-
+    if close_now <= close_prev: return 0
+    if atr_move < 1.5:          return 0
+    elif atr_move < 2.5:        return 1
+    elif atr_move < 4.0:        return 2
+    else:                       return 3
 
 def score_R(range_pos: float) -> int:
-    """
-    Range Position Score (R)
-    range_pos = (close - low) / (high - low)   [0..1]
-    """
-    if range_pos < 0.70:
-        return 0
-    elif range_pos < 0.85:
-        return 1
-    else:
-        return 2
+    if range_pos < 0.70:   return 0
+    elif range_pos < 0.85: return 1
+    else:                  return 2
 
-
-def score_T(close_now: float, ema20: float, ema50: float, adx14: float) -> int:
-    """
-    Trend Alignment Score (T)
-    +1 if close > EMA20
-    +1 if EMA20 > EMA50
-    +1 if ADX14 >= 20
-    """
+def score_T(close: float, ema20: float, ema50: float, adx14: float) -> int:
     t = 0
-    if close_now > ema20:
-        t += 1
-    if ema20 > ema50:
-        t += 1
-    if adx14 >= 20:
-        t += 1
+    if close > ema20:  t += 1
+    if ema20  > ema50: t += 1
+    if adx14  >= 20:   t += 1
     return t
 
-
-def compute_scores(df: pd.DataFrame) -> dict:
-    """
-    Compute all four scores for the last completed candle.
-    Returns a dict with individual scores and the composite VPRT score.
-    """
+def compute_scores(df: pd.DataFrame) -> Optional[dict]:
     if len(df) < 2:
-        raise ValueError("Need at least 2 candles to compute scores.")
-
-    row = df.iloc[-1]
+        return None
+    row  = df.iloc[-1]
     prev = df.iloc[-2]
 
-    # ── Derived quantities ────────────────────────────────────────────────
-    rv = row["volume"] / row["vol_ma20"] if row["vol_ma20"] > 0 else 0.0
-    atr_move = (row["close"] - prev["close"]) / row["atr14"] if row["atr14"] > 0 else 0.0
-    hl = row["high"] - row["low"]
+    rv        = row["volume"] / row["vol_ma20"] if row["vol_ma20"] > 0 else 0.0
+    atr_move  = (row["close"] - prev["close"]) / row["atr14"] if row["atr14"] > 0 else 0.0
+    hl        = row["high"] - row["low"]
     range_pos = (row["close"] - row["low"]) / hl if hl > 0 else 0.5
 
     v = score_V(rv)
     p = score_P(row["close"], prev["close"], atr_move)
     r = score_R(range_pos)
     t = score_T(row["close"], row["ema20"], row["ema50"], row["adx14"])
-    composite = v + p + r + t
 
     return {
         "close": row["close"],
@@ -239,516 +456,116 @@ def compute_scores(df: pd.DataFrame) -> dict:
         "atr14": row["atr14"],
         "adx14": row["adx14"],
         "rsi14": row["rsi14"],
-        "rv": round(rv, 2),
-        "atr_move": round(atr_move, 2),
+        "rv":        round(rv, 2),
+        "atr_move":  round(atr_move, 2),
         "range_pos": round(range_pos, 3),
-        "V": v,
-        "P": p,
-        "R": r,
-        "T": t,
-        "score": composite,
+        "V": v, "P": p, "R": r, "T": t,
+        "score": v + p + r + t,
         "timestamp": row["timestamp"],
     }
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# SECTION 3 — DATA FETCHER
+# DATA
 # ══════════════════════════════════════════════════════════════════════════════
 
-def fetch_ohlcv(
-    symbol: str,
-    interval: str = "1h",
-    limit: int = 600,
-    exchange_id: str = "binance",
-) -> Optional[pd.DataFrame]:
-    """
-    Fetch OHLCV data from a ccxt-compatible exchange.
-    Returns a DataFrame with columns: timestamp, open, high, low, close, volume
-    """
+@st.cache_data(ttl=60, show_spinner=False)
+def fetch_ohlcv(symbol: str, interval: str, limit: int, exchange_id: str) -> Optional[pd.DataFrame]:
     if not HAS_CCXT:
         return None
-
     try:
-        exchange_cls = getattr(ccxt, exchange_id)
-        exchange = exchange_cls({"enableRateLimit": True})
+        exchange = getattr(ccxt, exchange_id)({"enableRateLimit": True})
         raw = exchange.fetch_ohlcv(symbol, timeframe=interval, limit=limit)
-        df = pd.DataFrame(raw, columns=["timestamp", "open", "high", "low", "close", "volume"])
+        df  = pd.DataFrame(raw, columns=["timestamp", "open", "high", "low", "close", "volume"])
         df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms", utc=True)
         return df.dropna()
     except Exception as e:
-        print(f"[ERROR] Failed to fetch {symbol}: {e}")
+        st.error(f"Fetch error for {symbol}: {e}")
         return None
 
-
-def load_csv(path: str) -> pd.DataFrame:
-    """Load OHLCV data from a local CSV file."""
-    df = pd.read_csv(path)
-    # Normalise column names
-    df.columns = [c.lower().strip() for c in df.columns]
-    # Accept 'date', 'time', 'datetime', 'ts' as timestamp aliases
-    for alias in ["date", "time", "datetime", "ts"]:
-        if alias in df.columns and "timestamp" not in df.columns:
-            df.rename(columns={alias: "timestamp"}, inplace=True)
-    df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True, errors="coerce")
-    required = {"timestamp", "open", "high", "low", "close", "volume"}
-    missing = required - set(df.columns)
-    if missing:
-        raise ValueError(f"CSV missing columns: {missing}")
-    return df.dropna(subset=["timestamp", "close"]).reset_index(drop=True)
-
-
-def get_top_usdt_pairs(n: int = 30, exchange_id: str = "binance") -> list[str]:
-    """Return the top-N USDT pairs by 24h quote volume."""
+@st.cache_data(ttl=120, show_spinner=False)
+def get_top_usdt_pairs(n: int, exchange_id: str) -> list:
     if not HAS_CCXT:
         return []
     try:
-        exchange_cls = getattr(ccxt, exchange_id)
-        exchange = exchange_cls({"enableRateLimit": True})
-        tickers = exchange.fetch_tickers()
-        usdt = {
-            k: v for k, v in tickers.items()
-            if k.endswith("/USDT") and v.get("quoteVolume")
-        }
-        ranked = sorted(usdt.items(), key=lambda x: x[1]["quoteVolume"] or 0, reverse=True)
+        exchange = getattr(ccxt, exchange_id)({"enableRateLimit": True})
+        tickers  = exchange.fetch_tickers()
+        usdt     = {k: v for k, v in tickers.items()
+                    if k.endswith("/USDT") and v.get("quoteVolume")}
+        ranked   = sorted(usdt.items(), key=lambda x: x[1]["quoteVolume"] or 0, reverse=True)
         return [s for s, _ in ranked[:n]]
     except Exception as e:
-        print(f"[ERROR] Could not fetch ticker list: {e}")
+        st.error(f"Could not fetch pairs: {e}")
         return []
 
-
-# ══════════════════════════════════════════════════════════════════════════════
-# SECTION 4 — KRONOS INTEGRATION
-# ══════════════════════════════════════════════════════════════════════════════
-
-_kronos_predictor: Optional[object] = None  # singleton cache
-
-
-def load_kronos(model_variant: str = "NeoQuasar/Kronos-small") -> Optional[object]:
-    """
-    Load the Kronos model + tokenizer from HuggingFace (cached after first call).
-    """
-    global _kronos_predictor
-    if _kronos_predictor is not None:
-        return _kronos_predictor
-
-    if not HAS_KRONOS:
-        print("[WARN] Kronos not available. Run: pip install git+https://github.com/shiyu-coder/Kronos.git")
-        return None
-
+def load_csv(uploaded) -> Optional[pd.DataFrame]:
     try:
-        _print("Loading Kronos model from HuggingFace…")
-        tokenizer = KronosTokenizer.from_pretrained("NeoQuasar/Kronos-Tokenizer-base")
-        model = Kronos.from_pretrained(model_variant)
-        _kronos_predictor = KronosPredictor(model, tokenizer, max_context=512)
-        _print(f"Kronos loaded ({model_variant})", style="green")
-        return _kronos_predictor
+        df = pd.read_csv(uploaded)
+        df.columns = [c.lower().strip() for c in df.columns]
+        for alias in ["date", "time", "datetime", "ts"]:
+            if alias in df.columns and "timestamp" not in df.columns:
+                df.rename(columns={alias: "timestamp"}, inplace=True)
+        df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True, errors="coerce")
+        return df.dropna(subset=["timestamp", "close"]).reset_index(drop=True)
     except Exception as e:
-        print(f"[ERROR] Kronos load failed: {e}")
+        st.error(f"CSV error: {e}")
         return None
 
 
-def run_kronos_forecast(
-    df: pd.DataFrame,
-    pred_len: int = 24,
-    lookback: int = 400,
-    temperature: float = 1.0,
-    top_p: float = 0.9,
-    model_variant: str = "NeoQuasar/Kronos-small",
-) -> Optional[pd.DataFrame]:
-    """
-    Run a Kronos forecast on the given OHLCV DataFrame.
+# ══════════════════════════════════════════════════════════════════════════════
+# KRONOS
+# ══════════════════════════════════════════════════════════════════════════════
 
-    Parameters
-    ----------
-    df        : Full OHLCV dataframe (at least `lookback` rows)
-    pred_len  : Number of candles to predict ahead
-    lookback  : Number of historical candles to use as context (≤ 512)
-    temperature : Sampling temperature
-    top_p     : Nucleus sampling threshold
+@st.cache_resource(show_spinner=False)
+def load_kronos_model(variant: str):
+    if not HAS_KRONOS:
+        return None
+    try:
+        tokenizer = KronosTokenizer.from_pretrained("NeoQuasar/Kronos-Tokenizer-base")
+        model     = Kronos.from_pretrained(variant)
+        return KronosPredictor(model, tokenizer, max_context=512)
+    except Exception as e:
+        st.error(f"Kronos load error: {e}")
+        return None
 
-    Returns
-    -------
-    Forecast DataFrame with columns: open, high, low, close, volume
-    indexed by predicted timestamps.
-    """
-    predictor = load_kronos(model_variant)
+def run_kronos(df: pd.DataFrame, pred_len: int, lookback: int, variant: str) -> Optional[pd.DataFrame]:
+    predictor = load_kronos_model(variant)
     if predictor is None:
         return None
 
-    df = df.sort_values("timestamp").reset_index(drop=True)
+    df       = df.sort_values("timestamp").reset_index(drop=True)
     lookback = min(lookback, len(df), 512)
+    ctx      = df.tail(lookback).reset_index(drop=True)
+    x_ts     = ctx["timestamp"]
 
-    context_df = df.tail(lookback).reset_index(drop=True)
-    x_ts = context_df["timestamp"]
+    delta    = ctx["timestamp"].iloc[-1] - ctx["timestamp"].iloc[-2]
+    y_ts     = pd.Series(pd.date_range(
+        start=ctx["timestamp"].iloc[-1] + delta, periods=pred_len, freq=delta
+    ))
 
-    # Generate future timestamps based on the inferred candle frequency
-    last_ts = context_df["timestamp"].iloc[-1]
-    freq = pd.infer_freq(context_df["timestamp"])
-    if freq is None:
-        # Estimate from the last two candles
-        delta = context_df["timestamp"].iloc[-1] - context_df["timestamp"].iloc[-2]
-        future_ts = pd.date_range(start=last_ts + delta, periods=pred_len, freq=delta)
-    else:
-        future_ts = pd.date_range(start=last_ts, periods=pred_len + 1, freq=freq)[1:]
-
-    y_ts = pd.Series(future_ts)
-
-    # Kronos expects: open, high, low, close, volume  (amount is optional)
-    ohlcv_cols = [c for c in ["open", "high", "low", "close", "volume", "amount"] if c in context_df.columns]
+    cols = [c for c in ["open", "high", "low", "close", "volume", "amount"] if c in ctx.columns]
     try:
-        pred_df = predictor.predict(
-            df=context_df[ohlcv_cols],
-            x_timestamp=x_ts,
-            y_timestamp=y_ts,
-            pred_len=pred_len,
-            T=temperature,
-            top_p=top_p,
-            sample_count=1,
+        return predictor.predict(
+            df=ctx[cols], x_timestamp=x_ts, y_timestamp=y_ts,
+            pred_len=pred_len, T=1.0, top_p=0.9, sample_count=1,
         )
-        return pred_df
     except Exception as e:
-        print(f"[ERROR] Kronos prediction failed: {e}")
+        st.error(f"Kronos inference error: {e}")
         return None
 
 
-def summarise_forecast(pred_df: pd.DataFrame, current_close: float) -> dict:
-    """Derive high-level forecast summary from Kronos output."""
-    if pred_df is None or pred_df.empty:
-        return {}
-
-    forecast_close = pred_df["close"].values
-    high_target = pred_df["high"].max()
-    low_target = pred_df["low"].min()
-    final_close = forecast_close[-1]
-    pct_change = (final_close - current_close) / current_close * 100
-
-    # Simple directional confidence: fraction of candles where close > open
-    bullish_candles = (pred_df["close"] > pred_df["open"]).sum()
-    bullish_pct = bullish_candles / len(pred_df) * 100
-
-    return {
-        "forecast_close": round(final_close, 6),
-        "pct_change": round(pct_change, 2),
-        "high_target": round(high_target, 6),
-        "low_target": round(low_target, 6),
-        "bullish_pct": round(bullish_pct, 1),
-        "candles_ahead": len(pred_df),
-    }
-
-
 # ══════════════════════════════════════════════════════════════════════════════
-# SECTION 5 — OUTPUT HELPERS
+# CHARTS
 # ══════════════════════════════════════════════════════════════════════════════
 
-def _print(msg: str, style: str = ""):
-    if HAS_RICH:
-        console.print(f"[{style}]{msg}[/{style}]" if style else msg)
-    else:
-        print(msg)
-
-
-def _score_color(score: int) -> str:
-    if score >= 10:
-        return "bold magenta"
-    elif score >= 7:
-        return "bold green"
-    elif score >= 4:
-        return "yellow"
-    else:
-        return "dim"
-
-
-def print_rich_table(results: list[dict]):
-    if not HAS_RICH:
-        _print_plain_table(results)
+def candlestick_chart(df: pd.DataFrame, symbol: str, forecast_df: Optional[pd.DataFrame] = None):
+    if not HAS_PLOTLY:
+        st.info("Install plotly for charts: pip install plotly")
         return
 
-    table = Table(
-        title="🎯  Crypto Sniper — Signal Scanner",
-        box=box.ROUNDED,
-        show_lines=True,
-        highlight=True,
-    )
+    show = df.tail(120).copy()
+    fig  = go.Figure()
 
-    cols = [
-        ("Symbol", "cyan", "left"),
-        ("Close", "white", "right"),
-        ("RV", "white", "right"),
-        ("ATR Move", "white", "right"),
-        ("ADX", "white", "right"),
-        ("RSI", "white", "right"),
-        ("V", "blue", "center"),
-        ("P", "blue", "center"),
-        ("R", "blue", "center"),
-        ("T", "blue", "center"),
-        ("Score", "green", "center"),
-    ]
-
-    for name, style, justify in cols:
-        table.add_column(name, style=style, justify=justify)
-
-    for r in results:
-        score_str = f"[{_score_color(r['score'])}]{r['score']}[/{_score_color(r['score'])}]"
-        table.add_row(
-            r["symbol"],
-            f"{r['close']:.4g}",
-            f"{r['rv']:.2f}x",
-            f"{r['atr_move']:.2f}",
-            f"{r['adx14']:.1f}",
-            f"{r['rsi14']:.1f}",
-            str(r["V"]),
-            str(r["P"]),
-            str(r["R"]),
-            str(r["T"]),
-            score_str,
-        )
-
-    console.print(table)
-
-
-def print_kronos_panel(symbol: str, summary: dict):
-    if not HAS_RICH or not summary:
-        if summary:
-            print(f"\n[Kronos Forecast — {symbol}]")
-            print(f"  Forecast close  : {summary['forecast_close']}")
-            print(f"  Expected change : {summary['pct_change']:+.2f}%")
-            print(f"  High target     : {summary['high_target']}")
-            print(f"  Low target      : {summary['low_target']}")
-            print(f"  Bullish candles : {summary['bullish_pct']}%")
-            print(f"  Candles ahead   : {summary['candles_ahead']}")
-        return
-
-    direction = "▲ BULLISH" if summary["pct_change"] > 0 else "▼ BEARISH"
-    color = "green" if summary["pct_change"] > 0 else "red"
-
-    content = (
-        f"[bold]Direction:[/bold]  [{color}]{direction}[/{color}]\n"
-        f"[bold]Forecast close:[/bold]  {summary['forecast_close']}\n"
-        f"[bold]Expected change:[/bold]  [{color}]{summary['pct_change']:+.2f}%[/{color}]\n"
-        f"[bold]High target:[/bold]  {summary['high_target']}\n"
-        f"[bold]Low target:[/bold]  {summary['low_target']}\n"
-        f"[bold]Bullish candles:[/bold]  {summary['bullish_pct']}%\n"
-        f"[bold]Candles ahead:[/bold]  {summary['candles_ahead']}"
-    )
-    console.print(Panel(content, title=f"[bold cyan]Kronos Forecast — {symbol}[/bold cyan]", expand=False))
-
-
-def _print_plain_table(results: list[dict]):
-    header = f"{'Symbol':<12} {'Close':>10} {'RV':>6} {'ATRMv':>6} {'ADX':>6} {'RSI':>6}  V  P  R  T  Score"
-    print("\n" + header)
-    print("-" * len(header))
-    for r in results:
-        print(
-            f"{r['symbol']:<12} {r['close']:>10.4g} {r['rv']:>6.2f} {r['atr_move']:>6.2f}"
-            f" {r['adx14']:>6.1f} {r['rsi14']:>6.1f}"
-            f"  {r['V']}  {r['P']}  {r['R']}  {r['T']}  {r['score']}"
-        )
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# SECTION 6 — MAIN PIPELINE
-# ══════════════════════════════════════════════════════════════════════════════
-
-def analyse_symbol(
-    symbol: str,
-    interval: str = "1h",
-    limit: int = 600,
-    exchange: str = "binance",
-    csv_path: Optional[str] = None,
-) -> Optional[dict]:
-    """
-    Full pipeline for a single symbol:
-    1. Fetch OHLCV data
-    2. Compute indicators
-    3. Compute V/P/R/T scores
-    Returns a score dict or None on failure.
-    """
-    if csv_path:
-        df = load_csv(csv_path)
-    else:
-        df = fetch_ohlcv(symbol, interval=interval, limit=limit, exchange_id=exchange)
-
-    if df is None or len(df) < 60:
-        return None
-
-    df = compute_indicators(df)
-    df = df.dropna(subset=["ema20", "ema50", "atr14", "adx14"]).reset_index(drop=True)
-
-    if len(df) < 2:
-        return None
-
-    scores = compute_scores(df)
-    scores["symbol"] = symbol
-    scores["df"] = df          # carry the full df for Kronos use
-    scores["interval"] = interval
-    return scores
-
-
-def run_scanner(
-    symbols: list[str],
-    interval: str = "1h",
-    limit: int = 600,
-    exchange: str = "binance",
-    top_n: int = 0,
-    use_kronos: bool = False,
-    pred_len: int = 24,
-    lookback: int = 400,
-    min_score: int = 0,
-    kronos_model: str = "NeoQuasar/Kronos-small",
-) -> list[dict]:
-    """
-    Scan a list of symbols and return ranked results.
-    """
-    results = []
-
-    for sym in symbols:
-        _print(f"Analysing {sym}…", style="dim")
-        res = analyse_symbol(sym, interval=interval, limit=limit, exchange=exchange)
-        if res is None:
-            continue
-        results.append(res)
-
-    # Sort by composite score descending
-    results.sort(key=lambda x: x["score"], reverse=True)
-
-    # Apply score filter
-    results = [r for r in results if r["score"] >= min_score]
-
-    if top_n > 0:
-        results = results[:top_n]
-
-    # Run Kronos on each qualifying result
-    if use_kronos:
-        if not HAS_KRONOS:
-            _print("[WARN] Kronos not installed — skipping forecasts.", style="yellow")
-        else:
-            for r in results:
-                _print(f"Running Kronos forecast for {r['symbol']}…", style="dim")
-                forecast = run_kronos_forecast(
-                    r["df"],
-                    pred_len=pred_len,
-                    lookback=lookback,
-                    model_variant=kronos_model,
-                )
-                r["kronos_forecast"] = summarise_forecast(forecast, r["close"])
-                r["kronos_raw"] = forecast
-
-    # Strip df from output (not needed downstream)
-    for r in results:
-        r.pop("df", None)
-
-    return results
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# SECTION 7 — CLI ENTRY POINT
-# ══════════════════════════════════════════════════════════════════════════════
-
-def parse_args():
-    parser = argparse.ArgumentParser(
-        description="Crypto Sniper — V/P/R/T scoring + Kronos forecast",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-    )
-
-    # Data source
-    src = parser.add_mutually_exclusive_group()
-    src.add_argument("--symbol", type=str, help="Single symbol to analyse (e.g. BTCUSDT or BTC/USDT)")
-    src.add_argument("--watchlist", nargs="+", help="Space-separated list of base assets, e.g. BTC ETH SOL")
-    src.add_argument("--csv", type=str, help="Path to local CSV file (single symbol analysis)")
-
-    parser.add_argument("--interval", default="1h", help="Candle interval (default: 1h)")
-    parser.add_argument("--limit", type=int, default=600, help="Max candles to fetch (default: 600)")
-    parser.add_argument("--exchange", default="binance", help="ccxt exchange ID (default: binance)")
-    parser.add_argument("--top", type=int, default=0, help="Show only top-N results")
-    parser.add_argument("--min-score", type=int, default=0, help="Minimum composite score filter")
-    parser.add_argument("--scan-top", type=int, default=30, help="Auto-scan top-N USDT pairs (default: 30)")
-
-    # Kronos options
-    parser.add_argument("--kronos", action="store_true", help="Enable Kronos AI forecast")
-    parser.add_argument("--pred-len", type=int, default=24, help="Kronos: candles to predict (default: 24)")
-    parser.add_argument("--lookback", type=int, default=400, help="Kronos: context candles (default: 400)")
-    parser.add_argument("--kronos-model", default="NeoQuasar/Kronos-small",
-                        help="Kronos HuggingFace model variant (default: NeoQuasar/Kronos-small)")
-
-    return parser.parse_args()
-
-
-def main():
-    args = parse_args()
-
-    _print(Panel.renderable if HAS_RICH else "")
-    if HAS_RICH:
-        console.rule("[bold cyan]Crypto Sniper[/bold cyan]")
-        console.print(f"[dim]{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}[/dim]\n")
-    else:
-        print("=" * 60)
-        print("Crypto Sniper")
-        print(datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"))
-        print("=" * 60)
-
-    # ── Build symbol list ─────────────────────────────────────────────────
-    if args.csv:
-        # Single CSV analysis
-        _print(f"Loading CSV: {args.csv}")
-        res = analyse_symbol("CSV", csv_path=args.csv)
-        if res is None:
-            _print("[ERROR] Could not analyse CSV data.", style="red")
-            sys.exit(1)
-        results = [res]
-        results[0]["symbol"] = Path(args.csv).stem
-
-    elif args.symbol:
-        sym = args.symbol if "/" in args.symbol else args.symbol.upper().replace("USDT", "") + "/USDT"
-        results = run_scanner(
-            [sym], interval=args.interval, limit=args.limit,
-            exchange=args.exchange, use_kronos=args.kronos,
-            pred_len=args.pred_len, lookback=args.lookback,
-            kronos_model=args.kronos_model,
-        )
-
-    elif args.watchlist:
-        symbols = [s.upper() + "/USDT" for s in args.watchlist]
-        results = run_scanner(
-            symbols, interval=args.interval, limit=args.limit,
-            exchange=args.exchange, top_n=args.top,
-            use_kronos=args.kronos, pred_len=args.pred_len,
-            lookback=args.lookback, min_score=args.min_score,
-            kronos_model=args.kronos_model,
-        )
-
-    else:
-        # Default: auto-scan top USDT pairs
-        _print(f"Fetching top-{args.scan_top} USDT pairs by volume…")
-        symbols = get_top_usdt_pairs(n=args.scan_top, exchange_id=args.exchange)
-        if not symbols:
-            _print("[ERROR] No symbols fetched. Install ccxt or provide --watchlist.", style="red")
-            sys.exit(1)
-        results = run_scanner(
-            symbols, interval=args.interval, limit=args.limit,
-            exchange=args.exchange, top_n=args.top,
-            use_kronos=args.kronos, pred_len=args.pred_len,
-            lookback=args.lookback, min_score=args.min_score,
-            kronos_model=args.kronos_model,
-        )
-
-    # ── Display results ───────────────────────────────────────────────────
-    if not results:
-        _print("No results matched the criteria.", style="yellow")
-        sys.exit(0)
-
-    print_rich_table(results)
-
-    # Kronos panels (if enabled)
-    if args.kronos:
-        for r in results:
-            if r.get("kronos_forecast"):
-                print_kronos_panel(r["symbol"], r["kronos_forecast"])
-
-    # Summary
-    if HAS_RICH:
-        console.print(f"\n[dim]Scanned {len(results)} symbols  ·  "
-                      f"Interval: {args.interval}  ·  Exchange: {args.exchange}[/dim]")
-
-
-if __name__ == "__main__":
-    main()
+    # Candles
+    fig.add_trace(go.Candlestick(
+        x=show["timestamp"
