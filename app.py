@@ -1,4 +1,5 @@
 import io
+import os
 import re
 import time
 from dataclasses import dataclass
@@ -25,9 +26,9 @@ st.set_page_config(
 # =========================================================
 # BRANDING
 # =========================================================
-LOGO_PATH = "logo.png"   # replace with your actual file name if different
+LOGO_PATH = "assets/crypto_guru_logo.png"
 APP_HEADING = "Crypto Guru"
-APP_TAGLINE = "Precision crypto intelligence."   # replace with your exact line
+APP_TAGLINE = "Precision crypto intelligence."
 
 
 # =========================================================
@@ -77,8 +78,8 @@ def inject_styles() -> None:
 
             .stApp {
                 background:
-                    radial-gradient(circle at top left, rgba(255,153,51,0.10), transparent 24%),
-                    radial-gradient(circle at top right, rgba(255,153,51,0.06), transparent 20%),
+                    radial-gradient(circle at top left, rgba(255,153,51,0.11), transparent 24%),
+                    radial-gradient(circle at top right, rgba(255,153,51,0.08), transparent 20%),
                     linear-gradient(180deg, #000000 0%, #050505 100%);
             }
 
@@ -96,9 +97,50 @@ def inject_styles() -> None:
                 display: none;
             }
 
+            section[data-testid="stSidebar"] {
+                display: none !important;
+            }
+
             .hero-wrap {
                 text-align: center;
                 margin-bottom: 1.75rem;
+            }
+
+            .hero-logo-wrap {
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                margin-bottom: 0.65rem;
+                animation: floaty 4.5s ease-in-out infinite;
+            }
+
+            .hero-logo-glow {
+                display: inline-flex;
+                justify-content: center;
+                align-items: center;
+                padding: 14px;
+                border-radius: 24px;
+                background:
+                    radial-gradient(circle, rgba(255,153,51,0.16) 0%, rgba(255,153,51,0.05) 45%, rgba(255,153,51,0.00) 72%);
+                box-shadow:
+                    0 0 0 1px rgba(255,153,51,0.05),
+                    0 0 28px rgba(255,153,51,0.14),
+                    0 0 56px rgba(255,153,51,0.08);
+                transition: transform 0.25s ease, box-shadow 0.25s ease;
+            }
+
+            .hero-logo-glow:hover {
+                transform: translateY(-1px) scale(1.01);
+                box-shadow:
+                    0 0 0 1px rgba(255,153,51,0.08),
+                    0 0 36px rgba(255,153,51,0.18),
+                    0 0 68px rgba(255,153,51,0.11);
+            }
+
+            @keyframes floaty {
+                0% { transform: translateY(0px); }
+                50% { transform: translateY(-3px); }
+                100% { transform: translateY(0px); }
             }
 
             .hero-title {
@@ -106,7 +148,7 @@ def inject_styles() -> None:
                 font-size: 2.7rem;
                 font-weight: 800;
                 letter-spacing: -0.03em;
-                margin-top: 0.5rem;
+                margin-top: 0.3rem;
                 margin-bottom: 0.35rem;
             }
 
@@ -182,12 +224,12 @@ def inject_styles() -> None:
                 margin-bottom: 0.45rem;
             }
 
-            /* GLASS SEARCH BAR */
+            /* QUERY FIELD */
             .stTextInput > div > div > input {
-                background: linear-gradient(180deg, rgba(18,18,18,0.92) 0%, rgba(8,8,8,0.96) 100%) !important;
+                background: linear-gradient(180deg, rgba(18,18,18,0.94) 0%, rgba(8,8,8,0.98) 100%) !important;
                 color: #ffffff !important;
                 border-radius: 16px !important;
-                border: 1px solid rgba(255,153,51,0.22) !important;
+                border: 1px solid rgba(255,153,51,0.24) !important;
                 padding: 1rem 1rem !important;
                 font-size: 1.05rem !important;
                 text-align: center !important;
@@ -195,6 +237,7 @@ def inject_styles() -> None:
                 box-shadow:
                     inset 0 1px 0 rgba(255,255,255,0.03),
                     0 0 0 1px rgba(255,153,51,0.02);
+                transition: all 0.22s ease !important;
             }
 
             .stTextInput > div > div > input::placeholder {
@@ -202,14 +245,22 @@ def inject_styles() -> None:
                 opacity: 1 !important;
             }
 
+            .stTextInput > div > div > input:hover {
+                border: 1px solid rgba(255,153,51,0.34) !important;
+                box-shadow:
+                    inset 0 1px 0 rgba(255,255,255,0.03),
+                    0 0 10px rgba(255,153,51,0.06) !important;
+            }
+
             .stTextInput > div > div > input:focus {
-                background: linear-gradient(180deg, rgba(18,18,18,0.96) 0%, rgba(8,8,8,1) 100%) !important;
+                background: linear-gradient(180deg, rgba(18,18,18,0.98) 0%, rgba(8,8,8,1) 100%) !important;
                 color: #ffffff !important;
                 border: 1px solid #ff9933 !important;
                 outline: none !important;
                 box-shadow:
                     0 0 0 1px rgba(255,153,51,0.08),
-                    0 0 18px rgba(255,153,51,0.12) !important;
+                    0 0 18px rgba(255,153,51,0.13) !important;
+                transform: translateY(-1px);
             }
 
             [data-testid="stTextInput"] input {
@@ -228,6 +279,7 @@ def inject_styles() -> None:
                 background: linear-gradient(180deg, #ff9933 0%, #d97706 100%);
                 color: #000000;
                 padding: 0.35rem 0.7rem;
+                transition: all 0.2s ease;
             }
 
             .stButton > button:hover,
@@ -235,6 +287,14 @@ def inject_styles() -> None:
                 color: #000000;
                 border: 1px solid rgba(255,153,51,0.32);
                 background: linear-gradient(180deg, #ffad5c 0%, #e68613 100%);
+                box-shadow: 0 8px 22px rgba(255,153,51,0.14);
+                transform: translateY(-1px);
+            }
+
+            .stButton > button:focus,
+            .stDownloadButton > button:focus {
+                outline: none !important;
+                box-shadow: 0 0 0 2px rgba(255,153,51,0.18) !important;
             }
 
             div[data-testid="stExpander"] {
@@ -559,10 +619,10 @@ def generate_pdf(response: FinalResponse) -> bytes:
 def render_header() -> None:
     st.markdown('<div class="hero-wrap">', unsafe_allow_html=True)
 
-    try:
-        st.image(LOGO_PATH, width=110)
-    except Exception:
-        pass
+    if os.path.exists(LOGO_PATH):
+        st.markdown('<div class="hero-logo-wrap"><div class="hero-logo-glow">', unsafe_allow_html=True)
+        st.image(LOGO_PATH, width=120)
+        st.markdown('</div></div>', unsafe_allow_html=True)
 
     st.markdown(
         f"""
