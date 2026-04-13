@@ -11,7 +11,7 @@ from PIL import Image
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_RIGHT
 from reportlab.lib.pagesizes import A4
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
 from reportlab.platypus import (
     Image as RLImage,
@@ -21,7 +21,6 @@ from reportlab.platypus import (
     Table,
     TableStyle,
 )
-
 
 # =========================
 # PAGE CONFIG
@@ -39,21 +38,28 @@ st.set_page_config(
 BRAND_NAME = "crypto.guru"
 TAGLINE = "Detect Early. Act Smart."
 
-COLOR_BG = "#0A0E14"
-COLOR_CARD = "#111722"
-COLOR_CARD_2 = "#0F141D"
-COLOR_BORDER = "#242E3F"
-COLOR_TEXT = "#D9E1EC"
-COLOR_TEXT_STRONG = "#F3F6FB"
-COLOR_TEXT_DARKER = "#C2CCD9"
-COLOR_SUBTEXT = "#8692A3"
-COLOR_GREEN = "#7CFF5B"
-COLOR_GREEN_SOFT = "#67D84A"
-COLOR_AMBER = "#D7A63A"
-COLOR_RED = "#D96A6A"
-COLOR_ORANGE = "#D48A2F"
-COLOR_PDF_HEADER = "#0B1018"
-COLOR_PDF_RULE = "#222C3A"
+# App colors
+APP_BG = "#0A0E14"
+APP_CARD = "#111722"
+APP_CARD_2 = "#0F141D"
+APP_BORDER = "#242E3F"
+APP_TEXT = "#D9E1EC"
+APP_TEXT_STRONG = "#F3F6FB"
+APP_TEXT_MUTED = "#8692A3"
+APP_GREEN = "#7CFF5B"
+APP_GREEN_SOFT = "#67D84A"
+APP_AMBER = "#D7A63A"
+APP_RED = "#D96A6A"
+APP_ORANGE = "#D48A2F"
+
+# PDF colors
+PDF_BG_HEADER = "#10151D"
+PDF_RULE = "#2B3442"
+PDF_TEXT = "#111111"
+PDF_TEXT_SOFT = "#333333"
+PDF_MUTED = "#666666"
+PDF_GREEN = "#2E7D32"
+PDF_ORANGE = "#8C5A12"
 
 LOGO_PATH = "assets/crypto_guru_logo.png"
 
@@ -130,30 +136,30 @@ class ReportData:
 
 
 # =========================
-# STYLING
+# APP STYLING
 # =========================
 def inject_css() -> None:
     st.markdown(
         f"""
         <style>
         .stApp {{
-            background-color: {COLOR_BG};
-            color: {COLOR_TEXT};
+            background-color: {APP_BG};
+            color: {APP_TEXT};
         }}
 
         .block-container {{
-            padding-top: 1.15rem;
+            padding-top: 1.1rem;
             padding-bottom: 1.8rem;
             max-width: 1180px;
         }}
 
         section[data-testid="stSidebar"] {{
-            background-color: {COLOR_CARD_2};
+            background-color: {APP_CARD_2};
         }}
 
         .brand-box {{
-            background: linear-gradient(180deg, {COLOR_CARD}, #0E141E);
-            border: 1px solid {COLOR_BORDER};
+            background: linear-gradient(180deg, {APP_CARD}, #0E141E);
+            border: 1px solid {APP_BORDER};
             border-radius: 16px;
             padding: 16px 18px;
             margin-bottom: 16px;
@@ -168,23 +174,22 @@ def inject_css() -> None:
         }}
 
         .brand-subtitle {{
-            color: {COLOR_SUBTEXT};
+            color: {APP_TEXT_MUTED};
             font-size: 0.92rem;
             margin-top: 0.22rem;
             font-weight: 500;
-            letter-spacing: 0.01em;
         }}
 
         .section-box {{
-            background: linear-gradient(180deg, {COLOR_CARD}, #0F151F);
-            border: 1px solid {COLOR_BORDER};
+            background: linear-gradient(180deg, {APP_CARD}, #0F151F);
+            border: 1px solid {APP_BORDER};
             border-radius: 15px;
             padding: 15px 17px;
             margin-bottom: 13px;
         }}
 
         .section-label {{
-            color: {COLOR_ORANGE};
+            color: {APP_ORANGE};
             font-size: 0.78rem;
             font-weight: 900;
             letter-spacing: 0.12rem;
@@ -203,15 +208,15 @@ def inject_css() -> None:
             display: inline-block;
             padding: 6px 12px;
             border-radius: 999px;
-            border: 1px solid {COLOR_BORDER};
+            border: 1px solid {APP_BORDER};
             background: #171F2C;
             font-size: 0.78rem;
             font-weight: 800;
-            color: {COLOR_TEXT_STRONG};
+            color: {APP_TEXT_STRONG};
         }}
 
         .small-note {{
-            color: {COLOR_SUBTEXT};
+            color: {APP_TEXT_MUTED};
             font-size: 0.88rem;
             line-height: 1.5;
             font-weight: 500;
@@ -219,7 +224,7 @@ def inject_css() -> None:
 
         .agent-box {{
             background: #0F151F;
-            border: 1px solid {COLOR_BORDER};
+            border: 1px solid {APP_BORDER};
             border-radius: 12px;
             padding: 11px 13px;
             margin-bottom: 9px;
@@ -231,7 +236,7 @@ def inject_css() -> None:
             letter-spacing: 0.07rem;
             margin-bottom: 0.26rem;
             text-transform: uppercase;
-            color: {COLOR_TEXT_DARKER};
+            color: #C2CCD9;
         }}
 
         .verdict-box {{
@@ -243,7 +248,7 @@ def inject_css() -> None:
 
         .footer-note {{
             text-align: center;
-            color: {COLOR_SUBTEXT};
+            color: {APP_TEXT_MUTED};
             font-size: 0.83rem;
             margin-top: 18px;
         }}
@@ -264,14 +269,14 @@ def inject_css() -> None:
 
         .compact-label {{
             flex: 1;
-            color: {COLOR_TEXT_DARKER};
+            color: #C2CCD9;
             font-weight: 600;
         }}
 
         .compact-bar {{
             width: 70px;
             text-align: center;
-            color: {COLOR_GREEN_SOFT};
+            color: {APP_GREEN_SOFT};
             font-family: monospace;
             font-weight: 700;
         }}
@@ -279,22 +284,17 @@ def inject_css() -> None:
         .compact-value {{
             width: 52px;
             text-align: right;
-            color: {COLOR_TEXT};
+            color: {APP_TEXT};
             font-size: 0.90rem;
             font-weight: 700;
         }}
 
         .stDownloadButton > button {{
             background: linear-gradient(180deg, #16211A, #121A15);
-            color: {COLOR_TEXT_STRONG};
+            color: {APP_TEXT_STRONG};
             border: 1px solid #29472D;
             border-radius: 12px;
             font-weight: 800;
-        }}
-
-        .stTextInput input, .stNumberInput input {{
-            background-color: #0E141D !important;
-            color: {COLOR_TEXT_STRONG} !important;
         }}
         </style>
         """,
@@ -317,12 +317,12 @@ def score_status(score: float) -> str:
 
 def score_color(score: float) -> str:
     if score >= 11:
-        return COLOR_GREEN
+        return APP_GREEN
     if score >= 8:
-        return COLOR_AMBER
+        return APP_AMBER
     if score >= 5:
         return "#C89C42"
-    return COLOR_RED
+    return APP_RED
 
 
 def clamp_score(value: int, low: int, high: int) -> int:
@@ -334,7 +334,7 @@ def make_bar(value: int, max_value: int) -> str:
     return ("█" * value) + ("░" * (max_value - value))
 
 
-def get_safe_logo_for_pdf(path: str, width_mm: float = 14, height_mm: float = 14):
+def get_safe_logo_for_pdf(path: str, width_mm: float = 12, height_mm: float = 12):
     if not Path(path).exists():
         return None
 
@@ -362,14 +362,12 @@ def get_safe_logo_for_pdf(path: str, width_mm: float = 14, height_mm: float = 14
 def pdf_header_band(canvas, doc):
     canvas.saveState()
     page_width, page_height = A4
-
-    canvas.setFillColor(colors.HexColor(COLOR_PDF_HEADER))
+    canvas.setFillColor(colors.HexColor(PDF_BG_HEADER))
     canvas.rect(0, page_height - 28 * mm, page_width, 28 * mm, fill=1, stroke=0)
 
-    canvas.setStrokeColor(colors.HexColor(COLOR_PDF_RULE))
+    canvas.setStrokeColor(colors.HexColor(PDF_RULE))
     canvas.setLineWidth(0.6)
     canvas.line(16 * mm, page_height - 29 * mm, page_width - 16 * mm, page_height - 29 * mm)
-
     canvas.restoreState()
 
 
@@ -732,17 +730,17 @@ def build_pdf(report: ReportData) -> bytes:
         name="BrandStyle",
         parent=styles["Normal"],
         fontName="Helvetica-Bold",
-        fontSize=15,
-        leading=16,
-        textColor=colors.HexColor(COLOR_TEXT_STRONG),
+        fontSize=14.5,
+        leading=15.5,
+        textColor=colors.white,
     )
     report_title_style = ParagraphStyle(
         name="ReportTitleStyle",
         parent=styles["Normal"],
         fontName="Helvetica-Bold",
-        fontSize=13.2,
-        leading=14,
-        textColor=colors.HexColor(COLOR_TEXT_STRONG),
+        fontSize=12.6,
+        leading=13.5,
+        textColor=colors.white,
         alignment=TA_RIGHT,
     )
     small_style = ParagraphStyle(
@@ -750,55 +748,49 @@ def build_pdf(report: ReportData) -> bytes:
         parent=styles["Normal"],
         fontName="Helvetica",
         fontSize=8.3,
-        leading=10.5,
-        textColor=colors.HexColor(COLOR_SUBTEXT),
+        leading=10.3,
+        textColor=colors.HexColor(PDF_MUTED),
     )
     body_style = ParagraphStyle(
         name="BodyStyle",
         parent=styles["Normal"],
         fontName="Helvetica",
-        fontSize=9.4,
-        leading=12.3,
-        textColor=colors.HexColor(COLOR_TEXT_DARKER),
+        fontSize=9.5,
+        leading=12.4,
+        textColor=colors.HexColor(PDF_TEXT),
     )
     section_style = ParagraphStyle(
         name="SectionStyle",
         parent=styles["Normal"],
         fontName="Helvetica-Bold",
-        fontSize=10.2,
-        leading=12.5,
-        textColor=colors.HexColor(COLOR_ORANGE),
+        fontSize=10.1,
+        leading=12.2,
+        textColor=colors.HexColor(PDF_ORANGE),
         spaceAfter=2,
     )
     verdict_style = ParagraphStyle(
         name="VerdictStyle",
         parent=styles["Normal"],
         fontName="Helvetica-Bold",
-        fontSize=12.5,
-        leading=14.8,
-        textColor=colors.HexColor(COLOR_GREEN_SOFT),
+        fontSize=12.3,
+        leading=14.5,
+        textColor=colors.HexColor(PDF_GREEN),
     )
 
     story = []
 
-    safe_logo = get_safe_logo_for_pdf(LOGO_PATH, width_mm=12.5, height_mm=12.5)
+    safe_logo = get_safe_logo_for_pdf(LOGO_PATH, width_mm=12, height_mm=12)
 
     brand_copy = Paragraph(
-        f'<font color="{COLOR_TEXT_DARKER}">crypto</font><font color="{COLOR_GREEN_SOFT}">.guru</font><br/><font size="7.6" color="{COLOR_SUBTEXT}">{TAGLINE}</font>',
+        f'<font color="#D9E1EC">crypto</font><font color="#7CFF5B">.guru</font><br/><font size="7.4" color="#9AA7B8">{TAGLINE}</font>',
         brand_style,
     )
     report_title = Paragraph("CRYPTO INTELLIGENCE REPORT", report_title_style)
 
     if safe_logo is not None:
-        brand_table = Table(
-            [[safe_logo, brand_copy]],
-            colWidths=[14 * mm, 56 * mm],
-        )
+        brand_table = Table([[safe_logo, brand_copy]], colWidths=[14 * mm, 56 * mm])
     else:
-        brand_table = Table(
-            [[brand_copy]],
-            colWidths=[70 * mm],
-        )
+        brand_table = Table([[brand_copy]], colWidths=[70 * mm])
 
     brand_table.setStyle(
         TableStyle(
@@ -812,10 +804,7 @@ def build_pdf(report: ReportData) -> bytes:
         )
     )
 
-    header_table = Table(
-        [[brand_table, report_title]],
-        colWidths=[92 * mm, 78 * mm],
-    )
+    header_table = Table([[brand_table, report_title]], colWidths=[92 * mm, 78 * mm])
     header_table.setStyle(
         TableStyle(
             [
@@ -845,32 +834,14 @@ def build_pdf(report: ReportData) -> bytes:
     )
     story.append(Spacer(1, 4 * mm))
 
+    # Left-aligned score block
     story.append(Paragraph("01 · MIRO v2 SCORE", section_style))
-    score_table = Table(
-        [[
-            Paragraph(
-                f'<font size="21" color="{COLOR_GREEN_SOFT}"><b>{report.miro_total:.1f} / 15</b></font>',
-                body_style,
-            ),
-            Paragraph(
-                f'<font size="11.2" color="{COLOR_TEXT_STRONG}"><b>{report.status}</b></font>',
-                body_style,
-            ),
-        ]],
-        colWidths=[36 * mm, 96 * mm],
+    score_line = Paragraph(
+        f'<font size="20" color="{PDF_GREEN}"><b>{report.miro_total:.1f} / 15</b></font>'
+        f'&nbsp;&nbsp;&nbsp;<font size="11" color="{PDF_TEXT}"><b>{report.status}</b></font>',
+        body_style,
     )
-    score_table.setStyle(
-        TableStyle(
-            [
-                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                ("LEFTPADDING", (0, 0), (-1, -1), 0),
-                ("RIGHTPADDING", (0, 0), (-1, -1), 0),
-                ("TOPPADDING", (0, 0), (-1, -1), 0),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
-            ]
-        )
-    )
-    story.append(score_table)
+    story.append(score_line)
     story.append(Spacer(1, 1.8 * mm))
 
     compact_score_table = Table(
@@ -882,17 +853,18 @@ def build_pdf(report: ReportData) -> bytes:
             ["On-Chain", f"{report.breakdown.onchain_confirmation}/4"],
             ["Risk", f"-{report.breakdown.risk_penalty}"],
         ],
-        colWidths=[42 * mm, 15 * mm],
+        colWidths=[34 * mm, 14 * mm],
     )
     compact_score_table.setStyle(
         TableStyle(
             [
-                ("TEXTCOLOR", (0, 0), (-1, -1), colors.HexColor(COLOR_TEXT_DARKER)),
+                ("TEXTCOLOR", (0, 0), (-1, -1), colors.HexColor(PDF_TEXT_SOFT)),
                 ("FONTNAME", (0, 0), (-1, -1), "Helvetica-Bold"),
                 ("LEFTPADDING", (0, 0), (-1, -1), 0),
                 ("RIGHTPADDING", (0, 0), (-1, -1), 0),
-                ("TOPPADDING", (0, 0), (-1, -1), 1.5),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 1.5),
+                ("TOPPADDING", (0, 0), (-1, -1), 1.2),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 1.2),
+                ("ALIGN", (0, 0), (0, -1), "LEFT"),
                 ("ALIGN", (1, 0), (1, -1), "RIGHT"),
             ]
         )
@@ -985,7 +957,7 @@ def render_brand_header() -> None:
             st.markdown(
                 f"""
                 <div class="brand-title">
-                    <span style="color:{COLOR_TEXT_DARKER};">crypto</span><span style="color:{COLOR_GREEN_SOFT};">.guru</span>
+                    <span style="color:#C2CCD9;">crypto</span><span style="color:{APP_GREEN_SOFT};">.guru</span>
                 </div>
                 <div class="brand-subtitle">{TAGLINE}</div>
                 """,
@@ -995,10 +967,10 @@ def render_brand_header() -> None:
         st.markdown(
             f"""
             <div class="brand-title">
-                <span style="color:{COLOR_TEXT_DARKER};">crypto</span><span style="color:{COLOR_GREEN_SOFT};">.guru</span>
+                <span style="color:#C2CCD9;">crypto</span><span style="color:{APP_GREEN_SOFT};">.guru</span>
             </div>
             <div class="brand-subtitle">{TAGLINE}</div>
-            <div style="margin-top:8px; color:{COLOR_RED}; font-size:0.9rem;">
+            <div style="margin-top:8px; color:{APP_RED}; font-size:0.9rem;">
                 Logo not found at: {LOGO_PATH}
             </div>
             """,
@@ -1015,7 +987,7 @@ def render_token_header(report: ReportData) -> None:
             <div class="section-label">Live Signal</div>
             <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:16px; flex-wrap:wrap;">
                 <div>
-                    <div style="font-size:1.9rem; font-weight:900; color:{COLOR_TEXT_STRONG}; letter-spacing:-0.02em;">{report.token.token_name} <span style="color:{COLOR_SUBTEXT}; font-size:1rem; font-weight:700;">· {report.token.chain}</span></div>
+                    <div style="font-size:1.9rem; font-weight:900; color:{APP_TEXT_STRONG}; letter-spacing:-0.02em;">{report.token.token_name} <span style="color:{APP_TEXT_MUTED}; font-size:1rem; font-weight:700;">· {report.token.chain}</span></div>
                     <div class="small-note">{report.token.generated_at} · Timeframe: {report.token.timeframe} · Price: ${report.token.price:,.4f}</div>
                 </div>
                 <div style="text-align:right;">
@@ -1040,10 +1012,7 @@ def render_breakdown(report: ReportData) -> None:
         ("Risk", make_bar(b.risk_penalty, 5), f"-{b.risk_penalty}"),
     ]
 
-    st.markdown(
-        '<div class="section-box"><div class="section-label">01 · Miro v2 Breakdown</div>',
-        unsafe_allow_html=True,
-    )
+    st.markdown('<div class="section-box"><div class="section-label">01 · Miro v2 Breakdown</div>', unsafe_allow_html=True)
 
     for name, bar, value in rows:
         st.markdown(
@@ -1062,10 +1031,7 @@ def render_breakdown(report: ReportData) -> None:
 
 def render_smart_money(report: ReportData) -> None:
     s = report.smart_money
-    st.markdown(
-        '<div class="section-box"><div class="section-label">02 · Smart Money Snapshot</div>',
-        unsafe_allow_html=True,
-    )
+    st.markdown('<div class="section-box"><div class="section-label">02 · Smart Money Snapshot</div>', unsafe_allow_html=True)
     st.write(f"**Active Smart Wallets:** {s.smart_wallets_active}")
     st.write(f"**Repeat Buyers:** {'Detected' if s.repeat_buyers else 'No'}")
     st.write(f"**Net Flow:** {s.net_flow}")
@@ -1076,10 +1042,7 @@ def render_smart_money(report: ReportData) -> None:
 
 def render_kronos(report: ReportData) -> None:
     k = report.kronos
-    st.markdown(
-        '<div class="section-box"><div class="section-label">03 · Market Structure</div>',
-        unsafe_allow_html=True,
-    )
+    st.markdown('<div class="section-box"><div class="section-label">03 · Market Structure</div>', unsafe_allow_html=True)
     st.write(f"**Regime:** {k.regime}")
     st.write(f"**Bias:** {k.bias}")
     st.write(f"**Confidence:** {k.confidence}%")
@@ -1088,16 +1051,13 @@ def render_kronos(report: ReportData) -> None:
 
 
 def render_council(report: ReportData) -> None:
-    st.markdown(
-        '<div class="section-box"><div class="section-label">04 · AI Council</div>',
-        unsafe_allow_html=True,
-    )
+    st.markdown('<div class="section-box"><div class="section-label">04 · AI Council</div>', unsafe_allow_html=True)
     for agent in report.council:
         st.markdown(
             f"""
             <div class="agent-box">
                 <div class="agent-title">{agent.emoji} {agent.name}</div>
-                <div style="color:{COLOR_TEXT_DARKER}; font-weight:600;">{agent.text}</div>
+                <div style="color:#C2CCD9; font-weight:600;">{agent.text}</div>
             </div>
             """,
             unsafe_allow_html=True,
@@ -1107,10 +1067,7 @@ def render_council(report: ReportData) -> None:
 
 def render_risk(report: ReportData) -> None:
     r = report.risk
-    st.markdown(
-        '<div class="section-box"><div class="section-label">05 · Risk Summary</div>',
-        unsafe_allow_html=True,
-    )
+    st.markdown('<div class="section-box"><div class="section-label">05 · Risk Summary</div>', unsafe_allow_html=True)
     st.write(f"**Liquidity:** {r.liquidity}")
     st.write(f"**Concentration:** {r.concentration}")
     st.write(f"**Suspicious Activity:** {r.suspicious_activity}")
@@ -1124,9 +1081,9 @@ def render_verdict(report: ReportData) -> None:
         f"""
         <div class="verdict-box">
             <div class="section-label" style="margin-bottom:0.45rem;">06 · Final Verdict</div>
-            <div style="font-size:1.2rem; font-weight:900; color:{COLOR_GREEN_SOFT}; margin-bottom:0.55rem; letter-spacing:-0.01em;">{report.verdict_title}</div>
-            <ul style="margin-top:0.15rem; margin-bottom:0.7rem; color:{COLOR_TEXT_DARKER}; font-weight:600;">{bullets}</ul>
-            <div style="color:{COLOR_TEXT_STRONG};"><b>Recommended Action:</b> {report.action_note}</div>
+            <div style="font-size:1.2rem; font-weight:900; color:{APP_GREEN_SOFT}; margin-bottom:0.55rem; letter-spacing:-0.01em;">{report.verdict_title}</div>
+            <ul style="margin-top:0.15rem; margin-bottom:0.7rem; color:#C2CCD9; font-weight:600;">{bullets}</ul>
+            <div style="color:{APP_TEXT_STRONG};"><b>Recommended Action:</b> {report.action_note}</div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -1220,10 +1177,7 @@ def main() -> None:
             use_container_width=True,
         )
 
-    st.markdown(
-        f'<div class="footer-note">{BRAND_NAME} · {TAGLINE}</div>',
-        unsafe_allow_html=True,
-    )
+    st.markdown(f'<div class="footer-note">{BRAND_NAME} · {TAGLINE}</div>', unsafe_allow_html=True)
 
 
 if __name__ == "__main__":
