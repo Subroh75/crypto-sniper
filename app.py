@@ -101,7 +101,8 @@ div[data-testid="stTextInput"] input:focus {
   border-color: #7c3aed !important;
   box-shadow: 0 0 0 3px rgba(124,58,237,0.25) !important;
 }
-.stButton > button {
+.stButton > button,
+.stFormSubmitButton > button {
   width: 100%;
   background: linear-gradient(135deg, #7c3aed, #38bdf8) !important;
   color: #fff !important; border: none !important;
@@ -111,7 +112,8 @@ div[data-testid="stTextInput"] input:focus {
   text-transform: uppercase;
   transition: opacity 0.2s;
 }
-.stButton > button:hover { opacity: 0.88; }
+.stButton > button:hover,
+.stFormSubmitButton > button:hover { opacity: 0.88; }
 
 /* ── Radio interval pills ── */
 div[data-testid="stRadio"] > div { display:flex; flex-wrap:wrap; gap:8px; justify-content:center; }
@@ -698,28 +700,29 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# Input — Enter key OR button both trigger analysis
-c1, c2 = st.columns([3, 1])
-with c1:
-    coin_raw = st.text_input(
-        "",
-        placeholder="BTC  ·  ETH  ·  SOL  ·  KAVA",
-        label_visibility="collapsed",
-        key="coin_input",
-    )
-with c2:
-    go_btn = st.button("ANALYSE", use_container_width=True)
-
+# Interval selector — outside the form so it persists across re-runs
 interval_map = {"1m":"1m","5m":"5m","15m":"15m","30m":"30m","1H":"1h","4H":"4h","1D":"1d"}
 interval_lbl = st.radio("", list(interval_map.keys()), index=4, horizontal=True, label_visibility="collapsed")
 interval     = interval_map[interval_lbl]
+
+# st.form submits on Enter key OR button click
+with st.form(key="sniper_form", enter_to_submit=True, border=False):
+    c1, c2 = st.columns([3, 1])
+    with c1:
+        coin_raw = st.text_input(
+            "",
+            placeholder="BTC  ·  ETH  ·  SOL  ·  KAVA",
+            label_visibility="collapsed",
+        )
+    with c2:
+        go_btn = st.form_submit_button("ANALYSE", use_container_width=True)
 
 if not HAS_YF:
     st.error("yfinance not installed — add `yfinance` to requirements.txt")
     st.stop()
 
-# Trigger on Enter (coin_raw populated) OR button click
-should_run = bool(coin_raw)  # Enter key re-runs script with coin_raw set
+# Run if form was submitted (Enter or button) AND a coin was typed
+should_run = go_btn and bool(coin_raw)
 
 if not should_run:
     st.markdown("""
