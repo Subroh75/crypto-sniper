@@ -1,20 +1,21 @@
 from __future__ import annotations
 
-import json
+import io
+import math
 import textwrap
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 import streamlit as st
 
 
 # =========================================================
-# PAGE SETUP
+# PAGE CONFIG
 # =========================================================
 st.set_page_config(
     page_title="Crypto AI Lab",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="collapsed",
 )
 
 
@@ -24,53 +25,109 @@ st.set_page_config(
 st.markdown(
     """
     <style>
-    .block-container {
-        padding-top: 1.2rem;
-        padding-bottom: 2rem;
-        max-width: 1400px;
+    [data-testid="stSidebar"] {
+        display: none;
     }
 
-    .main-title {
+    .block-container {
+        max-width: 1120px;
+        padding-top: 1.2rem;
+        padding-bottom: 2.2rem;
+    }
+
+    .app-title {
         font-size: 2rem;
         font-weight: 800;
         color: #111111;
-        margin-bottom: 0.15rem;
+        margin-bottom: 0.2rem;
     }
 
-    .sub-title {
+    .app-subtitle {
         font-size: 1rem;
-        color: #444444;
+        color: #555555;
         margin-bottom: 1.2rem;
     }
 
-    .panel {
+    .section-title {
+        font-size: 1.18rem;
+        font-weight: 800;
+        color: #111111;
+        margin-top: 1.1rem;
+        margin-bottom: 0.8rem;
+    }
+
+    .signal-output-box {
+        border: 1px solid rgba(0,0,0,0.10);
+        border-radius: 18px;
+        padding: 18px 18px;
+        background: #ffffff;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+        margin-bottom: 12px;
+    }
+
+    .signal-main {
+        font-size: 1.45rem;
+        font-weight: 800;
+        color: #111111;
+        margin-bottom: 0.35rem;
+    }
+
+    .signal-sub {
+        font-size: 0.96rem;
+        color: #444444;
+        line-height: 1.5;
+    }
+
+    .grid-card {
         border: 1px solid rgba(0,0,0,0.10);
         border-radius: 16px;
-        padding: 14px 16px;
+        padding: 14px 14px;
         background: #ffffff;
-        margin-bottom: 12px;
         box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+        min-height: 106px;
+        margin-bottom: 12px;
     }
 
-    .panel-title {
-        font-size: 0.84rem;
-        color: #444444;
+    .grid-label {
+        font-size: 0.82rem;
+        color: #555555;
         font-weight: 700;
         margin-bottom: 6px;
-        text-transform: none;
     }
 
-    .panel-value {
+    .grid-value {
         font-size: 1.08rem;
         color: #111111;
         font-weight: 800;
-        margin-bottom: 3px;
+        margin-bottom: 6px;
     }
 
-    .panel-sub {
+    .grid-note {
         font-size: 0.86rem;
         color: #666666;
-        line-height: 1.4;
+        line-height: 1.45;
+    }
+
+    .narrative-box {
+        border: 1px solid rgba(0,0,0,0.10);
+        border-radius: 16px;
+        padding: 16px 16px;
+        background: #ffffff;
+        box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+        margin-bottom: 12px;
+    }
+
+    .narrative-heading {
+        font-size: 1rem;
+        font-weight: 800;
+        color: #111111;
+        margin-bottom: 0.45rem;
+    }
+
+    .narrative-text {
+        font-size: 0.95rem;
+        color: #222222;
+        line-height: 1.55;
     }
 
     .agent-card {
@@ -78,46 +135,49 @@ st.markdown(
         border-radius: 16px;
         padding: 14px 16px;
         background: #ffffff;
-        margin-bottom: 12px;
         box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+        margin-bottom: 12px;
     }
 
     .agent-title {
-        font-size: 0.96rem;
-        color: #111111;
+        font-size: 0.97rem;
         font-weight: 800;
+        color: #111111;
         margin-bottom: 8px;
     }
 
     .agent-body {
         font-size: 0.95rem;
         color: #222222;
-        line-height: 1.55;
+        line-height: 1.58;
     }
 
-    .summary-box {
-        border-radius: 14px;
-        padding: 14px 16px;
-        background: #f7f8fa;
-        border: 1px solid rgba(0,0,0,0.08);
-        color: #111111;
-        font-size: 0.95rem;
-        line-height: 1.5;
-        margin-top: 6px;
-        margin-bottom: 14px;
+    .download-wrap {
+        border: 1px solid rgba(0,0,0,0.10);
+        border-radius: 16px;
+        padding: 16px 16px;
+        background: #ffffff;
+        box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+        margin-top: 8px;
     }
 
-    .section-head {
-        font-size: 1.18rem;
-        font-weight: 800;
-        color: #111111;
-        margin-top: 0.6rem;
-        margin-bottom: 0.8rem;
-    }
-
-    .tiny-muted {
-        font-size: 0.82rem;
+    .tiny {
+        font-size: 0.84rem;
         color: #666666;
+    }
+
+    .stButton > button {
+        width: 100%;
+        border-radius: 12px;
+        height: 2.9rem;
+        font-weight: 700;
+    }
+
+    .stDownloadButton > button {
+        width: 100%;
+        border-radius: 12px;
+        height: 2.9rem;
+        font-weight: 700;
     }
     </style>
     """,
@@ -126,7 +186,7 @@ st.markdown(
 
 
 # =========================================================
-# UTILS
+# HELPERS
 # =========================================================
 def clamp(value: float, low: float, high: float) -> float:
     return max(low, min(high, value))
@@ -141,467 +201,247 @@ def safe_float(value: Any, default: float = 0.0) -> float:
         return default
 
 
-def score_band(score: float, max_score: float) -> str:
-    if max_score <= 0:
-        return "Balanced"
-    ratio = score / max_score
-    if ratio >= 0.80:
-        return "Strong"
-    if ratio >= 0.60:
+def signal_strength_label(score_out_of_15: float) -> str:
+    if score_out_of_15 >= 11.5:
+        return "High Momentum"
+    if score_out_of_15 >= 8.0:
         return "Constructive"
-    if ratio >= 0.40:
-        return "Balanced"
-    if ratio >= 0.20:
-        return "Cautious"
-    return "Weak"
-
-
-def direction_label(value: float) -> str:
-    if value >= 0.60:
-        return "Strong upside pressure"
-    if value >= 0.20:
-        return "Moderate upside pressure"
-    if value > -0.20:
-        return "Flat to mixed"
-    if value > -0.60:
-        return "Moderate downside pressure"
-    return "Strong downside pressure"
-
-
-def stability_label(value: float) -> str:
-    if value >= 0.75:
-        return "Very stable"
-    if value >= 0.55:
-        return "Stable"
-    if value >= 0.35:
-        return "Moderately stable"
-    if value >= 0.20:
-        return "Choppy"
-    return "Highly erratic"
-
-
-def breakout_label(value: float) -> str:
-    if value >= 0.80:
-        return "Breakout setup is strong"
-    if value >= 0.60:
-        return "Breakout setup is improving"
-    if value >= 0.40:
-        return "Breakout setup is possible"
-    if value >= 0.20:
-        return "Breakout setup is weak"
-    return "No meaningful breakout setup"
-
-
-def noise_label(value: float) -> str:
-    if value >= 0.80:
-        return "Very noisy"
-    if value >= 0.60:
-        return "Noisy"
-    if value >= 0.40:
-        return "Moderate noise"
-    if value >= 0.20:
-        return "Relatively clean"
-    return "Very clean"
-
-
-def strength_label_5(score: float) -> str:
-    if score >= 4.5:
-        return "Exceptional"
-    if score >= 3.8:
-        return "Strong"
-    if score >= 3.0:
-        return "Healthy"
-    if score >= 2.0:
+    if score_out_of_15 >= 5.0:
         return "Mixed"
     return "Weak"
 
 
+def component_label_5(value: float) -> str:
+    if value >= 4.5:
+        return "Exceptional"
+    if value >= 3.8:
+        return "Strong"
+    if value >= 3.0:
+        return "Healthy"
+    if value >= 2.0:
+        return "Mixed"
+    return "Weak"
+
+
+def range_label(value: float) -> str:
+    if value >= 1.6:
+        return "High in range"
+    if value >= 0.9:
+        return "Mid-range"
+    return "Low in range"
+
+
+def trend_label(value: float) -> str:
+    if value >= 2.5:
+        return "Aligned"
+    if value >= 1.8:
+        return "Improving"
+    if value >= 1.1:
+        return "Mixed"
+    return "Misaligned"
+
+
+def volatility_label(value: float) -> str:
+    if value >= 0.80:
+        return "Very high"
+    if value >= 0.60:
+        return "High"
+    if value >= 0.40:
+        return "Moderate"
+    if value >= 0.20:
+        return "Low"
+    return "Very low"
+
+
+def timing_label(breakout_value: float, volatility_value: float, trend_score: float) -> str:
+    if breakout_value >= 0.70 and volatility_value <= 0.45 and trend_score >= 1.8:
+        return "High-quality setup"
+    if breakout_value >= 0.55 and volatility_value <= 0.60:
+        return "Good setup"
+    if breakout_value >= 0.35:
+        return "Average setup"
+    return "Low-quality setup"
+
+
+def short_direction_label(slope_value: float) -> str:
+    if slope_value >= 0.60:
+        return "Strong upside pressure"
+    if slope_value >= 0.20:
+        return "Moderate upside pressure"
+    if slope_value > -0.20:
+        return "Flat to mixed"
+    if slope_value > -0.60:
+        return "Moderate downside pressure"
+    return "Strong downside pressure"
+
+
+def market_structure_label(trend_score: float, range_score: float, slope_value: float, breakout_value: float) -> str:
+    if trend_score >= 2.2 and range_score >= 1.2 and slope_value > 0.15:
+        return "Bullish"
+    if trend_score <= 1.0 and range_score <= 0.8 and slope_value < -0.15:
+        return "Bearish"
+    if abs(slope_value) < 0.20 and breakout_value < 0.50:
+        return "Sideways"
+    if slope_value > 0:
+        return "Bullish"
+    if slope_value < 0:
+        return "Bearish"
+    return "Sideways"
+
+
+def market_structure_narrative(structure: str, volume: float, price: float, trend: float, range_score: float, volatility: float) -> str:
+    if structure == "Bullish":
+        return (
+            f"Price structure is bullish. Participation is {component_label_5(volume).lower()}, "
+            f"price expansion is {component_label_5(price).lower()}, trend is {trend_label(trend).lower()}, "
+            f"and the asset is trading {range_label(range_score).lower()}. Volatility is {volatility_label(volatility).lower()}, "
+            f"so the market currently favors upside continuation over hesitation."
+        )
+    if structure == "Bearish":
+        return (
+            f"Price structure is bearish. Participation is {component_label_5(volume).lower()}, "
+            f"price expansion is {component_label_5(price).lower()}, trend is {trend_label(trend).lower()}, "
+            f"and the asset is trading {range_label(range_score).lower()}. Volatility is {volatility_label(volatility).lower()}, "
+            f"so the market currently favors weakness or failed rallies over clean upside continuation."
+        )
+    return (
+        f"Price structure is sideways. Participation is {component_label_5(volume).lower()}, "
+        f"price expansion is {component_label_5(price).lower()}, trend is {trend_label(trend).lower()}, "
+        f"and the asset is trading {range_label(range_score).lower()}. Volatility is {volatility_label(volatility).lower()}, "
+        f"so the market is better described as a range or transition than a decisive directional trend."
+    )
+
+
+def timing_narrative(timing_quality: str, slope_value: float, breakout_value: float, volatility_value: float) -> str:
+    direction = short_direction_label(slope_value)
+    if timing_quality == "High-quality setup":
+        return (
+            f"Timing quality is high. Direction is {direction.lower()}, breakout conditions are strong, "
+            f"and noise is reasonably contained. This is the type of setup where acting on confirmation makes sense."
+        )
+    if timing_quality == "Good setup":
+        return (
+            f"Timing quality is good. Direction is {direction.lower()}, breakout conditions are improving, "
+            f"and the setup has enough clarity to justify attention, but entries still need confirmation."
+        )
+    if timing_quality == "Average setup":
+        return (
+            f"Timing quality is average. Direction is {direction.lower()}, but the breakout profile is only moderate. "
+            f"This is watchlist territory rather than aggressive execution territory."
+        )
+    return (
+        f"Timing quality is low. Direction is {direction.lower()}, but the setup lacks decisive breakout quality. "
+        f"Patience is more valuable than forcing activity here."
+    )
+
+
+def conviction_score(volume: float, price: float, trend: float, range_score: float) -> float:
+    total = volume + price + trend + range_score
+    return round((total / 15.0) * 10.0, 1)
+
+
 # =========================================================
-# HUMAN-LANGUAGE SIGNAL MODEL
+# DATA MODEL
 # =========================================================
 @dataclass
-class HumanSignalComponents:
-    volume_strength_score: float = 0.0
-    volume_strength_text: str = "Weak participation"
-
-    price_expansion_score: float = 0.0
-    price_expansion_text: str = "Weak expansion"
-
-    position_in_range_score: float = 0.0
-    position_in_range_text: str = "Sitting low in its range"
-
-    trend_alignment_score: float = 0.0
-    trend_alignment_text: str = "Trend is mixed"
-
-    short_term_direction_value: float = 0.0
-    short_term_direction_text: str = "Flat to mixed"
-
-    price_stability_value: float = 0.5
-    price_stability_text: str = "Moderately stable"
-
-    breakout_potential_value: float = 0.0
-    breakout_potential_text: str = "No meaningful breakout setup"
-
-    noise_level_value: float = 0.5
-    noise_level_text: str = "Moderate noise"
-
-    market_structure: str = "Mixed structure"
-    timing_quality: str = "Average setup"
-    risk_posture: str = "Neutral risk"
-    momentum_view: str = "Momentum is mixed"
-    action_bias: str = "Wait for confirmation"
-
-    conviction_score: float = 0.0
-    conviction_text: str = "Balanced"
-
-    summary_line: str = ""
-
-    def to_agent_payload(self) -> Dict[str, Any]:
-        return {
-            "volume_strength": {
-                "score_out_of_5": round(self.volume_strength_score, 2),
-                "assessment": self.volume_strength_text,
-            },
-            "price_expansion": {
-                "score_out_of_5": round(self.price_expansion_score, 2),
-                "assessment": self.price_expansion_text,
-            },
-            "position_in_range": {
-                "score_out_of_2": round(self.position_in_range_score, 2),
-                "assessment": self.position_in_range_text,
-            },
-            "trend_alignment": {
-                "score_out_of_3": round(self.trend_alignment_score, 2),
-                "assessment": self.trend_alignment_text,
-            },
-            "short_term_direction": self.short_term_direction_text,
-            "price_stability": self.price_stability_text,
-            "breakout_potential": self.breakout_potential_text,
-            "noise_level": self.noise_level_text,
-            "market_structure": self.market_structure,
-            "timing_quality": self.timing_quality,
-            "risk_posture": self.risk_posture,
-            "momentum_view": self.momentum_view,
-            "action_bias": self.action_bias,
-            "conviction": {
-                "score_out_of_10": round(self.conviction_score, 2),
-                "assessment": self.conviction_text,
-            },
-            "summary_line": self.summary_line,
-        }
+class SignalPack:
+    symbol: str
+    timeframe: str
+    volume: float
+    price: float
+    trend: float
+    range_score: float
+    volatility: float
+    slope: float
+    breakout: float
+    market_structure: str
+    timing_quality: str
+    conviction: float
+    signal_output: str
 
 
-# =========================================================
-# TRANSLATION LAYER
-# =========================================================
-def build_human_signal_components(
-    *,
-    volume_score: float,
-    price_expansion_score: float,
+def build_signal_pack(
+    symbol: str,
+    timeframe: str,
+    volume: float,
+    price: float,
+    trend: float,
     range_score: float,
-    trend_score: float,
-    slope_value: float,
-    stability_value: float,
-    breakout_value: float,
-    noise_value: float,
-) -> HumanSignalComponents:
-    volume_score = clamp(safe_float(volume_score), 0.0, 5.0)
-    price_expansion_score = clamp(safe_float(price_expansion_score), 0.0, 5.0)
+    volatility: float,
+    slope: float,
+    breakout: float,
+) -> SignalPack:
+    volume = clamp(safe_float(volume), 0.0, 5.0)
+    price = clamp(safe_float(price), 0.0, 5.0)
+    trend = clamp(safe_float(trend), 0.0, 3.0)
     range_score = clamp(safe_float(range_score), 0.0, 2.0)
-    trend_score = clamp(safe_float(trend_score), 0.0, 3.0)
+    volatility = clamp(safe_float(volatility), 0.0, 1.0)
+    slope = clamp(safe_float(slope), -1.0, 1.0)
+    breakout = clamp(safe_float(breakout), 0.0, 1.0)
 
-    slope_value = clamp(safe_float(slope_value), -1.0, 1.0)
-    stability_value = clamp(safe_float(stability_value, 0.5), 0.0, 1.0)
-    breakout_value = clamp(safe_float(breakout_value), 0.0, 1.0)
-    noise_value = clamp(safe_float(noise_value, 0.5), 0.0, 1.0)
+    structure = market_structure_label(trend, range_score, slope, breakout)
+    timing = timing_label(breakout, volatility, trend)
 
-    conviction_raw = volume_score + price_expansion_score + range_score + trend_score
-    conviction_score = (conviction_raw / 15.0) * 10.0
+    raw_total = volume + price + trend + range_score
+    signal_output = signal_strength_label(raw_total)
 
-    volume_text = f"{strength_label_5(volume_score)} participation"
-    price_text = f"{strength_label_5(price_expansion_score)} expansion"
-
-    if range_score >= 1.6:
-        range_text = "Closing near the upper end of its range"
-    elif range_score >= 0.9:
-        range_text = "Holding in the middle of its range"
-    else:
-        range_text = "Sitting low in its range"
-
-    if trend_score >= 2.5:
-        trend_text = "Trend is aligned"
-    elif trend_score >= 1.8:
-        trend_text = "Trend is improving"
-    elif trend_score >= 1.1:
-        trend_text = "Trend is mixed"
-    else:
-        trend_text = "Trend is misaligned"
-
-    if conviction_raw >= 10.5:
-        momentum_view = "Momentum is expanding"
-    elif conviction_raw >= 8.0:
-        momentum_view = "Momentum is constructive"
-    elif conviction_raw >= 5.0:
-        momentum_view = "Momentum is mixed"
-    else:
-        momentum_view = "Momentum is weak"
-
-    if trend_score >= 2.2 and range_score >= 1.2 and slope_value > 0.15:
-        market_structure = "Bullish structure"
-    elif trend_score <= 1.0 and range_score <= 0.8 and slope_value < -0.15:
-        market_structure = "Bearish structure"
-    elif abs(slope_value) < 0.2 and breakout_value < 0.5:
-        market_structure = "Range-bound structure"
-    else:
-        market_structure = "Transitioning structure"
-
-    if breakout_value >= 0.7 and stability_value >= 0.5 and noise_value <= 0.45:
-        timing_quality = "High-quality setup"
-    elif breakout_value >= 0.55 and noise_value <= 0.60:
-        timing_quality = "Good setup"
-    elif breakout_value >= 0.35:
-        timing_quality = "Average setup"
-    else:
-        timing_quality = "Low-quality setup"
-
-    if conviction_raw >= 10.0 and noise_value <= 0.35 and stability_value >= 0.55:
-        risk_posture = "Aggressive risk is acceptable"
-    elif conviction_raw >= 7.0 and noise_value <= 0.60:
-        risk_posture = "Controlled risk is preferred"
-    elif conviction_raw >= 5.0:
-        risk_posture = "Small risk only"
-    else:
-        risk_posture = "Avoid size until conditions improve"
-
-    if market_structure == "Bullish structure" and breakout_value >= 0.55:
-        action_bias = "Lean long on pullbacks"
-    elif market_structure == "Bearish structure" and breakout_value >= 0.45:
-        action_bias = "Lean short into weakness"
-    elif breakout_value < 0.5:
-        action_bias = "Wait for confirmation"
-    else:
-        action_bias = "Trade only with tight risk"
-
-    summary_line = (
-        f"{momentum_view}. {market_structure}. {timing_quality}. "
-        f"Preferred stance: {action_bias.lower()}."
-    )
-
-    return HumanSignalComponents(
-        volume_strength_score=volume_score,
-        volume_strength_text=volume_text,
-        price_expansion_score=price_expansion_score,
-        price_expansion_text=price_text,
-        position_in_range_score=range_score,
-        position_in_range_text=range_text,
-        trend_alignment_score=trend_score,
-        trend_alignment_text=trend_text,
-        short_term_direction_value=slope_value,
-        short_term_direction_text=direction_label(slope_value),
-        price_stability_value=stability_value,
-        price_stability_text=stability_label(stability_value),
-        breakout_potential_value=breakout_value,
-        breakout_potential_text=breakout_label(breakout_value),
-        noise_level_value=noise_value,
-        noise_level_text=noise_label(noise_value),
-        market_structure=market_structure,
-        timing_quality=timing_quality,
-        risk_posture=risk_posture,
-        momentum_view=momentum_view,
-        action_bias=action_bias,
-        conviction_score=conviction_score,
-        conviction_text=score_band(conviction_raw, 15.0),
-        summary_line=summary_line,
-    )
-
-
-def make_human_language_components_from_signal_dict(signal: Dict[str, Any]) -> HumanSignalComponents:
-    volume_score = signal.get("volume_strength_score", signal.get("volume_score", 0.0))
-    price_score = signal.get("price_expansion_score", signal.get("price_score", 0.0))
-    range_score = signal.get("position_in_range_score", signal.get("range_score", 0.0))
-    trend_score = signal.get("trend_alignment_score", signal.get("trend_score", 0.0))
-
-    slope_value = signal.get("short_term_direction_value", signal.get("slope", 0.0))
-    stability_value = signal.get("price_stability_value", signal.get("stability", 0.5))
-    breakout_value = signal.get("breakout_potential_value", signal.get("breakout", 0.0))
-    noise_value = signal.get("noise_level_value", signal.get("volatility", signal.get("noise", 0.5)))
-
-    return build_human_signal_components(
-        volume_score=volume_score,
-        price_expansion_score=price_score,
+    return SignalPack(
+        symbol=symbol,
+        timeframe=timeframe,
+        volume=volume,
+        price=price,
+        trend=trend,
         range_score=range_score,
-        trend_score=trend_score,
-        slope_value=slope_value,
-        stability_value=stability_value,
-        breakout_value=breakout_value,
-        noise_value=noise_value,
+        volatility=volatility,
+        slope=slope,
+        breakout=breakout,
+        market_structure=structure,
+        timing_quality=timing,
+        conviction=conviction_score(volume, price, trend, range_score),
+        signal_output=signal_output,
     )
 
 
 # =========================================================
-# AGENT PROMPTS
+# AGENT LAYER
 # =========================================================
-def build_agent_system_prompt(role: str) -> str:
-    return textwrap.dedent(
-        f"""
-        You are the {role} agent inside a crypto intelligence app.
-
-        Rules:
-        1. Speak only in plain human language.
-        2. Never mention internal model names, internal labels, acronyms, factor codes, hidden references, or shorthand.
-        3. Use only these customer-facing terms:
-           Volume Strength
-           Price Expansion
-           Position in Range
-           Trend Alignment
-           Short-Term Direction
-           Price Stability
-           Breakout Potential
-           Noise Level
-           Market Structure
-           Timing Quality
-           Risk Posture
-           Momentum View
-           Action Bias
-        4. Be concise, clear, and decision-oriented.
-        5. Write like you are speaking to a customer, not an engineer.
-        """
-    ).strip()
-
-
-def build_agent_user_prompt(
-    role: str,
-    symbol: str,
-    timeframe: str,
-    components: HumanSignalComponents,
-    extra_context: Optional[Dict[str, Any]] = None,
-) -> str:
-    payload = components.to_agent_payload()
-    context = extra_context or {}
-
-    return textwrap.dedent(
-        f"""
-        Role: {role}
-        Asset: {symbol}
-        Timeframe: {timeframe}
-
-        Human-language signal components:
-        {json.dumps(payload, indent=2)}
-
-        Additional context:
-        {json.dumps(context, indent=2)}
-
-        Produce:
-        1. one sentence for the market read
-        2. one sentence for timing
-        3. one sentence for risk
-        4. one sentence for the next best action
-
-        Never mention hidden systems or internal mechanics.
-        """
-    ).strip()
-
-
-# =========================================================
-# LOCAL FALLBACK AGENTS
-# =========================================================
-def local_agent_response(
-    role: str,
-    symbol: str,
-    timeframe: str,
-    components: HumanSignalComponents,
-) -> str:
-    if role == "Market Analyst":
-        return (
-            f"{symbol} on {timeframe} shows {components.momentum_view.lower()} within "
-            f"{components.market_structure.lower()}. "
-            f"Volume Strength is described as {components.volume_strength_text.lower()} and "
-            f"Trend Alignment is {components.trend_alignment_text.lower()}."
-        )
-
-    if role == "Timing Analyst":
-        return (
-            f"Timing Quality is {components.timing_quality.lower()}. "
-            f"Short-Term Direction is {components.short_term_direction_text.lower()}, "
-            f"while Breakout Potential is {components.breakout_potential_text.lower()}."
-        )
-
-    if role == "Risk Analyst":
-        return (
-            f"Risk Posture is {components.risk_posture.lower()}. "
-            f"Price Stability is {components.price_stability_text.lower()} and Noise Level is "
-            f"{components.noise_level_text.lower()}, so position size should match setup quality."
-        )
-
-    if role == "Execution Coach":
-        return (
-            f"Action Bias is {components.action_bias.lower()}. "
-            f"Focus on clean confirmation rather than forcing activity, especially when conditions are mixed."
-        )
-
-    return components.summary_line
-
-
-# =========================================================
-# AI LAB PACK
-# =========================================================
-def generate_ai_lab_pack(
-    *,
-    symbol: str,
-    timeframe: str,
-    raw_signal: Dict[str, Any],
-    extra_context: Optional[Dict[str, Any]] = None,
-    llm_callable: Optional[Any] = None,
-) -> Dict[str, Any]:
-    components = make_human_language_components_from_signal_dict(raw_signal)
-
-    roles = [
-        "Market Analyst",
-        "Timing Analyst",
-        "Risk Analyst",
-        "Execution Coach",
-    ]
-
-    outputs: Dict[str, str] = {}
-
-    for role in roles:
-        system_prompt = build_agent_system_prompt(role)
-        user_prompt = build_agent_user_prompt(
-            role=role,
-            symbol=symbol,
-            timeframe=timeframe,
-            components=components,
-            extra_context=extra_context,
-        )
-
-        if llm_callable is not None:
-            try:
-                result = llm_callable(system_prompt, user_prompt)
-                outputs[role] = (result or "").strip()
-                if not outputs[role]:
-                    outputs[role] = local_agent_response(role, symbol, timeframe, components)
-            except Exception:
-                outputs[role] = local_agent_response(role, symbol, timeframe, components)
-        else:
-            outputs[role] = local_agent_response(role, symbol, timeframe, components)
+def ai_lab_outputs(pack: SignalPack) -> Dict[str, str]:
+    structure_text = pack.market_structure.lower()
+    timing_text = pack.timing_quality.lower()
+    direction_text = short_direction_label(pack.slope).lower()
+    vol_text = volatility_label(pack.volatility).lower()
 
     return {
-        "components": components,
-        "agent_payload": components.to_agent_payload(),
-        "agent_outputs": outputs,
+        "Market Analyst": (
+            f"{pack.symbol} on {pack.timeframe} currently presents a {structure_text} market structure. "
+            f"Volume is {component_label_5(pack.volume).lower()}, price expansion is {component_label_5(pack.price).lower()}, "
+            f"and trend alignment is {trend_label(pack.trend).lower()}, which keeps the broader read focused on directional follow-through."
+        ),
+        "Timing Analyst": (
+            f"The setup quality is {timing_text}. Short-term direction is {direction_text}, and the breakout profile suggests "
+            f"that execution should happen only when price confirms rather than on anticipation alone."
+        ),
+        "Risk Analyst": (
+            f"Volatility is {vol_text}, so risk should be sized according to current market noise. "
+            f"With a conviction score of {pack.conviction:.1f} out of 10, this is a setup for measured decision-making rather than emotional execution."
+        ),
+        "Execution Coach": (
+            f"The clearest action bias is to align with the current {structure_text} structure while respecting the {timing_text} timing profile. "
+            f"Stay selective, wait for confirmation, and avoid forcing trades when the signal is not fully aligned."
+        ),
     }
 
 
 # =========================================================
 # RENDER HELPERS
 # =========================================================
-def metric_box(title: str, value: str, subtitle: str = "") -> None:
+def card(title: str, value: str, note: str) -> None:
     st.markdown(
         f"""
-        <div class="panel">
-            <div class="panel-title">{title}</div>
-            <div class="panel-value">{value}</div>
-            <div class="panel-sub">{subtitle}</div>
+        <div class="grid-card">
+            <div class="grid-label">{title}</div>
+            <div class="grid-value">{value}</div>
+            <div class="grid-note">{note}</div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -620,220 +460,326 @@ def agent_card(title: str, body: str) -> None:
     )
 
 
-def render_translated_components(components: HumanSignalComponents) -> None:
-    st.markdown('<div class="section-head">Signal Breakdown</div>', unsafe_allow_html=True)
+# =========================================================
+# PDF GENERATOR
+# =========================================================
+def create_pdf_bytes(pack: SignalPack, agents: Dict[str, str]) -> bytes:
+    try:
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib.units import inch
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+    except Exception:
+        fallback_text = build_plaintext_report(pack, agents)
+        return fallback_text.encode("utf-8")
 
-    c1, c2 = st.columns(2)
-
-    with c1:
-        metric_box("Volume Strength", f"{components.volume_strength_score:.1f} / 5", components.volume_strength_text)
-        metric_box("Price Expansion", f"{components.price_expansion_score:.1f} / 5", components.price_expansion_text)
-        metric_box("Position in Range", f"{components.position_in_range_score:.1f} / 2", components.position_in_range_text)
-        metric_box("Trend Alignment", f"{components.trend_alignment_score:.1f} / 3", components.trend_alignment_text)
-
-    with c2:
-        metric_box("Short-Term Direction", components.short_term_direction_text)
-        metric_box("Price Stability", components.price_stability_text)
-        metric_box("Breakout Potential", components.breakout_potential_text)
-        metric_box("Noise Level", components.noise_level_text)
-
-    st.markdown('<div class="section-head">Market Read</div>', unsafe_allow_html=True)
-
-    a1, a2, a3 = st.columns(3)
-    with a1:
-        metric_box("Market Structure", components.market_structure)
-    with a2:
-        metric_box("Timing Quality", components.timing_quality)
-    with a3:
-        metric_box("Risk Posture", components.risk_posture)
-
-    b1, b2 = st.columns(2)
-    with b1:
-        metric_box("Momentum View", components.momentum_view)
-    with b2:
-        metric_box("Action Bias", components.action_bias)
-
-    st.markdown(
-        f'<div class="summary-box">{components.summary_line}</div>',
-        unsafe_allow_html=True,
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        rightMargin=36,
+        leftMargin=36,
+        topMargin=36,
+        bottomMargin=36,
     )
 
+    styles = getSampleStyleSheet()
+    title_style = styles["Title"]
+    body_style = styles["BodyText"]
+    body_style.fontName = "Helvetica"
+    body_style.fontSize = 10
+    body_style.leading = 14
 
-def render_ai_lab_output(
-    symbol: str,
-    timeframe: str,
-    components: HumanSignalComponents,
-    agent_outputs: Dict[str, str],
-) -> None:
-    st.markdown('<div class="section-head">AI Lab</div>', unsafe_allow_html=True)
-    st.markdown(
-        f'<div class="tiny-muted">{symbol} · {timeframe}</div>',
-        unsafe_allow_html=True,
+    heading_style = ParagraphStyle(
+        "HeadingStyle",
+        parent=styles["Heading2"],
+        fontName="Helvetica-Bold",
+        fontSize=13,
+        leading=16,
+        spaceAfter=8,
+        textColor="#111111",
     )
 
-    render_translated_components(components)
+    story = []
 
-    st.markdown('<div class="section-head">Agent Desk</div>', unsafe_allow_html=True)
+    story.append(Paragraph("Crypto AI Lab Report", title_style))
+    story.append(Spacer(1, 0.15 * inch))
+    story.append(Paragraph(f"<b>Asset:</b> {pack.symbol}", body_style))
+    story.append(Paragraph(f"<b>Timeframe:</b> {pack.timeframe}", body_style))
+    story.append(Spacer(1, 0.12 * inch))
 
-    ordered_roles = [
-        "Market Analyst",
-        "Timing Analyst",
-        "Risk Analyst",
-        "Execution Coach",
+    story.append(Paragraph("Signal Output", heading_style))
+    story.append(Paragraph(pack.signal_output, body_style))
+    story.append(Spacer(1, 0.1 * inch))
+
+    story.append(Paragraph("Signal Components", heading_style))
+    story.append(Paragraph(f"<b>Volume:</b> {pack.volume:.1f} / 5", body_style))
+    story.append(Paragraph(f"<b>Price:</b> {pack.price:.1f} / 5", body_style))
+    story.append(Paragraph(f"<b>Trend:</b> {pack.trend:.1f} / 3", body_style))
+    story.append(Paragraph(f"<b>Range:</b> {pack.range_score:.1f} / 2", body_style))
+    story.append(Paragraph(f"<b>Volatility:</b> {pack.volatility:.2f} / 1.0", body_style))
+    story.append(Spacer(1, 0.1 * inch))
+
+    story.append(Paragraph("Market Structure", heading_style))
+    story.append(Paragraph(f"<b>{pack.market_structure}</b>", body_style))
+    story.append(
+        Paragraph(
+            market_structure_narrative(
+                pack.market_structure,
+                pack.volume,
+                pack.price,
+                pack.trend,
+                pack.range_score,
+                pack.volatility,
+            ),
+            body_style,
+        )
+    )
+    story.append(Spacer(1, 0.1 * inch))
+
+    story.append(Paragraph("Timing Quality", heading_style))
+    story.append(Paragraph(f"<b>{pack.timing_quality}</b>", body_style))
+    story.append(
+        Paragraph(
+            timing_narrative(
+                pack.timing_quality,
+                pack.slope,
+                pack.breakout,
+                pack.volatility,
+            ),
+            body_style,
+        )
+    )
+    story.append(Spacer(1, 0.1 * inch))
+
+    story.append(Paragraph("AI Lab", heading_style))
+    for role, text in agents.items():
+        story.append(Paragraph(f"<b>{role}</b>", body_style))
+        story.append(Paragraph(text, body_style))
+        story.append(Spacer(1, 0.08 * inch))
+
+    doc.build(story)
+    pdf = buffer.getvalue()
+    buffer.close()
+    return pdf
+
+
+def build_plaintext_report(pack: SignalPack, agents: Dict[str, str]) -> str:
+    parts = [
+        "Crypto AI Lab Report",
+        "",
+        f"Asset: {pack.symbol}",
+        f"Timeframe: {pack.timeframe}",
+        "",
+        "Signal Output",
+        pack.signal_output,
+        "",
+        "Signal Components",
+        f"Volume: {pack.volume:.1f} / 5",
+        f"Price: {pack.price:.1f} / 5",
+        f"Trend: {pack.trend:.1f} / 3",
+        f"Range: {pack.range_score:.1f} / 2",
+        f"Volatility: {pack.volatility:.2f} / 1.0",
+        "",
+        "Market Structure",
+        pack.market_structure,
+        market_structure_narrative(
+            pack.market_structure,
+            pack.volume,
+            pack.price,
+            pack.trend,
+            pack.range_score,
+            pack.volatility,
+        ),
+        "",
+        "Timing Quality",
+        pack.timing_quality,
+        timing_narrative(
+            pack.timing_quality,
+            pack.slope,
+            pack.breakout,
+            pack.volatility,
+        ),
+        "",
+        "AI Lab",
     ]
 
-    for role in ordered_roles:
-        agent_card(role, agent_outputs.get(role, ""))
+    for role, text in agents.items():
+        parts.append(role)
+        parts.append(text)
+        parts.append("")
+
+    return "\n".join(parts)
 
 
 # =========================================================
-# OPTIONAL LLM CALL HOOK
-# Replace this with your real OpenAI call when ready.
+# TOP CONTROLS - NOT SIDEBAR
 # =========================================================
-def llm_callable(system_prompt: str, user_prompt: str) -> str:
-    """
-    Plug your real LLM call here later.
-
-    Example shape:
-        response = client.responses.create(
-            model="gpt-5.4",
-            input=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-        )
-        return response.output_text.strip()
-
-    For now this returns an empty string so the local agent fallback is used.
-    """
-    return ""
-
-
-# =========================================================
-# SIDEBAR
-# =========================================================
-with st.sidebar:
-    st.markdown("## Crypto AI Lab")
-    st.markdown("Human-language agent intelligence")
-    st.markdown("---")
-
-    selected_symbol = st.text_input("Symbol", value="BTC")
-    selected_timeframe = st.selectbox("Timeframe", ["15m", "1h", "4h", "1d"], index=1)
-
-    st.markdown("### Input Signals")
-
-    volume_score = st.slider("Volume Strength", 0.0, 5.0, 3.7, 0.1)
-    price_expansion_score = st.slider("Price Expansion", 0.0, 5.0, 3.4, 0.1)
-    range_score = st.slider("Position in Range", 0.0, 2.0, 1.4, 0.1)
-    trend_score = st.slider("Trend Alignment", 0.0, 3.0, 2.2, 0.1)
-
-    slope_value = st.slider("Short-Term Direction", -1.0, 1.0, 0.35, 0.05)
-    stability_value = st.slider("Price Stability", 0.0, 1.0, 0.58, 0.05)
-    breakout_value = st.slider("Breakout Potential", 0.0, 1.0, 0.66, 0.05)
-    volatility_value = st.slider("Noise Level", 0.0, 1.0, 0.34, 0.05)
-
-    st.markdown("---")
-    last_price = st.number_input("Last Price", min_value=0.0, value=84250.0, step=10.0)
-    change_percent = st.number_input("24h Change %", value=2.35, step=0.1)
-
-    run_lab = st.button("Run AI Lab", use_container_width=True)
-
-
-# =========================================================
-# MAIN HEADER
-# =========================================================
-st.markdown('<div class="main-title">Crypto AI Lab</div>', unsafe_allow_html=True)
+st.markdown('<div class="app-title">Crypto AI Lab</div>', unsafe_allow_html=True)
 st.markdown(
-    '<div class="sub-title">Agents consume only customer-facing language and respond without hidden references.</div>',
+    '<div class="app-subtitle">Clear signal translation, market structure, timing quality, deep reasoning, and PDF export.</div>',
+    unsafe_allow_html=True,
+)
+
+with st.container():
+    top1, top2, top3 = st.columns(3)
+    with top1:
+        symbol = st.text_input("Asset", value="BTC")
+    with top2:
+        timeframe = st.selectbox("Timeframe", ["15m", "1h", "4h", "1d"], index=1)
+    with top3:
+        run_analysis = st.button("Run Analysis")
+
+with st.container():
+    c1, c2, c3, c4, c5 = st.columns(5)
+    with c1:
+        volume = st.slider("Volume", 0.0, 5.0, 3.7, 0.1)
+    with c2:
+        price = st.slider("Price", 0.0, 5.0, 3.4, 0.1)
+    with c3:
+        trend = st.slider("Trend", 0.0, 3.0, 2.2, 0.1)
+    with c4:
+        range_score = st.slider("Range", 0.0, 2.0, 1.4, 0.1)
+    with c5:
+        volatility = st.slider("Volatility", 0.0, 1.0, 0.34, 0.01)
+
+with st.container():
+    c6, c7 = st.columns(2)
+    with c6:
+        slope = st.slider("Short-Term Direction", -1.0, 1.0, 0.35, 0.05)
+    with c7:
+        breakout = st.slider("Breakout Potential", 0.0, 1.0, 0.66, 0.05)
+
+
+# =========================================================
+# BUILD OUTPUT
+# =========================================================
+pack = build_signal_pack(
+    symbol=symbol,
+    timeframe=timeframe,
+    volume=volume,
+    price=price,
+    trend=trend,
+    range_score=range_score,
+    volatility=volatility,
+    slope=slope,
+    breakout=breakout,
+)
+
+agents = ai_lab_outputs(pack)
+
+
+# =========================================================
+# 1. SIGNAL OUTPUT
+# =========================================================
+st.markdown('<div class="section-title">Signal Output</div>', unsafe_allow_html=True)
+st.markdown(
+    f"""
+    <div class="signal-output-box">
+        <div class="signal-main">{pack.signal_output}</div>
+        <div class="signal-sub">
+            {pack.symbol} on {pack.timeframe} currently shows a <b>{pack.market_structure.lower()}</b> structure
+            with <b>{pack.timing_quality.lower()}</b> timing conditions and a conviction score of
+            <b>{pack.conviction:.1f} / 10</b>.
+        </div>
+    </div>
+    """,
     unsafe_allow_html=True,
 )
 
 
 # =========================================================
-# RAW SIGNAL ASSEMBLY
-# Replace these values with your real engine outputs later.
+# 2. SIGNAL COMPONENTS
 # =========================================================
-raw_signal = {
-    "volume_score": volume_score,
-    "price_score": price_expansion_score,
-    "range_score": range_score,
-    "trend_score": trend_score,
-    "slope": slope_value,
-    "stability": stability_value,
-    "breakout": breakout_value,
-    "volatility": volatility_value,
-}
+st.markdown('<div class="section-title">Signal Components</div>', unsafe_allow_html=True)
+
+r1 = st.columns(5)
+with r1[0]:
+    card("Volume", f"{pack.volume:.1f} / 5", f"{component_label_5(pack.volume)} participation")
+with r1[1]:
+    card("Price", f"{pack.price:.1f} / 5", f"{component_label_5(pack.price)} expansion")
+with r1[2]:
+    card("Trend", f"{pack.trend:.1f} / 3", f"Trend is {trend_label(pack.trend).lower()}")
+with r1[3]:
+    card("Range", f"{pack.range_score:.1f} / 2", range_label(pack.range_score))
+with r1[4]:
+    card("Volatility", f"{pack.volatility:.2f} / 1.0", f"{volatility_label(pack.volatility)} volatility")
 
 
 # =========================================================
-# MAIN APP
+# 3. MARKET STRUCTURE
 # =========================================================
-ai_lab_pack = generate_ai_lab_pack(
-    symbol=selected_symbol,
-    timeframe=selected_timeframe,
-    raw_signal=raw_signal,
-    extra_context={
-        "last_price": last_price,
-        "change_percent": change_percent,
-    },
-    llm_callable=llm_callable,
+st.markdown('<div class="section-title">Market Structure</div>', unsafe_allow_html=True)
+st.markdown(
+    f"""
+    <div class="narrative-box">
+        <div class="narrative-heading">{pack.market_structure}</div>
+        <div class="narrative-text">
+            {market_structure_narrative(
+                pack.market_structure,
+                pack.volume,
+                pack.price,
+                pack.trend,
+                pack.range_score,
+                pack.volatility
+            )}
+        </div>
+    </div>
+    """,
+    unsafe_allow_html=True,
 )
 
-components = ai_lab_pack["components"]
-agent_payload = ai_lab_pack["agent_payload"]
-agent_outputs = ai_lab_pack["agent_outputs"]
 
-col_left, col_right = st.columns([2.2, 1.1])
-
-with col_left:
-    render_ai_lab_output(
-        symbol=selected_symbol,
-        timeframe=selected_timeframe,
-        components=components,
-        agent_outputs=agent_outputs,
-    )
-
-with col_right:
-    st.markdown('<div class="section-head">Snapshot</div>', unsafe_allow_html=True)
-    metric_box("Asset", selected_symbol)
-    metric_box("Timeframe", selected_timeframe)
-    metric_box("Last Price", f"{last_price:,.2f}")
-    metric_box("24h Change", f"{change_percent:.2f}%")
-    metric_box("Conviction", f"{components.conviction_score:.1f} / 10", components.conviction_text)
-
-    st.markdown('<div class="section-head">Download</div>', unsafe_allow_html=True)
-
-    report = {
-        "asset": selected_symbol,
-        "timeframe": selected_timeframe,
-        "components": agent_payload,
-        "agent_outputs": agent_outputs,
-        "market_context": {
-            "last_price": last_price,
-            "change_percent": change_percent,
-        },
-    }
-
-    st.download_button(
-        label="Download AI Lab Report",
-        data=json.dumps(report, indent=2),
-        file_name=f"{selected_symbol.lower()}_{selected_timeframe}_ai_lab_report.json",
-        mime="application/json",
-        use_container_width=True,
-    )
-
-    with st.expander("Payload sent to agents"):
-        st.json(agent_payload)
-
-    with st.expander("Prompt rule"):
-        st.code(
-            """
-Agents must speak only in human language.
-Never mention internal model names, internal factor names, acronyms,
-hidden references, shorthand labels, or engine terminology.
-            """.strip()
-        )
+# =========================================================
+# 4. TIMING QUALITY
+# =========================================================
+st.markdown('<div class="section-title">Timing Quality</div>', unsafe_allow_html=True)
+st.markdown(
+    f"""
+    <div class="narrative-box">
+        <div class="narrative-heading">{pack.timing_quality}</div>
+        <div class="narrative-text">
+            {timing_narrative(
+                pack.timing_quality,
+                pack.slope,
+                pack.breakout,
+                pack.volatility
+            )}
+        </div>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
 
 
-if not run_lab:
-    st.caption("Adjust the inputs in the sidebar and click Run AI Lab. The app already updates live.")
+# =========================================================
+# 5. AI LAB
+# =========================================================
+st.markdown('<div class="section-title">AI Lab</div>', unsafe_allow_html=True)
+
+for role, text in agents.items():
+    agent_card(role, text)
+
+
+# =========================================================
+# 6. DOWNLOAD PDF
+# =========================================================
+st.markdown('<div class="section-title">Download PDF</div>', unsafe_allow_html=True)
+st.markdown(
+    """
+    <div class="download-wrap">
+        <div class="tiny">Export the current signal, structure, timing read, and AI Lab reasoning as a PDF report.</div>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
+pdf_bytes = create_pdf_bytes(pack, agents)
+
+st.download_button(
+    label="Download PDF Report",
+    data=pdf_bytes,
+    file_name=f"{pack.symbol.lower()}_{pack.timeframe}_ai_lab_report.pdf",
+    mime="application/pdf",
+    use_container_width=True,
+)
