@@ -9,6 +9,7 @@ from typing import List, Tuple
 import streamlit as st
 from PIL import Image
 from reportlab.lib import colors
+from reportlab.lib.enums import TA_RIGHT
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import mm
@@ -64,12 +65,12 @@ class TokenInfo:
 
 @dataclass
 class MiroBreakdown:
-    volume_expansion: int        # 0-5
-    volatility_expansion: int    # 0-3
-    range_control: int           # 0-2
-    trend_quality: int           # 0-3
-    onchain_confirmation: int    # 0-4
-    risk_penalty: int            # 0-5
+    volume_expansion: int
+    volatility_expansion: int
+    range_control: int
+    trend_quality: int
+    onchain_confirmation: int
+    risk_penalty: int
 
 
 @dataclass
@@ -140,13 +141,6 @@ def inject_css() -> None:
 
         section[data-testid="stSidebar"] {{
             background-color: #0F141D;
-        }}
-
-        div[data-testid="stMetric"] {{
-            background: {COLOR_CARD};
-            border: 1px solid {COLOR_BORDER};
-            padding: 14px;
-            border-radius: 14px;
         }}
 
         .brand-box {{
@@ -264,7 +258,6 @@ def inject_css() -> None:
             text-align: center;
             color: {COLOR_GREEN};
             font-family: monospace;
-            letter-spacing: 0;
         }}
 
         .compact-value {{
@@ -311,10 +304,10 @@ def make_bar(value: int, max_value: int) -> str:
     return ("█" * value) + ("░" * (max_value - value))
 
 
-def get_safe_logo_for_pdf(path: str, width_mm: float = 18, height_mm: float = 18):
+def get_safe_logo_for_pdf(path: str, width_mm: float = 14, height_mm: float = 14):
     """
-    Re-encodes the logo as a clean PNG in memory so ReportLab can read it safely.
-    Returns a ReportLab Image object or None.
+    Sanitizes the logo via Pillow and embeds it for ReportLab.
+    Converts white backgrounds to transparent-ish if present.
     """
     if not Path(path).exists():
         return None
@@ -322,6 +315,16 @@ def get_safe_logo_for_pdf(path: str, width_mm: float = 18, height_mm: float = 18
     try:
         with Image.open(path) as img:
             img = img.convert("RGBA")
+            pixels = img.getdata()
+            cleaned = []
+            for pixel in pixels:
+                r, g, b, a = pixel
+                if r > 245 and g > 245 and b > 245:
+                    cleaned.append((255, 255, 255, 0))
+                else:
+                    cleaned.append((r, g, b, a))
+            img.putdata(cleaned)
+
             buf = io.BytesIO()
             img.save(buf, format="PNG")
             buf.seek(0)
@@ -429,20 +432,17 @@ def build_smart_money(
     net_flow_positive: bool,
     holder_growth_24h: float,
 ) -> SmartMoneySnapshot:
-    net_flow = "Positive (Buy > Sell)" if net_flow_positive else "Mixed / Flat"
+    net_flow = "Positive" if net_flow_positive else "Mixed"
 
     parts = []
     if smart_wallets_active >= 2:
-        parts.append("smart accumulation visible")
+        parts.append("accumulation visible")
     if repeat_buyers:
-        parts.append("repeat entries detected")
+        parts.append("repeat buys")
     if holder_growth_24h >= 5:
         parts.append("holder growth supportive")
 
-    if parts:
-        summary = "Early positioning suggests " + ", ".join(parts) + "."
-    else:
-        summary = "No strong smart money pattern detected yet."
+    summary = "Early positioning suggests " + ", ".join(parts) + "." if parts else "No strong smart money pattern yet."
 
     return SmartMoneySnapshot(
         smart_wallets_active=smart_wallets_active,
@@ -455,20 +455,21 @@ def build_smart_money(
 
 def build_kronos(atr_multiple: float, adx_strength: float, range_position: float) -> KronosSnapshot:
     if atr_multiple < 1.5 and adx_strength < 20:
-        regime = "Low Volatility → Expansion Likely"
+        regime = "Compression"
         bias = "Mild Bullish" if range_position >= 0.70 else "Neutral"
         confidence = 64 if range_position >= 0.70 else 56
-        summary = "Compression conditions suggest rising probability of expansion."
+        summary = "Expansion probability is rising."
     elif atr_multiple >= 2.5 and adx_strength >= 20:
-        regime = "Active Expansion"
+        regime = "Expansion"
         bias = "Bullish"
         confidence = 72
-        summary = "Momentum and volatility align for possible continuation."
+        summary = "Momentum and volatility support continuation."
     else:
-        regime = "Mixed Structure"
+        regime = "Mixed"
         bias = "Neutral"
         confidence = 58
-        summary = "The market structure is tradable but not clean."
+        summary = "Structure is tradable but not clean."
+
     return KronosSnapshot(
         regime=regime,
         bias=bias,
@@ -483,11 +484,12 @@ def build_risk(
     suspicious_volume_penalty: bool,
 ) -> RiskSummary:
     liquidity = "Weak" if low_liquidity_penalty else "Strong"
-    concentration = "Elevated" if concentration_penalty else "Moderate / Acceptable"
-    suspicious_activity = "Detected" if suspicious_volume_penalty else "None detected"
-    execution_risk = "Use tighter execution discipline." if any(
+    concentration = "Elevated" if concentration_penalty else "Moderate"
+    suspicious_activity = "Detected" if suspicious_volume_penalty else "None"
+    execution_risk = "Use tighter execution." if any(
         [low_liquidity_penalty, concentration_penalty, suspicious_volume_penalty]
-    ) else "No critical execution issue."
+    ) else "No critical issue."
+
     return RiskSummary(
         liquidity=liquidity,
         concentration=concentration,
@@ -507,33 +509,33 @@ def build_council(
             name="Bull Whale",
             emoji="🐋",
             text=(
-                f"{smart_money.smart_wallets_active} smart wallets active. "
-                f"{'Repeat buying detected. ' if smart_money.repeat_buyers else ''}"
-                "Early positioning is likely."
+                f"{smart_money.smart_wallets_active} active wallets. "
+                f"{'Repeat buys seen. ' if smart_money.repeat_buyers else ''}"
+                "Accumulation is building."
             ),
         ),
         CouncilAgent(
             name="Bear Risk",
             emoji="🐻",
             text=(
-                f"Liquidity is {risk.liquidity.lower()} and concentration is {risk.concentration.lower()}. "
-                "Structural caution remains."
+                f"Liquidity {risk.liquidity.lower()}, concentration {risk.concentration.lower()}. "
+                "Stay selective."
             ),
         ),
         CouncilAgent(
             name="Quant Brain",
             emoji="🤖",
             text=(
-                f"{kronos.regime}. Bias: {kronos.bias}. "
-                f"Model confidence: {kronos.confidence}%."
+                f"{kronos.regime} regime, {kronos.bias.lower()} bias. "
+                f"Confidence {kronos.confidence}%."
             ),
         ),
         CouncilAgent(
             name="Risk Manager",
             emoji="🛡",
             text=(
-                f"Risk penalty sits at {breakdown.risk_penalty}/5. "
-                f"{'Wait for cleaner confirmation.' if breakdown.risk_penalty >= 2 else 'Conditions are tradable with discipline.'}"
+                f"Risk {breakdown.risk_penalty}/5. "
+                f"{'Wait for confirmation.' if breakdown.risk_penalty >= 2 else 'Tradable with discipline.'}"
             ),
         ),
     ]
@@ -544,28 +546,28 @@ def build_verdict(score: float) -> Tuple[str, List[str], str]:
         return (
             "⚡ VERDICT: HIGH-CONVICTION MOMENTUM",
             [
-                "Abnormal participation is present.",
-                "On-chain confirmation supports the move.",
-                "Structure favors continuation if follow-through appears.",
+                "Participation is strong.",
+                "On-chain confirmation is supportive.",
+                "Structure can continue with follow-through.",
             ],
-            "Act only on confirmed strength and disciplined risk sizing.",
+            "Act only on confirmed strength and disciplined sizing.",
         )
     if score >= 8:
         return (
             "🟡 VERDICT: WATCH FOR BREAKOUT",
             [
-                "Momentum conditions are forming.",
-                "Structure is improving but not fully resolved.",
-                "Smart money behavior adds credibility.",
+                "Momentum is forming.",
+                "Structure is improving.",
+                "Smart money adds credibility.",
             ],
-            "Wait for a confirmation candle or a clean expansion trigger.",
+            "Wait for a clean trigger before acting.",
         )
     if score >= 5:
         return (
             "👁 VERDICT: WATCHLIST ONLY",
             [
-                "Interesting candidate, but alignment is incomplete.",
-                "Conviction is not yet strong enough.",
+                "Interesting setup, but incomplete.",
+                "Conviction is not strong enough.",
                 "Structure remains mixed.",
             ],
             "Monitor and avoid forcing an entry.",
@@ -574,10 +576,10 @@ def build_verdict(score: float) -> Tuple[str, List[str], str]:
         "• VERDICT: NOISE",
         [
             "Signal quality is low.",
-            "Participation and structure are not strong enough.",
+            "Structure is not aligned.",
             "No meaningful edge is visible.",
         ],
-        "Ignore until the setup materially improves.",
+        "Ignore until the setup improves.",
     )
 
 
@@ -680,8 +682,8 @@ def build_pdf(report: ReportData) -> bytes:
         pagesize=A4,
         leftMargin=16 * mm,
         rightMargin=16 * mm,
-        topMargin=14 * mm,
-        bottomMargin=14 * mm,
+        topMargin=12 * mm,
+        bottomMargin=12 * mm,
     )
 
     styles = getSampleStyleSheet()
@@ -690,82 +692,126 @@ def build_pdf(report: ReportData) -> bytes:
         name="BrandStyle",
         parent=styles["Normal"],
         fontName="Helvetica-Bold",
-        fontSize=18,
-        leading=22,
+        fontSize=16,
+        leading=18,
         textColor=colors.HexColor(COLOR_TEXT),
+    )
+    tagline_style = ParagraphStyle(
+        name="TaglineStyle",
+        parent=styles["Normal"],
+        fontName="Helvetica",
+        fontSize=8,
+        leading=10,
+        textColor=colors.HexColor(COLOR_SUBTEXT),
+    )
+    report_title_style = ParagraphStyle(
+        name="ReportTitleStyle",
+        parent=styles["Normal"],
+        fontName="Helvetica-Bold",
+        fontSize=15,
+        leading=18,
+        textColor=colors.HexColor(COLOR_TEXT),
+        alignment=TA_RIGHT,
     )
     small_style = ParagraphStyle(
         name="SmallStyle",
         parent=styles["Normal"],
         fontName="Helvetica",
-        fontSize=9,
-        leading=12,
+        fontSize=8.5,
+        leading=11,
         textColor=colors.HexColor(COLOR_SUBTEXT),
     )
     body_style = ParagraphStyle(
         name="BodyStyle",
         parent=styles["Normal"],
         fontName="Helvetica",
-        fontSize=10,
-        leading=14,
+        fontSize=9.6,
+        leading=13,
         textColor=colors.HexColor("#DCE3EE"),
     )
     section_style = ParagraphStyle(
         name="SectionStyle",
         parent=styles["Normal"],
         fontName="Helvetica-Bold",
-        fontSize=11,
-        leading=14,
+        fontSize=10.5,
+        leading=13,
         textColor=colors.HexColor(COLOR_ORANGE),
-        spaceAfter=4,
+        spaceAfter=3,
     )
     verdict_style = ParagraphStyle(
         name="VerdictStyle",
         parent=styles["Normal"],
         fontName="Helvetica-Bold",
-        fontSize=14,
-        leading=18,
+        fontSize=13,
+        leading=16,
         textColor=colors.HexColor(COLOR_GREEN),
     )
 
     story = []
 
-    safe_logo = get_safe_logo_for_pdf(LOGO_PATH, width_mm=18, height_mm=18)
+    safe_logo = get_safe_logo_for_pdf(LOGO_PATH, width_mm=14, height_mm=14)
+
+    brand_copy = Paragraph(
+        f'<font color="{COLOR_SUBTEXT}">crypto</font><font color="{COLOR_GREEN}">.guru</font><br/><font size="8">{TAGLINE}</font>',
+        brand_style,
+    )
+    report_title = Paragraph("CRYPTO INTELLIGENCE REPORT", report_title_style)
 
     if safe_logo is not None:
-        header_table = Table(
-            [[
-                safe_logo,
-                Paragraph(
-                    f'<font color="{COLOR_SUBTEXT}">crypto</font><font color="{COLOR_GREEN}">.guru</font><br/><font size="9">{TAGLINE}</font>',
-                    brand_style,
-                ),
-                Paragraph("CRYPTO INTELLIGENCE REPORT", brand_style),
-            ]],
-            colWidths=[22 * mm, 80 * mm, 70 * mm],
+        brand_table = Table(
+            [[safe_logo, brand_copy]],
+            colWidths=[16 * mm, 58 * mm],
         )
     else:
-        header_table = Table(
-            [[
-                Paragraph(
-                    f'<font color="{COLOR_SUBTEXT}">crypto</font><font color="{COLOR_GREEN}">.guru</font><br/><font size="9">{TAGLINE}</font>',
-                    brand_style,
-                ),
-                Paragraph("CRYPTO INTELLIGENCE REPORT", brand_style),
-            ]],
-            colWidths=[100 * mm, 72 * mm],
+        brand_table = Table(
+            [[brand_copy]],
+            colWidths=[74 * mm],
         )
 
+    brand_table.setStyle(
+        TableStyle(
+            [
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                ("TOPPADDING", (0, 0), (-1, -1), 0),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+            ]
+        )
+    )
+
+    header_table = Table(
+        [[brand_table, report_title]],
+        colWidths=[92 * mm, 78 * mm],
+    )
     header_table.setStyle(
-        TableStyle([
-            ("VALIGN", (0, 0), (-1, -1), "TOP"),
-            ("LEFTPADDING", (0, 0), (-1, -1), 0),
-            ("RIGHTPADDING", (0, 0), (-1, -1), 0),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
-        ])
+        TableStyle(
+            [
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                ("TOPPADDING", (0, 0), (-1, -1), 0),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+            ]
+        )
     )
 
     story.append(header_table)
+    story.append(
+        Table(
+            [[""]],
+            colWidths=[170 * mm],
+            style=TableStyle(
+                [
+                    ("LINEBELOW", (0, 0), (-1, -1), 0.5, colors.HexColor(COLOR_BORDER)),
+                    ("TOPPADDING", (0, 0), (-1, -1), 0),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+                ]
+            ),
+        )
+    )
+    story.append(Spacer(1, 3 * mm))
+
     story.append(
         Paragraph(
             (
@@ -778,53 +824,70 @@ def build_pdf(report: ReportData) -> bytes:
             small_style,
         )
     )
-    story.append(Spacer(1, 5 * mm))
+    story.append(Spacer(1, 4 * mm))
 
     story.append(Paragraph("01 · MIRO v2 SCORE", section_style))
-    story.append(
-        Paragraph(
-            f'<font size="24" color="{COLOR_GREEN}"><b>{report.miro_total:.1f} / 15 — {report.status}</b></font>',
-            body_style,
-        )
-    )
-    story.append(Spacer(1, 2 * mm))
-
     score_table = Table(
-        [
-            ["Volume", f"{report.breakdown.volume_expansion} / 5"],
-            ["Volatility", f"{report.breakdown.volatility_expansion} / 3"],
-            ["Range", f"{report.breakdown.range_control} / 2"],
-            ["Trend", f"{report.breakdown.trend_quality} / 3"],
-            ["On-Chain", f"{report.breakdown.onchain_confirmation} / 4"],
-            ["Risk", f"-{report.breakdown.risk_penalty}"],
-        ],
-        colWidths=[95 * mm, 30 * mm],
+        [[
+            Paragraph(
+                f'<font size="22" color="{COLOR_GREEN}"><b>{report.miro_total:.1f} / 15</b></font>',
+                body_style,
+            ),
+            Paragraph(
+                f'<font size="12"><b>{report.status}</b></font>',
+                body_style,
+            ),
+        ]],
+        colWidths=[36 * mm, 90 * mm],
     )
     score_table.setStyle(
-        TableStyle([
-            ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#111722")),
-            ("TEXTCOLOR", (0, 0), (-1, -1), colors.HexColor(COLOR_TEXT)),
-            ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor(COLOR_BORDER)),
-            ("INNERGRID", (0, 0), (-1, -1), 0.4, colors.HexColor(COLOR_BORDER)),
-            ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
-            ("FONTNAME", (1, 0), (1, -1), "Helvetica-Bold"),
-            ("LEFTPADDING", (0, 0), (-1, -1), 8),
-            ("RIGHTPADDING", (0, 0), (-1, -1), 8),
-            ("TOPPADDING", (0, 0), (-1, -1), 6),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
-        ])
+        TableStyle(
+            [
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                ("TOPPADDING", (0, 0), (-1, -1), 0),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+            ]
+        )
     )
     story.append(score_table)
-    story.append(Spacer(1, 5 * mm))
+    story.append(Spacer(1, 2 * mm))
+
+    score_rows = [
+        ["Volume", f"{report.breakdown.volume_expansion}/5"],
+        ["Volatility", f"{report.breakdown.volatility_expansion}/3"],
+        ["Range", f"{report.breakdown.range_control}/2"],
+        ["Trend", f"{report.breakdown.trend_quality}/3"],
+        ["On-Chain", f"{report.breakdown.onchain_confirmation}/4"],
+        ["Risk", f"-{report.breakdown.risk_penalty}"],
+    ]
+    compact_score_table = Table(score_rows, colWidths=[42 * mm, 16 * mm])
+    compact_score_table.setStyle(
+        TableStyle(
+            [
+                ("TEXTCOLOR", (0, 0), (-1, -1), colors.HexColor(COLOR_TEXT)),
+                ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
+                ("FONTNAME", (1, 0), (1, -1), "Helvetica-Bold"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                ("TOPPADDING", (0, 0), (-1, -1), 2),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+                ("ALIGN", (1, 0), (1, -1), "RIGHT"),
+            ]
+        )
+    )
+    story.append(compact_score_table)
+    story.append(Spacer(1, 4 * mm))
 
     story.append(Paragraph("02 · SMART MONEY SNAPSHOT", section_style))
     story.append(
         Paragraph(
             (
-                f"Active Smart Wallets: {report.smart_money.smart_wallets_active}<br/>"
-                f"Repeat Buyers: {'Detected' if report.smart_money.repeat_buyers else 'No'}<br/>"
-                f"Net Flow: {report.smart_money.net_flow}<br/>"
-                f"Holder Growth (24H): {report.smart_money.holder_growth_24h:.1f}%<br/><br/>"
+                f"<b>Active Smart Wallets:</b> {report.smart_money.smart_wallets_active}<br/>"
+                f"<b>Repeat Buyers:</b> {'Detected' if report.smart_money.repeat_buyers else 'No'}<br/>"
+                f"<b>Net Flow:</b> {report.smart_money.net_flow}<br/>"
+                f"<b>Holder Growth (24H):</b> {report.smart_money.holder_growth_24h:.1f}%<br/><br/>"
                 f"{report.smart_money.summary}"
             ),
             body_style,
@@ -836,9 +899,9 @@ def build_pdf(report: ReportData) -> bytes:
     story.append(
         Paragraph(
             (
-                f"Regime: {report.kronos.regime}<br/>"
-                f"Bias: {report.kronos.bias}<br/>"
-                f"Confidence: {report.kronos.confidence}%<br/><br/>"
+                f"<b>Regime:</b> {report.kronos.regime}<br/>"
+                f"<b>Bias:</b> {report.kronos.bias}<br/>"
+                f"<b>Confidence:</b> {report.kronos.confidence}%<br/><br/>"
                 f"{report.kronos.summary}"
             ),
             body_style,
@@ -848,8 +911,13 @@ def build_pdf(report: ReportData) -> bytes:
 
     story.append(Paragraph("04 · AI COUNCIL", section_style))
     for agent in report.council:
-        story.append(Paragraph(f"<b>{agent.emoji} {agent.name}</b><br/>{agent.text}", body_style))
-        story.append(Spacer(1, 2 * mm))
+        story.append(
+            Paragraph(
+                f"<b>{agent.emoji} {agent.name}:</b> {agent.text}",
+                body_style,
+            )
+        )
+        story.append(Spacer(1, 1.5 * mm))
 
     story.append(Spacer(1, 3 * mm))
 
@@ -857,10 +925,10 @@ def build_pdf(report: ReportData) -> bytes:
     story.append(
         Paragraph(
             (
-                f"Liquidity: {report.risk.liquidity}<br/>"
-                f"Concentration: {report.risk.concentration}<br/>"
-                f"Suspicious Activity: {report.risk.suspicious_activity}<br/>"
-                f"Execution Risk: {report.risk.execution_risk}"
+                f"<b>Liquidity:</b> {report.risk.liquidity}<br/>"
+                f"<b>Concentration:</b> {report.risk.concentration}<br/>"
+                f"<b>Suspicious Activity:</b> {report.risk.suspicious_activity}<br/>"
+                f"<b>Execution Risk:</b> {report.risk.execution_risk}"
             ),
             body_style,
         )
@@ -869,12 +937,31 @@ def build_pdf(report: ReportData) -> bytes:
 
     story.append(Paragraph("06 · FINAL VERDICT", section_style))
     story.append(Paragraph(report.verdict_title, verdict_style))
-    bullet_html = "<br/>".join([f"• {point}" for point in report.verdict_points])
-    story.append(Paragraph(bullet_html, body_style))
+    clean_points = "<br/>".join([f"<b>—</b> {point}" for point in report.verdict_points])
+    story.append(Paragraph(clean_points, body_style))
     story.append(Spacer(1, 2 * mm))
-    story.append(Paragraph(f"<b>Recommended Action:</b> {report.action_note}", body_style))
-    story.append(Spacer(1, 8 * mm))
+    story.append(
+        Paragraph(
+            f"<b>Recommended Action:</b> {report.action_note}",
+            body_style,
+        )
+    )
+    story.append(Spacer(1, 7 * mm))
 
+    story.append(
+        Table(
+            [[""]],
+            colWidths=[170 * mm],
+            style=TableStyle(
+                [
+                    ("LINEABOVE", (0, 0), (-1, -1), 0.5, colors.HexColor(COLOR_BORDER)),
+                    ("TOPPADDING", (0, 0), (-1, -1), 0),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+                ]
+            ),
+        )
+    )
+    story.append(Spacer(1, 2 * mm))
     story.append(
         Paragraph(
             "Generated by crypto.guru · Detect Early. Act Smart. · For informational and research purposes only. Not financial advice.",
