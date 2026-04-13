@@ -497,6 +497,30 @@ def generate_agent_debate(symbol: str, sc: dict, interval: str) -> dict:
 # PDF
 # ══════════════════════════════════════════════════════════════════════════════
 
+def _p(text: str) -> str:
+    """Sanitise text to Latin-1 safe ASCII for fpdf2 core fonts."""
+    replacements = {
+        "\u2014": "-",   # em dash
+        "\u2013": "-",   # en dash
+        "\u00d7": "x",   # multiplication sign
+        "\u00b7": ".",   # middle dot
+        "\u2019": "'",   # right single quote
+        "\u2018": "'",   # left single quote
+        "\u201c": '"',   # left double quote
+        "\u201d": '"',   # right double quote
+        "\u2022": "-",   # bullet
+        "\u2026": "...", # ellipsis
+        "\u2192": "->",  # arrow
+        "\u2713": "OK",  # check mark
+        "\u2717": "X",   # cross
+        "\u25b2": "^",   # up triangle
+        "\u25bc": "v",   # down triangle
+    }
+    for ch, rep in replacements.items():
+        text = text.replace(ch, rep)
+    # Strip any remaining non-Latin-1 characters
+    return text.encode("latin-1", errors="ignore").decode("latin-1")
+
 def build_pdf(symbol: str, interval: str, sc: dict, debate: dict, now: str) -> bytes:
     if not HAS_FPDF:
         return b""
@@ -508,10 +532,10 @@ def build_pdf(symbol: str, interval: str, sc: dict, debate: dict, now: str) -> b
     # Title
     pdf.set_font("Helvetica", "B", 22)
     pdf.set_text_color(15, 23, 42)
-    pdf.cell(0, 12, "CRYPTO SNIPER — SIGNAL REPORT", ln=True, align="C")
+    pdf.cell(0, 12, _p("CRYPTO SNIPER - SIGNAL REPORT"), ln=True, align="C")
     pdf.set_font("Helvetica", "", 9)
     pdf.set_text_color(100, 116, 139)
-    pdf.cell(0, 6, f"{symbol}/USDT  |  {interval}  |  {now}", ln=True, align="C")
+    pdf.cell(0, 6, _p(f"{symbol}/USDT  |  {interval}  |  {now}"), ln=True, align="C")
     pdf.ln(4)
 
     # Signal
@@ -520,68 +544,68 @@ def build_pdf(symbol: str, interval: str, sc: dict, debate: dict, now: str) -> b
     pdf.set_font("Helvetica", "B", 18)
     color = (16, 185, 129) if score >= 9 else (245, 158, 11) if score >= 5 else (100, 116, 139)
     pdf.set_text_color(*color)
-    pdf.cell(0, 10, f"SIGNAL: {label}  ({score}/13)", ln=True, align="C")
+    pdf.cell(0, 10, _p(f"SIGNAL: {label}  ({score}/13)"), ln=True, align="C")
     pdf.ln(3)
 
     def section(title):
         pdf.set_font("Helvetica", "B", 11)
         pdf.set_text_color(30, 41, 59)
         pdf.set_fill_color(241, 245, 249)
-        pdf.cell(0, 8, f"  {title}", ln=True, fill=True)
+        pdf.cell(0, 8, _p(f"  {title}"), ln=True, fill=True)
         pdf.ln(2)
 
-    def row(label, value):
+    def row(lbl, value):
         pdf.set_font("Helvetica", "B", 9)
         pdf.set_text_color(100, 116, 139)
-        pdf.cell(60, 6, label)
+        pdf.cell(60, 6, _p(lbl))
         pdf.set_font("Helvetica", "", 9)
         pdf.set_text_color(15, 23, 42)
-        pdf.cell(0, 6, str(value), ln=True)
+        pdf.cell(0, 6, _p(str(value)), ln=True)
 
     def body(text):
         pdf.set_font("Helvetica", "", 9)
         pdf.set_text_color(51, 65, 85)
-        pdf.multi_cell(0, 5, text)
+        pdf.multi_cell(0, 5, _p(text))
         pdf.ln(2)
 
     # Score breakdown
     section("SIGNAL COMPONENTS")
-    row("V — Volume (max 5)", f"{sc['V']}/5   RV = {sc['rv']}×")
-    row("P — Momentum (max 3)", f"{sc['P']}/3   ATR move = {sc['atr_move']}")
-    row("R — Range Position (max 2)", f"{sc['R']}/2   range_pos = {sc['range_pos']}")
-    row("T — Trend Alignment (max 3)", f"{sc['T']}/3   ADX = {sc['adx14']:.1f}")
+    row("V - Volume (max 5)",        f"{sc['V']}/5   RV = {sc['rv']}x")
+    row("P - Momentum (max 3)",      f"{sc['P']}/3   ATR move = {sc['atr_move']}")
+    row("R - Range Position (max 2)",f"{sc['R']}/2   range_pos = {sc['range_pos']}")
+    row("T - Trend Alignment (max 3)",f"{sc['T']}/3   ADX = {sc['adx14']:.1f}")
     pdf.ln(2)
 
     # Market structure
     section("MARKET STRUCTURE")
-    row("Close",   f"{sc['close']:.6g}")
-    row("EMA 20",  f"{sc['ema20']:.6g}  ({'above' if sc['close'] > sc['ema20'] else 'below'})")
-    row("EMA 50",  f"{sc['ema50']:.6g}  ({'above' if sc['close'] > sc['ema50'] else 'below'})")
-    row("EMA 200", f"{sc['ema200']:.6g}  ({'above' if sc['close'] > sc['ema200'] else 'below'})")
-    row("VWAP",    f"{sc['vwap']:.6g}  ({'above' if sc['close'] > sc['vwap'] else 'below'})")
-    row("BB Upper / Lower", f"{sc['bb_upper']:.6g}  /  {sc['bb_lower']:.6g}")
+    row("Close",          f"{sc['close']:.6g}")
+    row("EMA 20",         f"{sc['ema20']:.6g}  ({'above' if sc['close'] > sc['ema20'] else 'below'})")
+    row("EMA 50",         f"{sc['ema50']:.6g}  ({'above' if sc['close'] > sc['ema50'] else 'below'})")
+    row("EMA 200",        f"{sc['ema200']:.6g}  ({'above' if sc['close'] > sc['ema200'] else 'below'})")
+    row("VWAP",           f"{sc['vwap']:.6g}  ({'above' if sc['close'] > sc['vwap'] else 'below'})")
+    row("BB Upper/Lower", f"{sc['bb_upper']:.6g}  /  {sc['bb_lower']:.6g}")
     pdf.ln(2)
 
     # Timing
     section("TIMING QUALITY")
-    row("RSI 14",   f"{sc['rsi14']:.1f}")
-    row("ADX 14",   f"{sc['adx14']:.1f}  ({'Trending' if sc['adx14'] >= 20 else 'Ranging'})")
+    row("RSI 14",    f"{sc['rsi14']:.1f}")
+    row("ADX 14",    f"{sc['adx14']:.1f}  ({'Trending' if sc['adx14'] >= 20 else 'Ranging'})")
     row("+DI / -DI", f"{sc['plus_di']:.1f}  /  {sc['minus_di']:.1f}")
-    row("ATR 14",   f"{sc['atr14']:.4g}  ({sc['atr14']/sc['close']*100:.2f}% of price)")
+    row("ATR 14",    f"{sc['atr14']:.4g}  ({sc['atr14']/sc['close']*100:.2f}% of price)")
     pdf.ln(2)
 
     # AI debate
-    section("AI LAB — AGENT DEBATE")
-    for agent, emoji in [("bull", "BULL"), ("bear", "BEAR"), ("risk", "RISK MANAGER"), ("cio", "CIO")]:
+    section("AI LAB - AGENT DEBATE")
+    for agent, lbl in [("bull", "BULL"), ("bear", "BEAR"), ("risk", "RISK MANAGER"), ("cio", "CIO")]:
         pdf.set_font("Helvetica", "B", 9)
         pdf.set_text_color(15, 23, 42)
-        pdf.cell(0, 6, f"{emoji} — Verdict: {debate[agent]['verdict']}", ln=True)
+        pdf.cell(0, 6, _p(f"{lbl} - Verdict: {debate[agent]['verdict']}"), ln=True)
         body(debate[agent]["text"])
 
     pdf.ln(2)
     pdf.set_font("Helvetica", "I", 7)
     pdf.set_text_color(148, 163, 184)
-    pdf.cell(0, 5, "Data via Yahoo Finance. Signals are not financial advice. Past performance does not guarantee future results.", ln=True, align="C")
+    pdf.cell(0, 5, _p("Data via Yahoo Finance. Signals are not financial advice. Past performance does not guarantee future results."), ln=True, align="C")
 
     return bytes(pdf.output())
 
