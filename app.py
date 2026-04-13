@@ -17,18 +17,17 @@ from reportlab.pdfgen import canvas
 # =========================================================
 st.set_page_config(
     page_title="Crypto Guru",
-    page_icon="🔮",
     layout="wide",
+    initial_sidebar_state="collapsed",
 )
 
 
 # =========================================================
 # BRANDING
-# Replace with your exact prior brand assets/text
 # =========================================================
-APP_LOGO = "🔮"
+LOGO_PATH = "logo.png"   # replace with your actual file name if different
 APP_HEADING = "Crypto Guru"
-APP_TAGLINE = "Precision crypto intelligence."
+APP_TAGLINE = "Precision crypto intelligence."   # replace with your exact line
 
 
 # =========================================================
@@ -65,80 +64,87 @@ def inject_styles() -> None:
         """
         <style>
             :root {
-                --bg: #07101d;
-                --panel: #0f1726;
-                --panel-2: #101a2c;
-                --border: rgba(255,255,255,0.08);
+                --bg: #000000;
+                --panel: #0a0a0a;
+                --panel-2: #111111;
+                --border: rgba(255,153,51,0.22);
                 --text: #ffffff;
-                --muted: #a6b3c8;
-                --accent: #6f8cff;
+                --muted: #d7b37a;
+                --accent: #ff9933;
+                --accent-2: #cc6f00;
+                --soft: rgba(255,153,51,0.08);
             }
 
             .stApp {
                 background:
-                    radial-gradient(circle at top left, rgba(111,140,255,0.10), transparent 28%),
-                    radial-gradient(circle at top right, rgba(111,140,255,0.08), transparent 22%),
-                    linear-gradient(180deg, #07101d 0%, #0a1220 100%);
+                    radial-gradient(circle at top left, rgba(255,153,51,0.10), transparent 24%),
+                    radial-gradient(circle at top right, rgba(255,153,51,0.06), transparent 20%),
+                    linear-gradient(180deg, #000000 0%, #050505 100%);
             }
 
             .block-container {
-                max-width: 920px;
-                padding-top: 4rem;
+                max-width: 900px;
+                padding-top: 3rem;
                 padding-bottom: 3rem;
+            }
+
+            header[data-testid="stHeader"] {
+                background: transparent;
+            }
+
+            [data-testid="collapsedControl"] {
+                display: none;
             }
 
             .hero-wrap {
                 text-align: center;
-                margin-bottom: 2rem;
-            }
-
-            .hero-logo {
-                font-size: 3rem;
-                line-height: 1;
-                margin-bottom: 0.8rem;
+                margin-bottom: 1.75rem;
             }
 
             .hero-title {
-                color: white;
-                font-size: 2.8rem;
+                color: #ffffff;
+                font-size: 2.7rem;
                 font-weight: 800;
                 letter-spacing: -0.03em;
-                margin-bottom: 0.4rem;
+                margin-top: 0.5rem;
+                margin-bottom: 0.35rem;
             }
 
             .hero-tagline {
                 color: var(--muted);
                 font-size: 1rem;
-                margin-bottom: 1.8rem;
+                margin-bottom: 0;
             }
 
             .search-shell {
-                background: linear-gradient(180deg, rgba(15,23,38,0.96) 0%, rgba(10,18,32,0.98) 100%);
-                border: 1px solid var(--border);
-                border-radius: 24px;
+                background: linear-gradient(180deg, rgba(10,10,10,0.98) 0%, rgba(18,18,18,0.98) 100%);
+                border: 1px solid rgba(255,153,51,0.20);
+                border-radius: 22px;
                 padding: 1rem;
-                box-shadow: 0 20px 60px rgba(0,0,0,0.30);
-                margin-bottom: 1.4rem;
+                box-shadow:
+                    0 0 0 1px rgba(255,153,51,0.03),
+                    0 20px 60px rgba(0,0,0,0.45);
+                margin-bottom: 1.15rem;
             }
 
             .result-card {
-                background: linear-gradient(180deg, rgba(15,23,38,0.96) 0%, rgba(10,18,32,0.98) 100%);
-                border: 1px solid var(--border);
+                background: linear-gradient(180deg, rgba(10,10,10,0.98) 0%, rgba(18,18,18,0.98) 100%);
+                border: 1px solid rgba(255,153,51,0.20);
                 border-radius: 20px;
                 padding: 1.15rem 1.2rem;
                 margin-top: 1rem;
-                box-shadow: 0 12px 36px rgba(0,0,0,0.18);
+                box-shadow: 0 12px 36px rgba(0,0,0,0.28);
             }
 
             .result-title {
-                color: white;
+                color: #ffffff;
                 font-size: 1.1rem;
                 font-weight: 750;
                 margin-bottom: 0.7rem;
             }
 
             .answer-text {
-                color: #eef3ff;
+                color: #fff7ed;
                 font-size: 1.02rem;
                 line-height: 1.7;
                 margin-bottom: 0.95rem;
@@ -151,43 +157,64 @@ def inject_styles() -> None:
             }
 
             .signal-box {
-                background: rgba(255,255,255,0.03);
-                border: 1px solid rgba(255,255,255,0.07);
+                background: rgba(255,153,51,0.04);
+                border: 1px solid rgba(255,153,51,0.12);
                 border-radius: 16px;
                 padding: 0.85rem 0.9rem;
             }
 
             .signal-label {
-                color: var(--muted);
+                color: #d7b37a;
                 font-size: 0.8rem;
                 margin-bottom: 0.3rem;
             }
 
             .signal-value {
-                color: white;
+                color: #ffffff;
                 font-size: 0.95rem;
                 font-weight: 700;
                 line-height: 1.4;
             }
 
             .why-line {
-                color: #e9efff;
+                color: #fff7ed;
                 line-height: 1.6;
                 margin-bottom: 0.45rem;
             }
 
+            /* GLASS SEARCH BAR */
             .stTextInput > div > div > input {
-                background: rgba(255,255,255,0.04);
-                color: white;
-                border-radius: 14px;
-                border: 1px solid rgba(255,255,255,0.08);
-                padding: 1rem 1rem;
-                font-size: 1.02rem;
-                text-align: center;
+                background: linear-gradient(180deg, rgba(18,18,18,0.92) 0%, rgba(8,8,8,0.96) 100%) !important;
+                color: #ffffff !important;
+                border-radius: 16px !important;
+                border: 1px solid rgba(255,153,51,0.22) !important;
+                padding: 1rem 1rem !important;
+                font-size: 1.05rem !important;
+                text-align: center !important;
+                caret-color: #ff9933 !important;
+                box-shadow:
+                    inset 0 1px 0 rgba(255,255,255,0.03),
+                    0 0 0 1px rgba(255,153,51,0.02);
             }
 
             .stTextInput > div > div > input::placeholder {
-                color: #95a3bc;
+                color: #c49352 !important;
+                opacity: 1 !important;
+            }
+
+            .stTextInput > div > div > input:focus {
+                background: linear-gradient(180deg, rgba(18,18,18,0.96) 0%, rgba(8,8,8,1) 100%) !important;
+                color: #ffffff !important;
+                border: 1px solid #ff9933 !important;
+                outline: none !important;
+                box-shadow:
+                    0 0 0 1px rgba(255,153,51,0.08),
+                    0 0 18px rgba(255,153,51,0.12) !important;
+            }
+
+            [data-testid="stTextInput"] input {
+                color: #ffffff !important;
+                background-color: #0d0d0d !important;
             }
 
             .stButton > button,
@@ -197,27 +224,28 @@ def inject_styles() -> None:
                 border-radius: 12px;
                 font-weight: 700;
                 font-size: 0.92rem;
-                border: 1px solid rgba(255,255,255,0.08);
-                background: linear-gradient(180deg, #7c9cff 0%, #6486ff 100%);
-                color: white;
+                border: 1px solid rgba(255,153,51,0.20);
+                background: linear-gradient(180deg, #ff9933 0%, #d97706 100%);
+                color: #000000;
                 padding: 0.35rem 0.7rem;
             }
 
             .stButton > button:hover,
             .stDownloadButton > button:hover {
-                color: white;
-                border: 1px solid rgba(255,255,255,0.10);
+                color: #000000;
+                border: 1px solid rgba(255,153,51,0.32);
+                background: linear-gradient(180deg, #ffad5c 0%, #e68613 100%);
             }
 
             div[data-testid="stExpander"] {
-                border: 1px solid rgba(255,255,255,0.08) !important;
+                border: 1px solid rgba(255,153,51,0.16) !important;
                 border-radius: 16px !important;
-                background: rgba(255,255,255,0.02) !important;
+                background: rgba(255,153,51,0.03) !important;
             }
 
             @media (max-width: 820px) {
                 .hero-title {
-                    font-size: 2.2rem;
+                    font-size: 2.15rem;
                 }
 
                 .signal-grid {
@@ -287,9 +315,6 @@ def score_to_confidence(score: float) -> str:
 
 # =========================================================
 # ENGINE ORDER
-# 1. MIRO
-# 2. KRONOS
-# 3. AI DEBATE
 # =========================================================
 def run_miro_logic(coin: str) -> EngineSignal:
     score = pseudo_score(coin + "miro_logic", 19)
@@ -298,10 +323,7 @@ def run_miro_logic(coin: str) -> EngineSignal:
         bias=score_to_bias(score),
         confidence=score_to_confidence(score),
         score=score,
-        summary=(
-            f"Miro logic reads {coin} through momentum and structure as "
-            f"{score_to_bias(score)}."
-        ),
+        summary=f"Miro logic reads {coin} through momentum and structure as {score_to_bias(score)}.",
     )
 
 
@@ -312,17 +334,12 @@ def run_kronos_logic(coin: str) -> EngineSignal:
         bias=score_to_bias(score),
         confidence=score_to_confidence(score),
         score=score,
-        summary=(
-            f"Kronos logic reads the timing quality on {coin} as "
-            f"{score_to_bias(score)}."
-        ),
+        summary=f"Kronos logic reads the timing quality on {coin} as {score_to_bias(score)}.",
     )
 
 
 def run_ai_debate(coin: str, miro: EngineSignal, kronos: EngineSignal) -> EngineSignal:
-    blended_seed = (
-        f"{coin}|{miro.score:.1f}|{miro.bias}|{kronos.score:.1f}|{kronos.bias}|ai_debate"
-    )
+    blended_seed = f"{coin}|{miro.score:.1f}|{miro.bias}|{kronos.score:.1f}|{kronos.bias}|ai_debate"
     score = pseudo_score(blended_seed, 13)
 
     if miro.score >= 7.2 and kronos.score >= 7.2:
@@ -330,20 +347,15 @@ def run_ai_debate(coin: str, miro: EngineSignal, kronos: EngineSignal) -> Engine
     elif miro.score < 6.0 and kronos.score < 6.0:
         score = max(4.8, round(score - 0.4, 1))
 
-    debate_bias = score_to_bias(score)
-    debate_confidence = score_to_confidence(score)
-
-    summary = (
-        f"AI Debate weighs Miro ({miro.bias}) against Kronos ({kronos.bias}) "
-        f"and concludes {coin} is {debate_bias}."
-    )
-
     return EngineSignal(
         label="AI Debate",
-        bias=debate_bias,
-        confidence=debate_confidence,
+        bias=score_to_bias(score),
+        confidence=score_to_confidence(score),
         score=score,
-        summary=summary,
+        summary=(
+            f"AI Debate weighs Miro ({miro.bias}) against Kronos ({kronos.bias}) "
+            f"and concludes {coin} is {score_to_bias(score)}."
+        ),
     )
 
 
@@ -351,7 +363,6 @@ def run_engines(coin: str) -> Dict[str, EngineSignal]:
     miro = run_miro_logic(coin)
     kronos = run_kronos_logic(coin)
     ai_debate = run_ai_debate(coin, miro, kronos)
-
     return {
         "miro": miro,
         "kronos": kronos,
@@ -409,13 +420,12 @@ def compose_response(coin: str, signals: Dict[str, EngineSignal]) -> FinalRespon
 
 
 # =========================================================
-# PDF GENERATION
+# PDF
 # =========================================================
 def wrap_text(text: str, font_name: str, font_size: int, max_width: float) -> List[str]:
     words = text.split()
     lines: List[str] = []
     current = ""
-
     for word in words:
         test = word if not current else f"{current} {word}"
         if stringWidth(test, font_name, font_size) <= max_width:
@@ -424,10 +434,8 @@ def wrap_text(text: str, font_name: str, font_size: int, max_width: float) -> Li
             if current:
                 lines.append(current)
             current = word
-
     if current:
         lines.append(current)
-
     return lines
 
 
@@ -440,15 +448,13 @@ def draw_wrapped_text(
     font_name: str = "Helvetica",
     font_size: int = 11,
     line_gap: int = 15,
-    color: HexColor = HexColor("#EAF0FF"),
+    color: HexColor = HexColor("#FFF7ED"),
 ) -> float:
     pdf.setFillColor(color)
     pdf.setFont(font_name, font_size)
-
     for line in wrap_text(text, font_name, font_size, max_width):
         pdf.drawString(x, y, line)
         y -= line_gap
-
     return y
 
 
@@ -461,43 +467,28 @@ def generate_pdf(response: FinalResponse) -> bytes:
     y = height - 22 * mm
     content_width = width - (2 * margin_x)
 
-    # Background
-    pdf.setFillColor(HexColor("#08101F"))
+    pdf.setFillColor(HexColor("#000000"))
     pdf.rect(0, 0, width, height, fill=1, stroke=0)
 
-    # Header
     pdf.setFillColor(HexColor("#FFFFFF"))
     pdf.setFont("Helvetica-Bold", 22)
-    pdf.drawString(margin_x, y, f"{APP_HEADING}")
+    pdf.drawString(margin_x, y, APP_HEADING)
     y -= 8 * mm
 
-    pdf.setFillColor(HexColor("#A6B3C8"))
+    pdf.setFillColor(HexColor("#D7B37A"))
     pdf.setFont("Helvetica", 11)
     pdf.drawString(margin_x, y, APP_TAGLINE)
     y -= 12 * mm
 
-    # Coin title
-    pdf.setFillColor(HexColor("#FFFFFF"))
+    pdf.setFillColor(HexColor("#FF9933"))
     pdf.setFont("Helvetica-Bold", 16)
     pdf.drawString(margin_x, y, f"{response.coin} Signal Output")
     y -= 8 * mm
 
-    # Answer
-    y = draw_wrapped_text(
-        pdf,
-        response.answer,
-        margin_x,
-        y,
-        content_width,
-        font_name="Helvetica",
-        font_size=11,
-        line_gap=15,
-        color=HexColor("#EAF0FF"),
-    )
+    y = draw_wrapped_text(pdf, response.answer, margin_x, y, content_width)
     y -= 5 * mm
 
-    # Summary box
-    pdf.setFillColor(HexColor("#101A2C"))
+    pdf.setFillColor(HexColor("#111111"))
     pdf.roundRect(margin_x, y - 32 * mm, content_width, 30 * mm, 8, fill=1, stroke=0)
 
     stat_y = y - 7 * mm
@@ -517,7 +508,7 @@ def generate_pdf(response: FinalResponse) -> bytes:
         x = margin_x + (col * col_width) + 5 * mm
         sy = stat_y - (row * row_gap)
 
-        pdf.setFillColor(HexColor("#A6B3C8"))
+        pdf.setFillColor(HexColor("#D7B37A"))
         pdf.setFont("Helvetica", 9)
         pdf.drawString(x, sy, label)
 
@@ -529,55 +520,31 @@ def generate_pdf(response: FinalResponse) -> bytes:
 
     y -= 40 * mm
 
-    # Engine scores
-    pdf.setFillColor(HexColor("#FFFFFF"))
+    pdf.setFillColor(HexColor("#FF9933"))
     pdf.setFont("Helvetica-Bold", 13)
     pdf.drawString(margin_x, y, "Engine Scores")
     y -= 8 * mm
 
-    score_lines = [
+    for line in [
         f"Miro: {response.miro_score:.1f} / 10",
         f"Kronos: {response.kronos_score:.1f} / 10",
         f"AI Debate: {response.debate_score:.1f} / 10",
-    ]
-    for line in score_lines:
-        y = draw_wrapped_text(
-            pdf,
-            line,
-            margin_x,
-            y,
-            content_width,
-            font_name="Helvetica",
-            font_size=11,
-            line_gap=15,
-            color=HexColor("#EAF0FF"),
-        )
+    ]:
+        y = draw_wrapped_text(pdf, line, margin_x, y, content_width)
 
     y -= 4 * mm
 
-    # Why
-    pdf.setFillColor(HexColor("#FFFFFF"))
+    pdf.setFillColor(HexColor("#FF9933"))
     pdf.setFont("Helvetica-Bold", 13)
     pdf.drawString(margin_x, y, "Why")
     y -= 8 * mm
 
     for reason in response.reasons:
-        y = draw_wrapped_text(
-            pdf,
-            f"• {reason}",
-            margin_x,
-            y,
-            content_width,
-            font_name="Helvetica",
-            font_size=11,
-            line_gap=15,
-            color=HexColor("#EAF0FF"),
-        )
+        y = draw_wrapped_text(pdf, f"• {reason}", margin_x, y, content_width)
         y -= 1 * mm
-
         if y < 25 * mm:
             pdf.showPage()
-            pdf.setFillColor(HexColor("#08101F"))
+            pdf.setFillColor(HexColor("#000000"))
             pdf.rect(0, 0, width, height, fill=1, stroke=0)
             y = height - 22 * mm
 
@@ -587,19 +554,25 @@ def generate_pdf(response: FinalResponse) -> bytes:
 
 
 # =========================================================
-# RENDER
+# UI
 # =========================================================
 def render_header() -> None:
+    st.markdown('<div class="hero-wrap">', unsafe_allow_html=True)
+
+    try:
+        st.image(LOGO_PATH, width=110)
+    except Exception:
+        pass
+
     st.markdown(
         f"""
-        <div class="hero-wrap">
-            <div class="hero-logo">{APP_LOGO}</div>
-            <div class="hero-title">{APP_HEADING}</div>
-            <div class="hero-tagline">{APP_TAGLINE}</div>
-        </div>
+        <div class="hero-title">{APP_HEADING}</div>
+        <div class="hero-tagline">{APP_TAGLINE}</div>
         """,
         unsafe_allow_html=True,
     )
+
+    st.markdown("</div>", unsafe_allow_html=True)
 
 
 def render_search() -> None:
@@ -613,7 +586,7 @@ def render_search() -> None:
         key="coin_input_widget",
     )
 
-    col1, col2, col3 = st.columns([3.2, 1.2, 1.2])
+    col1, col2, col3 = st.columns([3.4, 1.1, 1.1])
     with col2:
         analyze_clicked = st.button("Run Signal", use_container_width=True)
     with col3:
@@ -686,10 +659,7 @@ def render_output(response: FinalResponse, signals: Dict[str, EngineSignal]) -> 
     with st.expander("Engine Scores"):
         st.write(f"Miro: {signals['miro'].score:.1f} / 10 · {signals['miro'].confidence.title()}")
         st.write(f"Kronos: {signals['kronos'].score:.1f} / 10 · {signals['kronos'].confidence.title()}")
-        st.write(
-            f"AI Debate: {signals['ai_debate'].score:.1f} / 10 · "
-            f"{signals['ai_debate'].confidence.title()}"
-        )
+        st.write(f"AI Debate: {signals['ai_debate'].score:.1f} / 10 · {signals['ai_debate'].confidence.title()}")
 
     if st.session_state.last_pdf:
         st.download_button(
