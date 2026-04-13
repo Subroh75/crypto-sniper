@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import List, Tuple
 
 import streamlit as st
+from PIL import Image
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -308,6 +309,25 @@ def clamp_score(value: int, low: int, high: int) -> int:
 def make_bar(value: int, max_value: int) -> str:
     value = max(0, min(value, max_value))
     return ("█" * value) + ("░" * (max_value - value))
+
+
+def get_safe_logo_for_pdf(path: str, width_mm: float = 18, height_mm: float = 18):
+    """
+    Re-encodes the logo as a clean PNG in memory so ReportLab can read it safely.
+    Returns a ReportLab Image object or None.
+    """
+    if not Path(path).exists():
+        return None
+
+    try:
+        with Image.open(path) as img:
+            img = img.convert("RGBA")
+            buf = io.BytesIO()
+            img.save(buf, format="PNG")
+            buf.seek(0)
+            return RLImage(buf, width=width_mm * mm, height=height_mm * mm)
+    except Exception:
+        return None
 
 
 # =========================
@@ -710,13 +730,12 @@ def build_pdf(report: ReportData) -> bytes:
 
     story = []
 
-    logo_exists = Path(LOGO_PATH).exists()
+    safe_logo = get_safe_logo_for_pdf(LOGO_PATH, width_mm=18, height_mm=18)
 
-    if logo_exists:
-        logo = RLImage(LOGO_PATH, width=18 * mm, height=18 * mm)
+    if safe_logo is not None:
         header_table = Table(
             [[
-                logo,
+                safe_logo,
                 Paragraph(
                     f'<font color="{COLOR_SUBTEXT}">crypto</font><font color="{COLOR_GREEN}">.guru</font><br/><font size="9">{TAGLINE}</font>',
                     brand_style,
@@ -873,17 +892,37 @@ def build_pdf(report: ReportData) -> bytes:
 # UI COMPONENTS
 # =========================
 def render_brand_header() -> None:
-    st.markdown(
-        f"""
-        <div class="brand-box">
+    st.markdown('<div class="brand-box">', unsafe_allow_html=True)
+
+    if Path(LOGO_PATH).exists():
+        col1, col2 = st.columns([1, 7], gap="small")
+        with col1:
+            st.image(LOGO_PATH, width=72)
+        with col2:
+            st.markdown(
+                f"""
+                <div class="brand-title">
+                    <span style="color:{COLOR_SUBTEXT};">crypto</span><span style="color:{COLOR_GREEN};">.guru</span>
+                </div>
+                <div class="brand-subtitle">{TAGLINE}</div>
+                """,
+                unsafe_allow_html=True,
+            )
+    else:
+        st.markdown(
+            f"""
             <div class="brand-title">
                 <span style="color:{COLOR_SUBTEXT};">crypto</span><span style="color:{COLOR_GREEN};">.guru</span>
             </div>
             <div class="brand-subtitle">{TAGLINE}</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+            <div style="margin-top:8px; color:{COLOR_RED}; font-size:0.9rem;">
+                Logo not found at: {LOGO_PATH}
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    st.markdown("</div>", unsafe_allow_html=True)
 
 
 def render_token_header(report: ReportData) -> None:
