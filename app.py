@@ -2,29 +2,21 @@ from __future__ import annotations
 
 import io
 from dataclasses import dataclass
-from datetime import datetime
-from pathlib import Path
-from typing import List, Tuple
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional, Tuple
 
+import requests
 import streamlit as st
-from PIL import Image
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_RIGHT
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
-from reportlab.platypus import (
-    Image as RLImage,
-    Paragraph,
-    SimpleDocTemplate,
-    Spacer,
-    Table,
-    TableStyle,
-)
+from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
-# =========================
+# ============================================================
 # PAGE CONFIG
-# =========================
+# ============================================================
 st.set_page_config(
     page_title="crypto.guru",
     page_icon="🟢",
@@ -32,13 +24,12 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# =========================
-# BRAND CONFIG
-# =========================
+# ============================================================
+# BRAND / THEME
+# ============================================================
 BRAND_NAME = "crypto.guru"
 TAGLINE = "Detect Early. Act Smart."
 
-# App colors
 APP_BG = "#0A0E14"
 APP_CARD = "#111722"
 APP_CARD_2 = "#0F141D"
@@ -52,7 +43,6 @@ APP_AMBER = "#D7A63A"
 APP_RED = "#D96A6A"
 APP_ORANGE = "#D48A2F"
 
-# PDF colors
 PDF_BG_HEADER = "#10151D"
 PDF_RULE = "#2B3442"
 PDF_TEXT = "#111111"
@@ -61,19 +51,46 @@ PDF_MUTED = "#666666"
 PDF_GREEN = "#2E7D32"
 PDF_ORANGE = "#8C5A12"
 
-LOGO_PATH = "assets/crypto_guru_logo.png"
+DEXSCREENER_BASE = "https://api.dexscreener.com"
+ETHERSCAN_V2_BASE = "https://api.etherscan.io/v2/api"
 
-# =========================
+EVM_CHAIN_IDS: Dict[str, str] = {
+    "ethereum": "1",
+    "bsc": "56",
+    "polygon": "137",
+    "arbitrum": "42161",
+    "base": "8453",
+    "optimism": "10",
+    "avalanche": "43114",
+}
+
+# ============================================================
 # DATA MODELS
-# =========================
+# ============================================================
 @dataclass
-class TokenInfo:
-    token_name: str
-    symbol: str
-    chain: str
-    timeframe: str
-    price: float
-    generated_at: str
+class TokenPair:
+    chain_id: str
+    dex_id: str
+    pair_address: str
+    url: str
+    base_symbol: str
+    base_name: str
+    base_address: str
+    quote_symbol: str
+    quote_address: str
+    price_usd: float
+    fdv: float
+    market_cap: float
+    liquidity_usd: float
+    volume_24h: float
+    buys_24h: int
+    sells_24h: int
+    pair_age_hours: float
+    price_change_5m: float
+    price_change_1h: float
+    price_change_6h: float
+    price_change_24h: float
+    pair_created_at: Optional[int]
 
 
 @dataclass
@@ -119,8 +136,24 @@ class RiskSummary:
 
 
 @dataclass
+class OnChainMetrics:
+    enabled: bool
+    chain_supported: bool
+    total_supply_raw: float
+    holder_rows: List[Dict[str, Any]]
+    top10_concentration_pct: float
+    smart_wallets_active: int
+    repeat_buyers: bool
+    net_flow_label: str
+    smart_wallet_net_units: float
+    holder_growth_proxy: float
+    notes: List[str]
+
+
+@dataclass
 class ReportData:
-    token: TokenInfo
+    token: TokenPair
+    generated_at: str
     miro_total: float
     status: str
     breakdown: MiroBreakdown
@@ -131,12 +164,12 @@ class ReportData:
     verdict_title: str
     verdict_points: List[str]
     action_note: str
-    client_name: str
+    onchain_metrics: OnChainMetrics
 
 
-# =========================
-# APP STYLING
-# =========================
+# ============================================================
+# STYLING
+# ============================================================
 def inject_css() -> None:
     st.markdown(
         f"""
@@ -147,9 +180,9 @@ def inject_css() -> None:
         }}
 
         .block-container {{
-            padding-top: 1.1rem;
-            padding-bottom: 1.8rem;
-            max-width: 1180px;
+            padding-top: 1.0rem;
+            padding-bottom: 1.6rem;
+            max-width: 1280px;
         }}
 
         section[data-testid="stSidebar"] {{
@@ -197,7 +230,7 @@ def inject_css() -> None:
         }}
 
         .score-text {{
-            font-size: 2.15rem;
+            font-size: 2.05rem;
             font-weight: 900;
             margin-bottom: 0.14rem;
             letter-spacing: -0.03em;
@@ -219,6 +252,42 @@ def inject_css() -> None:
             font-size: 0.88rem;
             line-height: 1.5;
             font-weight: 500;
+        }}
+
+        .compact-row {{
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
+            padding: 5px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+            font-size: 0.93rem;
+        }}
+
+        .compact-row:last-child {{
+            border-bottom: none;
+        }}
+
+        .compact-label {{
+            flex: 1;
+            color: #C2CCD9;
+            font-weight: 600;
+        }}
+
+        .compact-bar {{
+            width: 70px;
+            text-align: center;
+            color: {APP_GREEN_SOFT};
+            font-family: monospace;
+            font-weight: 700;
+        }}
+
+        .compact-value {{
+            width: 58px;
+            text-align: right;
+            color: {APP_TEXT};
+            font-size: 0.90rem;
+            font-weight: 700;
         }}
 
         .agent-box {{
@@ -252,40 +321,16 @@ def inject_css() -> None:
             margin-top: 18px;
         }}
 
-        .compact-row {{
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            gap: 12px;
-            padding: 5px 0;
-            border-bottom: 1px solid rgba(255,255,255,0.05);
-            font-size: 0.93rem;
-        }}
-
-        .compact-row:last-child {{
-            border-bottom: none;
-        }}
-
-        .compact-label {{
-            flex: 1;
-            color: #C2CCD9;
-            font-weight: 600;
-        }}
-
-        .compact-bar {{
-            width: 70px;
-            text-align: center;
-            color: {APP_GREEN_SOFT};
-            font-family: monospace;
+        .signal-chip {{
+            display:inline-block;
+            padding: 5px 10px;
+            border-radius: 999px;
+            border: 1px solid {APP_BORDER};
+            background: #171F2C;
+            font-size: 0.75rem;
             font-weight: 700;
-        }}
-
-        .compact-value {{
-            width: 52px;
-            text-align: right;
-            color: {APP_TEXT};
-            font-size: 0.90rem;
-            font-weight: 700;
+            margin-right: 6px;
+            margin-bottom: 6px;
         }}
 
         .stDownloadButton > button {{
@@ -301,9 +346,36 @@ def inject_css() -> None:
     )
 
 
-# =========================
+# ============================================================
 # HELPERS
-# =========================
+# ============================================================
+def safe_float(value: Any, default: float = 0.0) -> float:
+    try:
+        if value is None:
+            return default
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def safe_int(value: Any, default: int = 0) -> int:
+    try:
+        if value is None:
+            return default
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def clamp_score(value: int, low: int, high: int) -> int:
+    return max(low, min(high, value))
+
+
+def make_bar(value: int, max_value: int) -> str:
+    value = max(0, min(value, max_value))
+    return ("█" * value) + ("░" * (max_value - value))
+
+
 def score_status(score: float) -> str:
     if score >= 11:
         return "⚡ HIGH MOMENTUM"
@@ -324,54 +396,422 @@ def score_color(score: float) -> str:
     return APP_RED
 
 
-def clamp_score(value: int, low: int, high: int) -> int:
-    return max(low, min(high, value))
+def human_usd(v: float) -> str:
+    if v >= 1_000_000_000:
+        return f"${v / 1_000_000_000:.2f}B"
+    if v >= 1_000_000:
+        return f"${v / 1_000_000:.2f}M"
+    if v >= 1_000:
+        return f"${v / 1_000:.1f}K"
+    return f"${v:.0f}"
 
 
-def make_bar(value: int, max_value: int) -> str:
-    value = max(0, min(value, max_value))
-    return ("█" * value) + ("░" * (max_value - value))
+def format_pct(v: float) -> str:
+    return f"{v:+.2f}%"
 
 
-def get_safe_logo_for_pdf(path: str, width_mm: float = 12, height_mm: float = 12):
-    if not Path(path).exists():
-        return None
+def parse_csv_wallets(text: str) -> List[str]:
+    wallets: List[str] = []
+    for raw in text.splitlines():
+        addr = raw.strip()
+        if not addr:
+            continue
+        wallets.append(addr.lower())
+    return wallets
 
+
+def get_etherscan_api_key() -> str:
     try:
-        with Image.open(path) as img:
-            img = img.convert("RGBA")
-            pixels = img.getdata()
-            cleaned = []
-            for pixel in pixels:
-                r, g, b, a = pixel
-                if r > 245 and g > 245 and b > 245:
-                    cleaned.append((255, 255, 255, 0))
-                else:
-                    cleaned.append((r, g, b, a))
-            img.putdata(cleaned)
+        return st.secrets.get("ETHERSCAN_API_KEY", "")
+    except Exception:
+        return ""
 
-            buf = io.BytesIO()
-            img.save(buf, format="PNG")
-            buf.seek(0)
-            return RLImage(buf, width=width_mm * mm, height=height_mm * mm)
+
+# ============================================================
+# DEXSCREENER
+# ============================================================
+def http_get_json(url: str, params: Optional[Dict[str, Any]] = None, timeout: int = 20) -> Dict[str, Any]:
+    response = requests.get(
+        url,
+        params=params,
+        timeout=timeout,
+        headers={"Accept": "application/json", "User-Agent": "crypto.guru/1.0"},
+    )
+    response.raise_for_status()
+    return response.json()
+
+
+def parse_pair(raw: Dict[str, Any]) -> Optional[TokenPair]:
+    try:
+        base = raw.get("baseToken", {}) or {}
+        quote = raw.get("quoteToken", {}) or {}
+        volume = raw.get("volume", {}) or {}
+        txns = raw.get("txns", {}) or {}
+        price_change = raw.get("priceChange", {}) or {}
+        liquidity = raw.get("liquidity", {}) or {}
+
+        pair_created_at = raw.get("pairCreatedAt")
+        age_hours = 99999.0
+        if pair_created_at:
+            age_hours = max(
+                0.0,
+                (datetime.now(timezone.utc).timestamp() * 1000 - float(pair_created_at)) / 1000 / 3600,
+            )
+
+        txns_h24 = txns.get("h24", {}) or {}
+        return TokenPair(
+            chain_id=str(raw.get("chainId", "")),
+            dex_id=str(raw.get("dexId", "")),
+            pair_address=str(raw.get("pairAddress", "")),
+            url=str(raw.get("url", "")),
+            base_symbol=str(base.get("symbol", "")),
+            base_name=str(base.get("name", "")),
+            base_address=str(base.get("address", "")),
+            quote_symbol=str(quote.get("symbol", "")),
+            quote_address=str(quote.get("address", "")),
+            price_usd=safe_float(raw.get("priceUsd")),
+            fdv=safe_float(raw.get("fdv")),
+            market_cap=safe_float(raw.get("marketCap")),
+            liquidity_usd=safe_float(liquidity.get("usd")),
+            volume_24h=safe_float(volume.get("h24")),
+            buys_24h=safe_int(txns_h24.get("buys")),
+            sells_24h=safe_int(txns_h24.get("sells")),
+            pair_age_hours=age_hours,
+            price_change_5m=safe_float(price_change.get("m5")),
+            price_change_1h=safe_float(price_change.get("h1")),
+            price_change_6h=safe_float(price_change.get("h6")),
+            price_change_24h=safe_float(price_change.get("h24")),
+            pair_created_at=safe_int(pair_created_at) if pair_created_at else None,
+        )
     except Exception:
         return None
 
 
-def pdf_header_band(canvas, doc):
-    canvas.saveState()
-    page_width, page_height = A4
-    canvas.setFillColor(colors.HexColor(PDF_BG_HEADER))
-    canvas.rect(0, page_height - 28 * mm, page_width, 28 * mm, fill=1, stroke=0)
-    canvas.setStrokeColor(colors.HexColor(PDF_RULE))
-    canvas.setLineWidth(0.6)
-    canvas.line(16 * mm, page_height - 29 * mm, page_width - 16 * mm, page_height - 29 * mm)
-    canvas.restoreState()
+@st.cache_data(ttl=300, show_spinner=False)
+def fetch_search_pairs(query: str) -> List[TokenPair]:
+    if not query.strip():
+        return []
+    data = http_get_json(f"{DEXSCREENER_BASE}/latest/dex/search/", params={"q": query})
+    pairs_raw = data.get("pairs", []) or []
+    parsed: List[TokenPair] = []
+    for raw in pairs_raw:
+        pair = parse_pair(raw)
+        if pair:
+            parsed.append(pair)
+    return parsed
 
 
-# =========================
-# CORE LOGIC
-# =========================
+@st.cache_data(ttl=300, show_spinner=False)
+def fetch_trending_universe(seed_queries: Tuple[str, ...]) -> List[TokenPair]:
+    seen: Dict[str, TokenPair] = {}
+    for query in seed_queries:
+        try:
+            results = fetch_search_pairs(query)
+        except Exception:
+            results = []
+
+        for pair in results:
+            key = f"{pair.chain_id}:{pair.pair_address}"
+            if key not in seen or pair.liquidity_usd > seen[key].liquidity_usd:
+                seen[key] = pair
+    return list(seen.values())
+
+
+def universe_filter(
+    pairs: List[TokenPair],
+    min_liquidity: float,
+    min_volume_24h: float,
+    max_age_hours: float,
+    allowed_chains: List[str],
+) -> List[TokenPair]:
+    filtered: List[TokenPair] = []
+    for p in pairs:
+        if allowed_chains and p.chain_id not in allowed_chains:
+            continue
+        if p.liquidity_usd < min_liquidity:
+            continue
+        if p.volume_24h < min_volume_24h:
+            continue
+        if p.pair_age_hours > max_age_hours:
+            continue
+        if p.price_usd <= 0:
+            continue
+        filtered.append(p)
+    return filtered
+
+
+# ============================================================
+# ETHERSCAN V2 ON-CHAIN ENGINE
+# ============================================================
+@st.cache_data(ttl=300, show_spinner=False)
+def etherscan_v2(
+    chainid: str,
+    module: str,
+    action: str,
+    params: Dict[str, Any],
+    api_key: str,
+) -> Dict[str, Any]:
+    if not api_key:
+        return {"status": "0", "message": "NO_API_KEY", "result": []}
+
+    merged = {
+        "chainid": chainid,
+        "module": module,
+        "action": action,
+        "apikey": api_key,
+    }
+    merged.update(params)
+
+    try:
+        data = http_get_json(ETHERSCAN_V2_BASE, params=merged, timeout=25)
+        return data
+    except Exception as e:
+        return {"status": "0", "message": "ERROR", "result": str(e)}
+
+
+def get_chainid_for_token(pair: TokenPair) -> Optional[str]:
+    return EVM_CHAIN_IDS.get(pair.chain_id)
+
+
+def is_evm_supported(pair: TokenPair) -> bool:
+    return get_chainid_for_token(pair) is not None
+
+
+def parse_decimal_token_value(raw_value: Any, token_decimal: Any) -> float:
+    value = safe_float(raw_value)
+    decimals = safe_int(token_decimal, 18)
+    try:
+        return value / (10 ** decimals)
+    except Exception:
+        return 0.0
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def fetch_token_supply(chainid: str, contract_address: str, api_key: str) -> float:
+    data = etherscan_v2(
+        chainid=chainid,
+        module="stats",
+        action="tokensupply",
+        params={"contractaddress": contract_address},
+        api_key=api_key,
+    )
+    result = data.get("result", "0")
+    return safe_float(result, 0.0)
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def fetch_token_holders(chainid: str, contract_address: str, api_key: str, page: int = 1, offset: int = 100) -> List[Dict[str, Any]]:
+    data = etherscan_v2(
+        chainid=chainid,
+        module="token",
+        action="tokenholderlist",
+        params={
+            "contractaddress": contract_address,
+            "page": page,
+            "offset": offset,
+        },
+        api_key=api_key,
+    )
+    result = data.get("result", [])
+    if isinstance(result, list):
+        return result
+    return []
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def fetch_wallet_token_transfers(
+    chainid: str,
+    wallet_address: str,
+    contract_address: str,
+    api_key: str,
+    page: int = 1,
+    offset: int = 100,
+) -> List[Dict[str, Any]]:
+    data = etherscan_v2(
+        chainid=chainid,
+        module="account",
+        action="tokentx",
+        params={
+            "address": wallet_address,
+            "contractaddress": contract_address,
+            "page": page,
+            "offset": offset,
+            "sort": "desc",
+        },
+        api_key=api_key,
+    )
+    result = data.get("result", [])
+    if isinstance(result, list):
+        return result
+    return []
+
+
+def compute_top10_concentration_pct(holder_rows: List[Dict[str, Any]], total_supply_raw: float) -> float:
+    if total_supply_raw <= 0:
+        return 0.0
+    top10_bal = 0.0
+    for row in holder_rows[:10]:
+        bal = safe_float(row.get("TokenHolderQuantity") or row.get("tokenHolderQuantity"))
+        top10_bal += bal
+    return round((top10_bal / total_supply_raw) * 100, 2)
+
+
+def compute_smart_wallet_metrics_from_transfers(
+    pair: TokenPair,
+    watched_wallets: List[str],
+    api_key: str,
+) -> Tuple[int, bool, bool, float, List[str]]:
+    chainid = get_chainid_for_token(pair)
+    if not chainid or not watched_wallets or not api_key:
+        return 0, False, False, 0.0, []
+
+    active_wallets = 0
+    repeat_buyers = False
+    net_positive_wallets = 0
+    total_net_units = 0.0
+    notes: List[str] = []
+
+    for wallet in watched_wallets[:25]:
+        transfers = fetch_wallet_token_transfers(
+            chainid=chainid,
+            wallet_address=wallet,
+            contract_address=pair.base_address,
+            api_key=api_key,
+            page=1,
+            offset=100,
+        )
+        if not transfers:
+            continue
+
+        buys = 0.0
+        sells = 0.0
+        buy_count = 0
+        token_symbol = pair.base_symbol
+
+        for tx in transfers:
+            tx_from = str(tx.get("from", "")).lower()
+            tx_to = str(tx.get("to", "")).lower()
+            token_decimal = tx.get("tokenDecimal", 18)
+            value_units = parse_decimal_token_value(tx.get("value", 0), token_decimal)
+
+            if tx_to == wallet:
+                buys += value_units
+                buy_count += 1
+            elif tx_from == wallet:
+                sells += value_units
+
+        net_units = buys - sells
+        if buys > 0 or sells > 0:
+            active_wallets += 1
+        if buy_count >= 2:
+            repeat_buyers = True
+        if net_units > 0:
+            net_positive_wallets += 1
+        total_net_units += net_units
+
+        if buys > 0 or sells > 0:
+            notes.append(
+                f"{wallet[:6]}…{wallet[-4:]}: {token_symbol} net {net_units:.2f}"
+            )
+
+    net_flow_positive = total_net_units > 0
+    holder_growth_proxy = min(15.0, active_wallets * 1.5 + (3.0 if repeat_buyers else 0.0))
+    return active_wallets, repeat_buyers, net_flow_positive, holder_growth_proxy, notes[:6]
+
+
+def build_onchain_metrics(pair: TokenPair, watched_wallets: List[str], api_key: str) -> OnChainMetrics:
+    chainid = get_chainid_for_token(pair)
+    if not chainid:
+        return OnChainMetrics(
+            enabled=False,
+            chain_supported=False,
+            total_supply_raw=0.0,
+            holder_rows=[],
+            top10_concentration_pct=0.0,
+            smart_wallets_active=0,
+            repeat_buyers=False,
+            net_flow_label="Unavailable",
+            smart_wallet_net_units=0.0,
+            holder_growth_proxy=0.0,
+            notes=["Chain is not wired into the EVM on-chain adapter yet."],
+        )
+
+    if not api_key:
+        return OnChainMetrics(
+            enabled=False,
+            chain_supported=True,
+            total_supply_raw=0.0,
+            holder_rows=[],
+            top10_concentration_pct=0.0,
+            smart_wallets_active=0,
+            repeat_buyers=False,
+            net_flow_label="No API key",
+            smart_wallet_net_units=0.0,
+            holder_growth_proxy=0.0,
+            notes=["Add ETHERSCAN_API_KEY to Streamlit secrets to enable real on-chain enrichment."],
+        )
+
+    total_supply_raw = fetch_token_supply(chainid, pair.base_address, api_key)
+    holder_rows = fetch_token_holders(chainid, pair.base_address, api_key, page=1, offset=100)
+    top10_concentration_pct = compute_top10_concentration_pct(holder_rows, total_supply_raw)
+
+    smart_wallets_active, repeat_buyers, net_flow_positive, holder_growth_proxy, wallet_notes = (
+        compute_smart_wallet_metrics_from_transfers(pair, watched_wallets, api_key)
+    )
+
+    return OnChainMetrics(
+        enabled=True,
+        chain_supported=True,
+        total_supply_raw=total_supply_raw,
+        holder_rows=holder_rows,
+        top10_concentration_pct=top10_concentration_pct,
+        smart_wallets_active=smart_wallets_active,
+        repeat_buyers=repeat_buyers,
+        net_flow_label="Positive" if net_flow_positive else "Mixed / Flat",
+        smart_wallet_net_units=0.0,
+        holder_growth_proxy=holder_growth_proxy,
+        notes=wallet_notes if wallet_notes else ["No watched-wallet activity detected for this token."],
+    )
+
+
+# ============================================================
+# MIRO + INTELLIGENCE
+# ============================================================
+def estimate_relative_volume(pair: TokenPair) -> float:
+    txn_total = pair.buys_24h + pair.sells_24h
+    if pair.liquidity_usd <= 0:
+        return 0.0
+    turnover = pair.volume_24h / max(pair.liquidity_usd, 1.0)
+    activity_boost = min(txn_total / 100.0, 5.0)
+    return turnover + activity_boost
+
+
+def estimate_atr_multiple(pair: TokenPair) -> float:
+    move = max(abs(pair.price_change_1h), abs(pair.price_change_6h), abs(pair.price_change_24h))
+    return move / 4.0
+
+
+def estimate_range_position(pair: TokenPair) -> float:
+    x = 0.5 + (pair.price_change_1h / 20.0) + (pair.price_change_24h / 40.0)
+    return max(0.0, min(1.0, x))
+
+
+def estimate_trend_flags(pair: TokenPair) -> Tuple[bool, bool, float]:
+    price_above_fast = pair.price_change_1h > 0
+    fast_above_slow = pair.price_change_24h > 0
+    adx_proxy = min(40.0, abs(pair.price_change_24h) + abs(pair.price_change_6h) / 2.0)
+    return price_above_fast, fast_above_slow, adx_proxy
+
+
+def estimate_penalties(pair: TokenPair, onchain: OnChainMetrics) -> Tuple[bool, bool, bool]:
+    low_liquidity_penalty = pair.liquidity_usd < 100_000
+    concentration_penalty = onchain.top10_concentration_pct > 60 if onchain.enabled else (
+        pair.market_cap > 0 and pair.fdv > 0 and pair.market_cap < pair.fdv * 0.55
+    )
+    suspicious_volume_penalty = pair.volume_24h > 0 and pair.liquidity_usd > 0 and (pair.volume_24h / pair.liquidity_usd) > 40
+    return low_liquidity_penalty, concentration_penalty, suspicious_volume_penalty
+
+
 def calculate_miro_v2(
     relative_volume: float,
     atr_multiple: float,
@@ -463,28 +903,21 @@ def total_miro_score(b: MiroBreakdown) -> float:
 
 
 def build_smart_money(
-    smart_wallets_active: int,
-    repeat_buyers: bool,
-    net_flow_positive: bool,
-    holder_growth_24h: float,
+    onchain: OnChainMetrics,
 ) -> SmartMoneySnapshot:
-    net_flow = "Positive" if net_flow_positive else "Mixed"
-
-    parts = []
-    if smart_wallets_active >= 2:
-        parts.append("accumulation visible")
-    if repeat_buyers:
-        parts.append("repeat buys")
-    if holder_growth_24h >= 5:
-        parts.append("holder growth supportive")
-
-    summary = "Early positioning suggests " + ", ".join(parts) + "." if parts else "No strong smart money pattern yet."
+    summary = (
+        f"Watched-wallet flow is {onchain.net_flow_label.lower()}, "
+        f"{'repeat buys detected' if onchain.repeat_buyers else 'no repeat buys'}, "
+        f"holder-growth proxy {onchain.holder_growth_proxy:.1f}."
+        if onchain.enabled
+        else "On-chain engine not active; using lighter heuristics."
+    )
 
     return SmartMoneySnapshot(
-        smart_wallets_active=smart_wallets_active,
-        repeat_buyers=repeat_buyers,
-        net_flow=net_flow,
-        holder_growth_24h=holder_growth_24h,
+        smart_wallets_active=onchain.smart_wallets_active,
+        repeat_buyers=onchain.repeat_buyers,
+        net_flow=onchain.net_flow_label,
+        holder_growth_24h=onchain.holder_growth_proxy,
         summary=summary,
     )
 
@@ -518,9 +951,14 @@ def build_risk(
     low_liquidity_penalty: bool,
     concentration_penalty: bool,
     suspicious_volume_penalty: bool,
+    onchain: OnChainMetrics,
 ) -> RiskSummary:
     liquidity = "Weak" if low_liquidity_penalty else "Strong"
-    concentration = "Elevated" if concentration_penalty else "Moderate"
+    concentration = (
+        f"Top10 {onchain.top10_concentration_pct:.1f}%"
+        if onchain.enabled and onchain.top10_concentration_pct > 0
+        else ("Elevated" if concentration_penalty else "Moderate")
+    )
     suspicious_activity = "Detected" if suspicious_volume_penalty else "None"
     execution_risk = "Use tighter execution." if any(
         [low_liquidity_penalty, concentration_penalty, suspicious_volume_penalty]
@@ -545,7 +983,7 @@ def build_council(
             name="Bull Whale",
             emoji="🐋",
             text=(
-                f"{smart_money.smart_wallets_active} active wallets. "
+                f"{smart_money.smart_wallets_active} watched wallets active. "
                 f"{'Repeat buys seen. ' if smart_money.repeat_buyers else ''}"
                 "Accumulation is building."
             ),
@@ -619,35 +1057,14 @@ def build_verdict(score: float) -> Tuple[str, List[str], str]:
     )
 
 
-def generate_report(
-    token_name: str,
-    symbol: str,
-    chain: str,
-    timeframe: str,
-    price: float,
-    relative_volume: float,
-    atr_multiple: float,
-    range_position: float,
-    adx_strength: float,
-    smart_wallets_active: int,
-    repeat_buyers: bool,
-    net_flow_positive: bool,
-    holder_growth_24h: float,
-    price_above_ema20: bool,
-    ema20_above_ema50: bool,
-    low_liquidity_penalty: bool,
-    concentration_penalty: bool,
-    suspicious_volume_penalty: bool,
-    client_name: str,
-) -> ReportData:
-    token = TokenInfo(
-        token_name=token_name,
-        symbol=symbol,
-        chain=chain,
-        timeframe=timeframe,
-        price=price,
-        generated_at=datetime.now().strftime("%d %b %Y | %I:%M %p"),
-    )
+def build_report_data(pair: TokenPair, watched_wallets: List[str], api_key: str) -> ReportData:
+    onchain = build_onchain_metrics(pair, watched_wallets, api_key)
+
+    relative_volume = estimate_relative_volume(pair)
+    atr_multiple = estimate_atr_multiple(pair)
+    range_position = estimate_range_position(pair)
+    price_above_ema20, ema20_above_ema50, adx_strength = estimate_trend_flags(pair)
+    low_liquidity_penalty, concentration_penalty, suspicious_volume_penalty = estimate_penalties(pair, onchain)
 
     breakdown = calculate_miro_v2(
         relative_volume=relative_volume,
@@ -656,10 +1073,10 @@ def generate_report(
         price_above_ema20=price_above_ema20,
         ema20_above_ema50=ema20_above_ema50,
         adx_strength=adx_strength,
-        smart_wallets_active=smart_wallets_active,
-        repeat_buyers=repeat_buyers,
-        net_flow_positive=net_flow_positive,
-        holder_growth_24h=holder_growth_24h,
+        smart_wallets_active=onchain.smart_wallets_active,
+        repeat_buyers=onchain.repeat_buyers,
+        net_flow_positive=onchain.net_flow_label == "Positive",
+        holder_growth_24h=onchain.holder_growth_proxy,
         low_liquidity_penalty=low_liquidity_penalty,
         concentration_penalty=concentration_penalty,
         suspicious_volume_penalty=suspicious_volume_penalty,
@@ -667,12 +1084,7 @@ def generate_report(
 
     miro_total = total_miro_score(breakdown)
     status = score_status(miro_total)
-    smart_money = build_smart_money(
-        smart_wallets_active=smart_wallets_active,
-        repeat_buyers=repeat_buyers,
-        net_flow_positive=net_flow_positive,
-        holder_growth_24h=holder_growth_24h,
-    )
+    smart_money = build_smart_money(onchain)
     kronos = build_kronos(
         atr_multiple=atr_multiple,
         adx_strength=adx_strength,
@@ -682,6 +1094,7 @@ def generate_report(
         low_liquidity_penalty=low_liquidity_penalty,
         concentration_penalty=concentration_penalty,
         suspicious_volume_penalty=suspicious_volume_penalty,
+        onchain=onchain,
     )
     council = build_council(
         smart_money=smart_money,
@@ -692,7 +1105,8 @@ def generate_report(
     verdict_title, verdict_points, action_note = build_verdict(miro_total)
 
     return ReportData(
-        token=token,
+        token=pair,
+        generated_at=datetime.now().strftime("%d %b %Y | %I:%M %p"),
         miro_total=miro_total,
         status=status,
         breakdown=breakdown,
@@ -703,13 +1117,24 @@ def generate_report(
         verdict_title=verdict_title,
         verdict_points=verdict_points,
         action_note=action_note,
-        client_name=client_name or "Premium Client",
+        onchain_metrics=onchain,
     )
 
 
-# =========================
-# PDF GENERATION
-# =========================
+# ============================================================
+# PDF
+# ============================================================
+def pdf_header_band(canvas, doc):
+    canvas.saveState()
+    page_width, page_height = A4
+    canvas.setFillColor(colors.HexColor(PDF_BG_HEADER))
+    canvas.rect(0, page_height - 28 * mm, page_width, 28 * mm, fill=1, stroke=0)
+    canvas.setStrokeColor(colors.HexColor(PDF_RULE))
+    canvas.setLineWidth(0.6)
+    canvas.line(16 * mm, page_height - 29 * mm, page_width - 16 * mm, page_height - 29 * mm)
+    canvas.restoreState()
+
+
 def build_pdf(report: ReportData) -> bytes:
     buffer = io.BytesIO()
 
@@ -777,32 +1202,12 @@ def build_pdf(report: ReportData) -> bytes:
 
     story = []
 
-    safe_logo = get_safe_logo_for_pdf(LOGO_PATH, width_mm=12, height_mm=12)
-
     brand_copy = Paragraph(
         f'<font color="#D9E1EC">crypto</font><font color="#7CFF5B">.guru</font><br/><font size="7.4" color="#9AA7B8">{TAGLINE}</font>',
         brand_style,
     )
     report_title = Paragraph("CRYPTO INTELLIGENCE REPORT", report_title_style)
-
-    if safe_logo is not None:
-        brand_table = Table([[safe_logo, brand_copy]], colWidths=[14 * mm, 56 * mm])
-    else:
-        brand_table = Table([[brand_copy]], colWidths=[70 * mm])
-
-    brand_table.setStyle(
-        TableStyle(
-            [
-                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                ("LEFTPADDING", (0, 0), (-1, -1), 0),
-                ("RIGHTPADDING", (0, 0), (-1, -1), 0),
-                ("TOPPADDING", (0, 0), (-1, -1), 0),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
-            ]
-        )
-    )
-
-    header_table = Table([[brand_table, report_title]], colWidths=[92 * mm, 78 * mm])
+    header_table = Table([[brand_copy, report_title]], colWidths=[92 * mm, 78 * mm])
     header_table.setStyle(
         TableStyle(
             [
@@ -814,80 +1219,75 @@ def build_pdf(report: ReportData) -> bytes:
             ]
         )
     )
-
     story.append(header_table)
     story.append(Spacer(1, 3 * mm))
 
     story.append(
         Paragraph(
             (
-                f"Token: {report.token.token_name} ({report.token.symbol}) | "
-                f"Chain: {report.token.chain} | "
-                f"Timeframe: {report.token.timeframe} | "
-                f"Generated: {report.token.generated_at} | "
-                f"Prepared for: {report.client_name}"
+                f"Token: {report.token.base_name} ({report.token.base_symbol}) | "
+                f"Chain: {report.token.chain_id} | "
+                f"Timeframe: Live | "
+                f"Generated: {report.generated_at}"
             ),
             small_style,
         )
     )
     story.append(Spacer(1, 4 * mm))
 
-    # Fixed indented score block
     story.append(Paragraph("01 · MIRO v2 SCORE", section_style))
-    story.append(Spacer(1, 1.2 * mm))
-
-    score_line = Paragraph(
-        f'<font size="20" color="{PDF_GREEN}"><b>{report.miro_total:.1f} / 15</b></font>'
-        f'&nbsp;&nbsp;&nbsp;<font size="11" color="{PDF_TEXT}"><b>{report.status}</b></font>',
-        body_style,
+    score_header_table = Table(
+        [["", f"{report.miro_total:.1f} / 15", report.status]],
+        colWidths=[10 * mm, 32 * mm, 55 * mm],
     )
+    score_header_table.setStyle(
+        TableStyle(
+            [
+                ("TEXTCOLOR", (1, 0), (1, 0), colors.HexColor(PDF_GREEN)),
+                ("TEXTCOLOR", (2, 0), (2, 0), colors.HexColor(PDF_TEXT)),
+                ("FONTNAME", (1, 0), (1, 0), "Helvetica-Bold"),
+                ("FONTNAME", (2, 0), (2, 0), "Helvetica-Bold"),
+                ("FONTSIZE", (1, 0), (1, 0), 20),
+                ("FONTSIZE", (2, 0), (2, 0), 11),
+                ("ALIGN", (1, 0), (1, 0), "LEFT"),
+                ("ALIGN", (2, 0), (2, 0), "LEFT"),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                ("TOPPADDING", (0, 0), (-1, -1), 0),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+            ]
+        )
+    )
+    story.append(score_header_table)
 
     compact_score_table = Table(
         [
-            ["Volume", f"{report.breakdown.volume_expansion}/5"],
-            ["Volatility", f"{report.breakdown.volatility_expansion}/3"],
-            ["Range", f"{report.breakdown.range_control}/2"],
-            ["Trend", f"{report.breakdown.trend_quality}/3"],
-            ["On-Chain", f"{report.breakdown.onchain_confirmation}/4"],
-            ["Risk", f"-{report.breakdown.risk_penalty}"],
+            ["", "Volume", f"{report.breakdown.volume_expansion}/5"],
+            ["", "Volatility", f"{report.breakdown.volatility_expansion}/3"],
+            ["", "Range", f"{report.breakdown.range_control}/2"],
+            ["", "Trend", f"{report.breakdown.trend_quality}/3"],
+            ["", "On-Chain", f"{report.breakdown.onchain_confirmation}/4"],
+            ["", "Risk", f"-{report.breakdown.risk_penalty}"],
         ],
-        colWidths=[34 * mm, 14 * mm],
+        colWidths=[10 * mm, 34 * mm, 14 * mm],
     )
     compact_score_table.setStyle(
         TableStyle(
             [
-                ("TEXTCOLOR", (0, 0), (-1, -1), colors.HexColor(PDF_TEXT_SOFT)),
-                ("FONTNAME", (0, 0), (-1, -1), "Helvetica-Bold"),
+                ("TEXTCOLOR", (1, 0), (-1, -1), colors.HexColor(PDF_TEXT_SOFT)),
+                ("FONTNAME", (1, 0), (-1, -1), "Helvetica-Bold"),
+                ("FONTSIZE", (1, 0), (-1, -1), 9.5),
+                ("ALIGN", (1, 0), (1, -1), "LEFT"),
+                ("ALIGN", (2, 0), (2, -1), "RIGHT"),
                 ("LEFTPADDING", (0, 0), (-1, -1), 0),
                 ("RIGHTPADDING", (0, 0), (-1, -1), 0),
-                ("TOPPADDING", (0, 0), (-1, -1), 1.2),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 1.2),
-                ("ALIGN", (0, 0), (0, -1), "LEFT"),
-                ("ALIGN", (1, 0), (1, -1), "RIGHT"),
+                ("TOPPADDING", (0, 0), (-1, -1), 1.5),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 1.5),
             ]
         )
     )
-
-    score_block = Table(
-        [
-            ["", score_line],
-            ["", compact_score_table],
-        ],
-        colWidths=[10 * mm, 48 * mm],
-    )
-    score_block.setStyle(
-        TableStyle(
-            [
-                ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                ("LEFTPADDING", (0, 0), (-1, -1), 0),
-                ("RIGHTPADDING", (0, 0), (-1, -1), 0),
-                ("TOPPADDING", (0, 0), (-1, -1), 0),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
-            ]
-        )
-    )
-
-    story.append(score_block)
+    story.append(compact_score_table)
     story.append(Spacer(1, 4 * mm))
 
     story.append(Paragraph("02 · SMART MONEY SNAPSHOT", section_style))
@@ -897,7 +1297,7 @@ def build_pdf(report: ReportData) -> bytes:
                 f"<b>Active Smart Wallets:</b> {report.smart_money.smart_wallets_active}<br/>"
                 f"<b>Repeat Buyers:</b> {'Detected' if report.smart_money.repeat_buyers else 'No'}<br/>"
                 f"<b>Net Flow:</b> {report.smart_money.net_flow}<br/>"
-                f"<b>Holder Growth (24H):</b> {report.smart_money.holder_growth_24h:.1f}%<br/><br/>"
+                f"<b>Holder Growth Proxy:</b> {report.smart_money.holder_growth_24h:.1f}<br/><br/>"
                 f"{report.smart_money.summary}"
             ),
             body_style,
@@ -919,14 +1319,7 @@ def build_pdf(report: ReportData) -> bytes:
     )
     story.append(Spacer(1, 3.6 * mm))
 
-    story.append(Paragraph("04 · AI COUNCIL", section_style))
-    for agent in report.council:
-        story.append(Paragraph(f"<b>{agent.emoji} {agent.name}:</b> {agent.text}", body_style))
-        story.append(Spacer(1, 1.2 * mm))
-
-    story.append(Spacer(1, 2.5 * mm))
-
-    story.append(Paragraph("05 · RISK SUMMARY", section_style))
+    story.append(Paragraph("04 · RISK SUMMARY", section_style))
     story.append(
         Paragraph(
             (
@@ -940,7 +1333,7 @@ def build_pdf(report: ReportData) -> bytes:
     )
     story.append(Spacer(1, 3.6 * mm))
 
-    story.append(Paragraph("06 · FINAL VERDICT", section_style))
+    story.append(Paragraph("05 · FINAL VERDICT", section_style))
     story.append(Paragraph(report.verdict_title, verdict_style))
     clean_points = "<br/>".join([f"<b>—</b> {point}" for point in report.verdict_points])
     story.append(Paragraph(clean_points, body_style))
@@ -961,52 +1354,33 @@ def build_pdf(report: ReportData) -> bytes:
     return pdf
 
 
-# =========================
+# ============================================================
 # UI COMPONENTS
-# =========================
+# ============================================================
 def render_brand_header() -> None:
-    st.markdown('<div class="brand-box">', unsafe_allow_html=True)
-
-    if Path(LOGO_PATH).exists():
-        col1, col2 = st.columns([1, 7], gap="small")
-        with col1:
-            st.image(LOGO_PATH, width=72)
-        with col2:
-            st.markdown(
-                f"""
-                <div class="brand-title">
-                    <span style="color:#C2CCD9;">crypto</span><span style="color:{APP_GREEN_SOFT};">.guru</span>
-                </div>
-                <div class="brand-subtitle">{TAGLINE}</div>
-                """,
-                unsafe_allow_html=True,
-            )
-    else:
-        st.markdown(
-            f"""
+    st.markdown(
+        f"""
+        <div class="brand-box">
             <div class="brand-title">
                 <span style="color:#C2CCD9;">crypto</span><span style="color:{APP_GREEN_SOFT};">.guru</span>
             </div>
             <div class="brand-subtitle">{TAGLINE}</div>
-            <div style="margin-top:8px; color:{APP_RED}; font-size:0.9rem;">
-                Logo not found at: {LOGO_PATH}
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-    st.markdown("</div>", unsafe_allow_html=True)
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def render_token_header(report: ReportData) -> None:
+    p = report.token
     st.markdown(
         f"""
         <div class="section-box">
             <div class="section-label">Live Signal</div>
             <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:16px; flex-wrap:wrap;">
                 <div>
-                    <div style="font-size:1.9rem; font-weight:900; color:{APP_TEXT_STRONG}; letter-spacing:-0.02em;">{report.token.token_name} <span style="color:{APP_TEXT_MUTED}; font-size:1rem; font-weight:700;">· {report.token.chain}</span></div>
-                    <div class="small-note">{report.token.generated_at} · Timeframe: {report.token.timeframe} · Price: ${report.token.price:,.4f}</div>
+                    <div style="font-size:1.9rem; font-weight:900; color:{APP_TEXT_STRONG}; letter-spacing:-0.02em;">{p.base_name} <span style="color:{APP_TEXT_MUTED}; font-size:1rem; font-weight:700;">· {p.chain_id}</span></div>
+                    <div class="small-note">{report.generated_at} · Price: ${p.price_usd:,.6f} · Liquidity: {human_usd(p.liquidity_usd)} · Vol 24H: {human_usd(p.volume_24h)}</div>
                 </div>
                 <div style="text-align:right;">
                     <div class="score-text" style="color:{score_color(report.miro_total)};">{report.miro_total:.1f} / 15</div>
@@ -1031,7 +1405,6 @@ def render_breakdown(report: ReportData) -> None:
     ]
 
     st.markdown('<div class="section-box"><div class="section-label">01 · Miro v2 Breakdown</div>', unsafe_allow_html=True)
-
     for name, bar, value in rows:
         st.markdown(
             f"""
@@ -1043,24 +1416,43 @@ def render_breakdown(report: ReportData) -> None:
             """,
             unsafe_allow_html=True,
         )
+    st.markdown("</div>", unsafe_allow_html=True)
+
+
+def render_onchain_panel(report: ReportData) -> None:
+    o = report.onchain_metrics
+    st.markdown('<div class="section-box"><div class="section-label">02 · On-Chain Engine</div>', unsafe_allow_html=True)
+
+    st.write(f"**Engine Enabled:** {'Yes' if o.enabled else 'No'}")
+    st.write(f"**Chain Supported:** {'Yes' if o.chain_supported else 'No'}")
+    st.write(f"**Watched Wallets Active:** {o.smart_wallets_active}")
+    st.write(f"**Repeat Buyers:** {'Detected' if o.repeat_buyers else 'No'}")
+    st.write(f"**Net Flow:** {o.net_flow_label}")
+    if o.enabled and o.top10_concentration_pct > 0:
+        st.write(f"**Top 10 Holder Concentration:** {o.top10_concentration_pct:.2f}%")
+
+    if o.notes:
+        st.markdown("**Notes:**")
+        for note in o.notes:
+            st.markdown(f"- {note}")
 
     st.markdown("</div>", unsafe_allow_html=True)
 
 
 def render_smart_money(report: ReportData) -> None:
     s = report.smart_money
-    st.markdown('<div class="section-box"><div class="section-label">02 · Smart Money Snapshot</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-box"><div class="section-label">03 · Smart Money Snapshot</div>', unsafe_allow_html=True)
     st.write(f"**Active Smart Wallets:** {s.smart_wallets_active}")
     st.write(f"**Repeat Buyers:** {'Detected' if s.repeat_buyers else 'No'}")
     st.write(f"**Net Flow:** {s.net_flow}")
-    st.write(f"**Holder Growth (24H):** {s.holder_growth_24h:.1f}%")
+    st.write(f"**Holder Growth Proxy:** {s.holder_growth_24h:.1f}")
     st.caption(s.summary)
     st.markdown("</div>", unsafe_allow_html=True)
 
 
 def render_kronos(report: ReportData) -> None:
     k = report.kronos
-    st.markdown('<div class="section-box"><div class="section-label">03 · Market Structure</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-box"><div class="section-label">04 · Market Structure</div>', unsafe_allow_html=True)
     st.write(f"**Regime:** {k.regime}")
     st.write(f"**Bias:** {k.bias}")
     st.write(f"**Confidence:** {k.confidence}%")
@@ -1069,7 +1461,7 @@ def render_kronos(report: ReportData) -> None:
 
 
 def render_council(report: ReportData) -> None:
-    st.markdown('<div class="section-box"><div class="section-label">04 · AI Council</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-box"><div class="section-label">05 · AI Council</div>', unsafe_allow_html=True)
     for agent in report.council:
         st.markdown(
             f"""
@@ -1085,7 +1477,7 @@ def render_council(report: ReportData) -> None:
 
 def render_risk(report: ReportData) -> None:
     r = report.risk
-    st.markdown('<div class="section-box"><div class="section-label">05 · Risk Summary</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-box"><div class="section-label">06 · Risk Summary</div>', unsafe_allow_html=True)
     st.write(f"**Liquidity:** {r.liquidity}")
     st.write(f"**Concentration:** {r.concentration}")
     st.write(f"**Suspicious Activity:** {r.suspicious_activity}")
@@ -1098,7 +1490,7 @@ def render_verdict(report: ReportData) -> None:
     st.markdown(
         f"""
         <div class="verdict-box">
-            <div class="section-label" style="margin-bottom:0.45rem;">06 · Final Verdict</div>
+            <div class="section-label" style="margin-bottom:0.45rem;">07 · Final Verdict</div>
             <div style="font-size:1.2rem; font-weight:900; color:{APP_GREEN_SOFT}; margin-bottom:0.55rem; letter-spacing:-0.01em;">{report.verdict_title}</div>
             <ul style="margin-top:0.15rem; margin-bottom:0.7rem; color:#C2CCD9; font-weight:600;">{bullets}</ul>
             <div style="color:{APP_TEXT_STRONG};"><b>Recommended Action:</b> {report.action_note}</div>
@@ -1108,84 +1500,161 @@ def render_verdict(report: ReportData) -> None:
     )
 
 
-# =========================
-# MAIN APP
-# =========================
+# ============================================================
+# MAIN
+# ============================================================
 def main() -> None:
     inject_css()
     render_brand_header()
 
     with st.sidebar:
-        st.header("Signal Inputs")
+        st.header("Live Engine Controls")
 
-        token_name = st.text_input("Token Name", value="AAVE")
-        symbol = st.text_input("Symbol", value="AAVE")
-        chain = st.selectbox("Chain", ["Ethereum", "Base", "Solana", "Arbitrum", "BNB Chain"], index=0)
-        timeframe = st.selectbox("Timeframe", ["1H", "4H", "1D"], index=1)
-        price = st.number_input("Price", min_value=0.0, value=171.25, step=0.01)
+        seed_query_string = st.text_area(
+            "Seed Queries",
+            value="SOL\nETH\nBASE\nPEPE\nDOGE\nAI\nMEME\nDEFI\nBTC",
+            height=180,
+        )
+        seed_queries = tuple([q.strip() for q in seed_query_string.splitlines() if q.strip()])
 
-        st.subheader("Miro v2")
-        relative_volume = st.number_input("Relative Volume", min_value=0.0, value=6.2, step=0.1)
-        atr_multiple = st.number_input("ATR Multiple", min_value=0.0, value=2.4, step=0.1)
-        range_position = st.slider("Range Position", min_value=0.0, max_value=1.0, value=0.82, step=0.01)
-        adx_strength = st.number_input("ADX Strength", min_value=0.0, value=18.0, step=0.5)
+        allowed_chains = st.multiselect(
+            "Chains",
+            options=["ethereum", "solana", "base", "bsc", "arbitrum", "polygon", "avalanche", "optimism"],
+            default=["ethereum", "base", "bsc", "arbitrum", "polygon", "optimism"],
+        )
+
+        min_liquidity = st.number_input("Min Liquidity ($)", min_value=0, value=100000, step=10000)
+        min_volume_24h = st.number_input("Min 24H Volume ($)", min_value=0, value=250000, step=25000)
+        max_age_hours = st.number_input("Max Pair Age (hours)", min_value=1, value=24 * 14, step=24)
+        max_results = st.slider("Max Ranked Signals", min_value=10, max_value=200, value=40, step=10)
 
         st.subheader("On-Chain")
-        smart_wallets_active = st.number_input("Smart Wallets Active", min_value=0, value=3, step=1)
-        repeat_buyers = st.checkbox("Repeat Buyers Detected", value=True)
-        net_flow_positive = st.checkbox("Net Flow Positive", value=True)
-        holder_growth_24h = st.number_input("Holder Growth 24H (%)", min_value=-100.0, value=6.2, step=0.1)
+        watched_wallets_text = st.text_area(
+            "Watched Smart Wallets (one per line)",
+            value="",
+            height=160,
+            help="Paste EVM wallet addresses you want tracked for token accumulation.",
+        )
+        watched_wallets = parse_csv_wallets(watched_wallets_text)
 
-        st.subheader("Trend")
-        price_above_ema20 = st.checkbox("Price Above EMA20", value=True)
-        ema20_above_ema50 = st.checkbox("EMA20 Above EMA50", value=True)
+        refresh_now = st.button("Refresh Live Universe", use_container_width=True)
 
-        st.subheader("Penalties")
-        low_liquidity_penalty = st.checkbox("Low Liquidity Penalty", value=False)
-        concentration_penalty = st.checkbox("Concentration Penalty", value=False)
-        suspicious_volume_penalty = st.checkbox("Suspicious Volume Penalty", value=False)
+    if refresh_now:
+        st.cache_data.clear()
 
-        st.subheader("Premium Report")
-        client_name = st.text_input("Client Name", value="Premium Client")
+    api_key = get_etherscan_api_key()
 
-    report = generate_report(
-        token_name=token_name,
-        symbol=symbol,
-        chain=chain,
-        timeframe=timeframe,
-        price=price,
-        relative_volume=relative_volume,
-        atr_multiple=atr_multiple,
-        range_position=range_position,
-        adx_strength=adx_strength,
-        smart_wallets_active=smart_wallets_active,
-        repeat_buyers=repeat_buyers,
-        net_flow_positive=net_flow_positive,
-        holder_growth_24h=holder_growth_24h,
-        price_above_ema20=price_above_ema20,
-        ema20_above_ema50=ema20_above_ema50,
-        low_liquidity_penalty=low_liquidity_penalty,
-        concentration_penalty=concentration_penalty,
-        suspicious_volume_penalty=suspicious_volume_penalty,
-        client_name=client_name,
+    with st.spinner("Building live universe..."):
+        try:
+            universe = fetch_trending_universe(seed_queries)
+        except Exception as e:
+            st.error(f"Failed to fetch live universe: {e}")
+            return
+
+    filtered = universe_filter(
+        pairs=universe,
+        min_liquidity=float(min_liquidity),
+        min_volume_24h=float(min_volume_24h),
+        max_age_hours=float(max_age_hours),
+        allowed_chains=allowed_chains,
     )
 
-    render_token_header(report)
+    reports: List[ReportData] = [build_report_data(pair, watched_wallets, api_key) for pair in filtered]
+    reports.sort(key=lambda r: (r.miro_total, r.token.volume_24h, r.token.liquidity_usd), reverse=True)
+    reports = reports[:max_results]
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Live Universe", len(universe))
+    c2.metric("Filtered Candidates", len(filtered))
+    c3.metric("Ranked Signals", len(reports))
+    c4.metric("Etherscan Key", "Loaded" if api_key else "Missing")
+
+    if not reports:
+        st.warning("No live candidates matched your filters.")
+        return
+
+    st.markdown('<div class="section-box"><div class="section-label">Live Signal Board</div>', unsafe_allow_html=True)
+
+    options = {
+        f"{r.token.base_symbol} · {r.token.chain_id} · Score {r.miro_total:.1f} · Vol {human_usd(r.token.volume_24h)}": i
+        for i, r in enumerate(reports)
+    }
+    selected_label = st.selectbox("Select Signal", list(options.keys()))
+    selected_report = reports[options[selected_label]]
+
+    rows: List[Dict[str, Any]] = []
+    for r in reports:
+        rows.append(
+            {
+                "symbol": r.token.base_symbol,
+                "chain": r.token.chain_id,
+                "score": r.miro_total,
+                "status": r.status,
+                "price": r.token.price_usd,
+                "liq": r.token.liquidity_usd,
+                "vol24h": r.token.volume_24h,
+                "chg1h": r.token.price_change_1h,
+                "chg24h": r.token.price_change_24h,
+                "age_h": round(r.token.pair_age_hours, 1),
+            }
+        )
+
+    st.dataframe(
+        rows,
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "symbol": "Symbol",
+            "chain": "Chain",
+            "score": st.column_config.NumberColumn("Score", format="%.1f"),
+            "status": "Status",
+            "price": st.column_config.NumberColumn("Price", format="$%.6f"),
+            "liq": st.column_config.NumberColumn("Liquidity", format="$%.0f"),
+            "vol24h": st.column_config.NumberColumn("24H Volume", format="$%.0f"),
+            "chg1h": st.column_config.NumberColumn("1H %", format="%.2f%%"),
+            "chg24h": st.column_config.NumberColumn("24H %", format="%.2f%%"),
+            "age_h": st.column_config.NumberColumn("Age (h)", format="%.1f"),
+        },
+    )
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    render_token_header(selected_report)
 
     left_col, right_col = st.columns([1.1, 0.9])
 
     with left_col:
-        render_breakdown(report)
-        render_smart_money(report)
-        render_kronos(report)
+        render_breakdown(selected_report)
+        render_onchain_panel(selected_report)
+        render_smart_money(selected_report)
+        render_kronos(selected_report)
+
+        st.markdown('<div class="section-box"><div class="section-label">Pair Snapshot</div>', unsafe_allow_html=True)
+        st.markdown(
+            f"""
+            <span class="signal-chip">DEX: {selected_report.token.dex_id}</span>
+            <span class="signal-chip">Pair Age: {selected_report.token.pair_age_hours:.1f}h</span>
+            <span class="signal-chip">1H: {format_pct(selected_report.token.price_change_1h)}</span>
+            <span class="signal-chip">24H: {format_pct(selected_report.token.price_change_24h)}</span>
+            <span class="signal-chip">Liquidity: {human_usd(selected_report.token.liquidity_usd)}</span>
+            <span class="signal-chip">Volume: {human_usd(selected_report.token.volume_24h)}</span>
+            """,
+            unsafe_allow_html=True,
+        )
+        if selected_report.token.url:
+            st.markdown(f"[Open pair on Dexscreener]({selected_report.token.url})")
+        st.markdown("</div>", unsafe_allow_html=True)
 
     with right_col:
-        render_council(report)
-        render_risk(report)
-        render_verdict(report)
+        render_council(selected_report)
+        render_risk(selected_report)
+        render_verdict(selected_report)
 
-        pdf_bytes = build_pdf(report)
-        filename = f"{report.token.symbol}_intelligence_report_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf"
+        pdf_bytes = build_pdf(selected_report)
+        filename = (
+            f"{selected_report.token.base_symbol}_"
+            f"{selected_report.token.chain_id}_"
+            f"{datetime.now().strftime('%Y%m%d_%H%M')}.pdf"
+        )
 
         st.download_button(
             label="Download Intelligence Report (PDF)",
