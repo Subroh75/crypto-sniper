@@ -1,1447 +1,839 @@
-import io
-import json
-import math
-import os
-import re
-import time
-from dataclasses import dataclass
-from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from __future__ import annotations
 
-import numpy as np
-import pandas as pd
-import requests
+import json
+import textwrap
+from dataclasses import dataclass
+from typing import Any, Dict, Optional
+
 import streamlit as st
-from reportlab.lib.colors import HexColor
-from reportlab.lib.pagesizes import A4
-from reportlab.lib.units import mm
-from reportlab.pdfbase.pdfmetrics import stringWidth
-from reportlab.pdfgen import canvas
+
 
 # =========================================================
-# STREAMLIT PAGE
+# PAGE SETUP
 # =========================================================
 st.set_page_config(
-    page_title="Crypto Guru",
+    page_title="Crypto AI Lab",
     layout="wide",
-    initial_sidebar_state="collapsed",
+    initial_sidebar_state="expanded",
 )
-
-# =========================================================
-# BRANDING
-# =========================================================
-LOGO_PATH = "assets/crypto_guru_logo.png"
-APP_HEADING = "Crypto Guru"
-APP_TAGLINE = "Precision crypto intelligence."
-
-# =========================================================
-# SECRETS / CONFIG
-# Put these in Streamlit secrets:
-#
-# ETHERSCAN_API_KEY="your_key"
-# CRYPTOCOMPARE_API_KEY="your_key"
-#
-# Optional comma-separated smart wallets:
-# SMART_WALLETS="0xabc...,0xdef..."
-#
-# Optional comma-separated exchange wallets:
-# EXCHANGE_WALLETS="0x123...,0x456..."
-#
-# Optional JSON string map for ERC20 token contracts:
-# TOKEN_MAP_JSON='{
-#   "FET":{"contract":"0x....","chainid":"1"},
-#   "LINK":{"contract":"0x....","chainid":"1"}
-# }'
-# =========================================================
-ETHERSCAN_API_KEY = st.secrets.get("ETHERSCAN_API_KEY", "")
-CRYPTOCOMPARE_API_KEY = st.secrets.get("CRYPTOCOMPARE_API_KEY", "")
-
-SMART_WALLETS = [
-    w.strip().lower()
-    for w in st.secrets.get("SMART_WALLETS", "").split(",")
-    if w.strip()
-]
-EXCHANGE_WALLETS = [
-    w.strip().lower()
-    for w in st.secrets.get("EXCHANGE_WALLETS", "").split(",")
-    if w.strip()
-]
-
-try:
-    TOKEN_MAP = json.loads(st.secrets.get("TOKEN_MAP_JSON", "{}"))
-except Exception:
-    TOKEN_MAP = {}
-
-HOLDER_CACHE_FILE = "holder_cache.json"
-
-# =========================================================
-# DATA MODELS
-# =========================================================
-@dataclass
-class CoinMetrics:
-    rv: float
-    close_now: float
-    close_prev: float
-    atr_move: float
-    range_pos: float
-    ema20: float
-    ema50: float
-    adx14: float
-    smart_wallet_accumulation: bool
-    repeat_buyer_presence: bool
-    net_large_buyer_flow_positive: bool
-    holder_growth_positive: bool
-    penalty_low_liquidity: int
-    penalty_concentration: int
-    penalty_exchange_inflow: int
-    penalty_wash_like_volume: int
-    penalty_high_slippage: int
-    avg_dollar_volume: float
-    top10_concentration: Optional[float]
-    exchange_inflow_tokens: float
-    smart_wallet_net_flow_tokens: float
-    holder_count: Optional[int]
-    miro_components: Dict[str, float]
-
-
-@dataclass
-class EngineSignal:
-    label: str
-    bias: str
-    confidence: str
-    score: float
-    summary: str
-
-
-@dataclass
-class AILabDecision:
-    bull: str
-    bear: str
-    risk_manager: str
-    chief_strategist: str
-    final_bias: str
-    final_confidence: str
-    final_score: float
-
-
-@dataclass
-class FinalResponse:
-    coin: str
-    answer: str
-    bias: str
-    confidence: str
-    risk: str
-    action: str
-    reasons: List[str]
-    miro_score: float
-    kronos_score: float
-    ai_lab_score: float
-    bull_case: str
-    bear_case: str
-    risk_case: str
-    chief_strategist: str
 
 
 # =========================================================
 # STYLES
 # =========================================================
-def inject_styles() -> None:
-    st.markdown(
-        """
-        <style>
-            :root {
-                --bg: #000000;
-                --panel: #0a0a0a;
-                --panel-2: #111111;
-                --border: rgba(255,153,51,0.22);
-                --text: #ffffff;
-                --muted: #d7b37a;
-                --accent: #ff9933;
-            }
-
-            .stApp {
-                background:
-                    radial-gradient(circle at top left, rgba(255,153,51,0.11), transparent 24%),
-                    radial-gradient(circle at top right, rgba(255,153,51,0.08), transparent 20%),
-                    linear-gradient(180deg, #000000 0%, #050505 100%);
-            }
-
-            .block-container {
-                max-width: 980px;
-                padding-top: 3rem;
-                padding-bottom: 3rem;
-            }
-
-            header[data-testid="stHeader"] {
-                background: transparent;
-            }
-
-            [data-testid="collapsedControl"] {
-                display: none;
-            }
-
-            section[data-testid="stSidebar"] {
-                display: none !important;
-            }
-
-            .hero-wrap {
-                text-align: center;
-                margin-bottom: 1.75rem;
-            }
-
-            .hero-logo-wrap {
-                display: flex;
-                justify-content: center;
-                align-items: center;
-                margin-bottom: 0.65rem;
-                animation: floaty 4.5s ease-in-out infinite;
-            }
-
-            .hero-logo-glow {
-                display: inline-flex;
-                justify-content: center;
-                align-items: center;
-                padding: 14px;
-                border-radius: 24px;
-                background:
-                    radial-gradient(circle, rgba(255,153,51,0.16) 0%, rgba(255,153,51,0.05) 45%, rgba(255,153,51,0.00) 72%);
-                box-shadow:
-                    0 0 0 1px rgba(255,153,51,0.05),
-                    0 0 28px rgba(255,153,51,0.14),
-                    0 0 56px rgba(255,153,51,0.08);
-                transition: transform 0.25s ease, box-shadow 0.25s ease;
-            }
-
-            .hero-logo-glow:hover {
-                transform: translateY(-1px) scale(1.01);
-                box-shadow:
-                    0 0 0 1px rgba(255,153,51,0.08),
-                    0 0 36px rgba(255,153,51,0.18),
-                    0 0 68px rgba(255,153,51,0.11);
-            }
-
-            @keyframes floaty {
-                0% { transform: translateY(0px); }
-                50% { transform: translateY(-3px); }
-                100% { transform: translateY(0px); }
-            }
-
-            .hero-title {
-                color: #ffffff;
-                font-size: 2.7rem;
-                font-weight: 800;
-                letter-spacing: -0.03em;
-                margin-top: 0.3rem;
-                margin-bottom: 0.35rem;
-            }
-
-            .hero-tagline {
-                color: var(--muted);
-                font-size: 1rem;
-                margin-bottom: 0;
-            }
-
-            .search-shell {
-                background: linear-gradient(180deg, rgba(10,10,10,0.98) 0%, rgba(18,18,18,0.98) 100%);
-                border: 1px solid rgba(255,153,51,0.20);
-                border-radius: 22px;
-                padding: 1rem;
-                box-shadow:
-                    0 0 0 1px rgba(255,153,51,0.03),
-                    0 20px 60px rgba(0,0,0,0.45);
-                margin-bottom: 1.15rem;
-            }
-
-            .result-card {
-                background: linear-gradient(180deg, rgba(10,10,10,0.98) 0%, rgba(18,18,18,0.98) 100%);
-                border: 1px solid rgba(255,153,51,0.20);
-                border-radius: 20px;
-                padding: 1.15rem 1.2rem;
-                margin-top: 1rem;
-                box-shadow: 0 12px 36px rgba(0,0,0,0.28);
-            }
-
-            .result-title {
-                color: #ffffff;
-                font-size: 1.1rem;
-                font-weight: 750;
-                margin-bottom: 0.7rem;
-            }
-
-            .answer-text {
-                color: #fff7ed;
-                font-size: 1.02rem;
-                line-height: 1.7;
-                margin-bottom: 0.95rem;
-            }
-
-            .signal-grid {
-                display: grid;
-                grid-template-columns: repeat(4, minmax(0, 1fr));
-                gap: 0.8rem;
-            }
-
-            .signal-box {
-                background: rgba(255,153,51,0.04);
-                border: 1px solid rgba(255,153,51,0.12);
-                border-radius: 16px;
-                padding: 0.85rem 0.9rem;
-            }
-
-            .signal-label {
-                color: #d7b37a;
-                font-size: 0.8rem;
-                margin-bottom: 0.3rem;
-            }
-
-            .signal-value {
-                color: #ffffff;
-                font-size: 0.95rem;
-                font-weight: 700;
-                line-height: 1.4;
-            }
-
-            .why-line {
-                color: #fff7ed;
-                line-height: 1.6;
-                margin-bottom: 0.45rem;
-                opacity: 1 !important;
-            }
-
-            .stTextInput > div > div > input {
-                background: linear-gradient(180deg, rgba(18,18,18,0.94) 0%, rgba(8,8,8,0.98) 100%) !important;
-                color: #ffffff !important;
-                border-radius: 16px !important;
-                border: 1px solid rgba(255,153,51,0.24) !important;
-                padding: 1rem 1rem !important;
-                font-size: 1.05rem !important;
-                text-align: center !important;
-                caret-color: #ff9933 !important;
-                transition: all 0.22s ease !important;
-            }
-
-            .stTextInput > div > div > input::placeholder {
-                color: #c49352 !important;
-                opacity: 1 !important;
-            }
-
-            .stTextInput > div > div > input:focus {
-                background: linear-gradient(180deg, rgba(18,18,18,0.98) 0%, rgba(8,8,8,1) 100%) !important;
-                color: #ffffff !important;
-                border: 1px solid #ff9933 !important;
-                outline: none !important;
-                box-shadow:
-                    0 0 0 1px rgba(255,153,51,0.08),
-                    0 0 18px rgba(255,153,51,0.13) !important;
-                transform: translateY(-1px);
-            }
-
-            [data-testid="stTextInput"] input {
-                color: #ffffff !important;
-                background-color: #0d0d0d !important;
-            }
-
-            .stButton > button,
-            .stDownloadButton > button {
-                width: 100%;
-                min-height: 2.45rem;
-                border-radius: 12px;
-                font-weight: 700;
-                font-size: 0.92rem;
-                border: 1px solid rgba(255,153,51,0.20);
-                background: linear-gradient(180deg, #ff9933 0%, #d97706 100%);
-                color: #000000;
-                padding: 0.35rem 0.7rem;
-                transition: all 0.2s ease;
-            }
-
-            .stButton > button:hover,
-            .stDownloadButton > button:hover {
-                color: #000000;
-                border: 1px solid rgba(255,153,51,0.32);
-                background: linear-gradient(180deg, #ffad5c 0%, #e68613 100%);
-                box-shadow: 0 8px 22px rgba(255,153,51,0.14);
-                transform: translateY(-1px);
-            }
-
-            div[data-testid="stExpander"] {
-                border: 1px solid rgba(255,153,51,0.16) !important;
-                border-radius: 16px !important;
-                background: rgba(255,153,51,0.03) !important;
-                overflow: hidden !important;
-            }
-
-            div[data-testid="stExpander"] summary {
-                background: rgba(255,153,51,0.04) !important;
-                color: #ffffff !important;
-                border-radius: 16px !important;
-            }
-
-            div[data-testid="stExpander"] summary p {
-                color: #ffffff !important;
-                font-weight: 700 !important;
-                opacity: 1 !important;
-            }
-
-            div[data-testid="stExpander"] summary svg {
-                fill: #ff9933 !important;
-                color: #ff9933 !important;
-                opacity: 1 !important;
-            }
-
-            div[data-testid="stExpanderDetails"] {
-                color: #fff7ed !important;
-                opacity: 1 !important;
-            }
-
-            div[data-testid="stExpanderDetails"] p,
-            div[data-testid="stExpanderDetails"] div,
-            div[data-testid="stExpanderDetails"] span,
-            div[data-testid="stExpanderDetails"] label {
-                color: #fff7ed !important;
-                opacity: 1 !important;
-            }
-
-            @media (max-width: 820px) {
-                .hero-title { font-size: 2.15rem; }
-                .signal-grid { grid-template-columns: 1fr 1fr; }
-            }
-
-            @media (max-width: 580px) {
-                .signal-grid { grid-template-columns: 1fr; }
-            }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
-
-
-# =========================================================
-# STATE
-# =========================================================
-def init_state() -> None:
-    defaults = {
-        "coin_input": "",
-        "last_coin": "",
-        "last_response": None,
-        "last_signals": None,
-        "last_pdf": None,
-        "last_metrics": None,
-        "last_ai_lab": None,
+st.markdown(
+    """
+    <style>
+    .block-container {
+        padding-top: 1.2rem;
+        padding-bottom: 2rem;
+        max-width: 1400px;
     }
-    for key, value in defaults.items():
-        if key not in st.session_state:
-            st.session_state[key] = value
+
+    .main-title {
+        font-size: 2rem;
+        font-weight: 800;
+        color: #111111;
+        margin-bottom: 0.15rem;
+    }
+
+    .sub-title {
+        font-size: 1rem;
+        color: #444444;
+        margin-bottom: 1.2rem;
+    }
+
+    .panel {
+        border: 1px solid rgba(0,0,0,0.10);
+        border-radius: 16px;
+        padding: 14px 16px;
+        background: #ffffff;
+        margin-bottom: 12px;
+        box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+    }
+
+    .panel-title {
+        font-size: 0.84rem;
+        color: #444444;
+        font-weight: 700;
+        margin-bottom: 6px;
+        text-transform: none;
+    }
+
+    .panel-value {
+        font-size: 1.08rem;
+        color: #111111;
+        font-weight: 800;
+        margin-bottom: 3px;
+    }
+
+    .panel-sub {
+        font-size: 0.86rem;
+        color: #666666;
+        line-height: 1.4;
+    }
+
+    .agent-card {
+        border: 1px solid rgba(0,0,0,0.10);
+        border-radius: 16px;
+        padding: 14px 16px;
+        background: #ffffff;
+        margin-bottom: 12px;
+        box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+    }
+
+    .agent-title {
+        font-size: 0.96rem;
+        color: #111111;
+        font-weight: 800;
+        margin-bottom: 8px;
+    }
+
+    .agent-body {
+        font-size: 0.95rem;
+        color: #222222;
+        line-height: 1.55;
+    }
+
+    .summary-box {
+        border-radius: 14px;
+        padding: 14px 16px;
+        background: #f7f8fa;
+        border: 1px solid rgba(0,0,0,0.08);
+        color: #111111;
+        font-size: 0.95rem;
+        line-height: 1.5;
+        margin-top: 6px;
+        margin-bottom: 14px;
+    }
+
+    .section-head {
+        font-size: 1.18rem;
+        font-weight: 800;
+        color: #111111;
+        margin-top: 0.6rem;
+        margin-bottom: 0.8rem;
+    }
+
+    .tiny-muted {
+        font-size: 0.82rem;
+        color: #666666;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
 
 # =========================================================
-# HELPERS
+# UTILS
 # =========================================================
-def normalize_coin(raw: str) -> str:
-    return re.sub(r"[^A-Za-z0-9]", "", raw.strip().upper())
-
-
-def score_to_bias(score: float) -> str:
-    if score >= 11.0:
-        return "strong bullish"
-    if score >= 8.5:
-        return "bullish"
-    if score >= 6.0:
-        return "constructive"
-    if score >= 3.5:
-        return "neutral"
-    return "cautious"
-
-
-def score_to_confidence(score: float) -> str:
-    if score >= 10.0:
-        return "high"
-    if score >= 6.0:
-        return "medium"
-    return "low"
+def clamp(value: float, low: float, high: float) -> float:
+    return max(low, min(high, value))
 
 
 def safe_float(value: Any, default: float = 0.0) -> float:
     try:
+        if value is None:
+            return default
         return float(value)
     except Exception:
         return default
 
 
-def get_token_map_entry(symbol: str) -> Optional[Dict[str, str]]:
-    entry = TOKEN_MAP.get(symbol.upper())
-    if isinstance(entry, dict):
-        return entry
-    return None
+def score_band(score: float, max_score: float) -> str:
+    if max_score <= 0:
+        return "Balanced"
+    ratio = score / max_score
+    if ratio >= 0.80:
+        return "Strong"
+    if ratio >= 0.60:
+        return "Constructive"
+    if ratio >= 0.40:
+        return "Balanced"
+    if ratio >= 0.20:
+        return "Cautious"
+    return "Weak"
 
 
-def load_holder_cache() -> Dict[str, Any]:
-    if not os.path.exists(HOLDER_CACHE_FILE):
-        return {}
-    try:
-        with open(HOLDER_CACHE_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return {}
+def direction_label(value: float) -> str:
+    if value >= 0.60:
+        return "Strong upside pressure"
+    if value >= 0.20:
+        return "Moderate upside pressure"
+    if value > -0.20:
+        return "Flat to mixed"
+    if value > -0.60:
+        return "Moderate downside pressure"
+    return "Strong downside pressure"
 
 
-def save_holder_cache(data: Dict[str, Any]) -> None:
-    try:
-        with open(HOLDER_CACHE_FILE, "w", encoding="utf-8") as f:
-            json.dump(data, f)
-    except Exception:
-        pass
+def stability_label(value: float) -> str:
+    if value >= 0.75:
+        return "Very stable"
+    if value >= 0.55:
+        return "Stable"
+    if value >= 0.35:
+        return "Moderately stable"
+    if value >= 0.20:
+        return "Choppy"
+    return "Highly erratic"
 
 
-def update_holder_growth(symbol: str, chainid: str, holder_count: Optional[int]) -> bool:
-    if holder_count is None:
-        return False
-    cache = load_holder_cache()
-    key = f"{chainid}:{symbol.upper()}"
-    prev = cache.get(key, {}).get("holder_count")
-    cache[key] = {
-        "holder_count": holder_count,
-        "updated_at": datetime.now(timezone.utc).isoformat(),
-    }
-    save_holder_cache(cache)
-    if prev is None:
-        return False
-    return holder_count > int(prev)
+def breakout_label(value: float) -> str:
+    if value >= 0.80:
+        return "Breakout setup is strong"
+    if value >= 0.60:
+        return "Breakout setup is improving"
+    if value >= 0.40:
+        return "Breakout setup is possible"
+    if value >= 0.20:
+        return "Breakout setup is weak"
+    return "No meaningful breakout setup"
 
 
-# =========================================================
-# MARKET DATA - CRYPTOCOMPARE
-# =========================================================
-@st.cache_data(ttl=300, show_spinner=False)
-def fetch_ohlcv_cryptocompare(symbol: str, limit: int = 240) -> pd.DataFrame:
-    """
-    Uses the widely deployed CryptoCompare histohour endpoint.
-    Replace only this function if you move to a different CoinDesk Data API path.
-    """
-    url = "https://min-api.cryptocompare.com/data/v2/histohour"
-    params = {
-        "fsym": symbol.upper(),
-        "tsym": "USD",
-        "limit": limit,
-        "aggregate": 1,
-    }
-    headers = {}
-    if CRYPTOCOMPARE_API_KEY:
-        headers["authorization"] = f"Apikey {CRYPTOCOMPARE_API_KEY}"
-
-    resp = requests.get(url, params=params, headers=headers, timeout=20)
-    resp.raise_for_status()
-    payload = resp.json()
-
-    data = payload.get("Data", {}).get("Data", [])
-    if not data:
-        raise ValueError(f"No market data returned for {symbol}")
-
-    df = pd.DataFrame(data)
-    df["time"] = pd.to_datetime(df["time"], unit="s", utc=True)
-    df = df.rename(
-        columns={
-            "volumefrom": "volume_base",
-            "volumeto": "volume_quote",
-        }
-    )
-    required = ["time", "open", "high", "low", "close", "volume_base", "volume_quote"]
-    for col in required:
-        if col not in df.columns:
-            raise ValueError(f"Missing market column: {col}")
-    return df[required].copy()
+def noise_label(value: float) -> str:
+    if value >= 0.80:
+        return "Very noisy"
+    if value >= 0.60:
+        return "Noisy"
+    if value >= 0.40:
+        return "Moderate noise"
+    if value >= 0.20:
+        return "Relatively clean"
+    return "Very clean"
 
 
-def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
-    out = df.copy()
-
-    out["ema20"] = out["close"].ewm(span=20, adjust=False).mean()
-    out["ema50"] = out["close"].ewm(span=50, adjust=False).mean()
-
-    prev_close = out["close"].shift(1)
-    tr_components = pd.concat(
-        [
-            (out["high"] - out["low"]).abs(),
-            (out["high"] - prev_close).abs(),
-            (out["low"] - prev_close).abs(),
-        ],
-        axis=1,
-    )
-    out["tr"] = tr_components.max(axis=1)
-    out["atr14"] = out["tr"].rolling(14).mean()
-
-    up_move = out["high"].diff()
-    down_move = -out["low"].diff()
-
-    plus_dm = np.where((up_move > down_move) & (up_move > 0), up_move, 0.0)
-    minus_dm = np.where((down_move > up_move) & (down_move > 0), down_move, 0.0)
-
-    atr14 = out["atr14"].replace(0, np.nan)
-    plus_di = 100 * pd.Series(plus_dm, index=out.index).rolling(14).mean() / atr14
-    minus_di = 100 * pd.Series(minus_dm, index=out.index).rolling(14).mean() / atr14
-    dx = (abs(plus_di - minus_di) / (plus_di + minus_di).replace(0, np.nan)) * 100
-    out["adx14"] = dx.rolling(14).mean()
-
-    return out
+def strength_label_5(score: float) -> str:
+    if score >= 4.5:
+        return "Exceptional"
+    if score >= 3.8:
+        return "Strong"
+    if score >= 3.0:
+        return "Healthy"
+    if score >= 2.0:
+        return "Mixed"
+    return "Weak"
 
 
 # =========================================================
-# ON-CHAIN DATA - ETHERSCAN
+# HUMAN-LANGUAGE SIGNAL MODEL
 # =========================================================
-@st.cache_data(ttl=300, show_spinner=False)
-def etherscan_get(params: Dict[str, Any]) -> Dict[str, Any]:
-    if not ETHERSCAN_API_KEY:
-        return {"status": "0", "message": "Missing Etherscan API key", "result": []}
+@dataclass
+class HumanSignalComponents:
+    volume_strength_score: float = 0.0
+    volume_strength_text: str = "Weak participation"
 
-    query = {"apikey": ETHERSCAN_API_KEY}
-    query.update(params)
-    resp = requests.get("https://api.etherscan.io/v2/api", params=query, timeout=20)
-    resp.raise_for_status()
-    return resp.json()
+    price_expansion_score: float = 0.0
+    price_expansion_text: str = "Weak expansion"
 
+    position_in_range_score: float = 0.0
+    position_in_range_text: str = "Sitting low in its range"
 
-def fetch_top_holders(contract: str, chainid: str) -> Tuple[Optional[List[Dict[str, Any]]], bool]:
-    payload = etherscan_get(
-        {
-            "chainid": chainid,
-            "module": "token",
-            "action": "topholders",
-            "contractaddress": contract,
-            "offset": 10,
-        }
-    )
-    ok = payload.get("status") == "1" and isinstance(payload.get("result"), list)
-    return (payload.get("result") if ok else None, ok)
+    trend_alignment_score: float = 0.0
+    trend_alignment_text: str = "Trend is mixed"
 
+    short_term_direction_value: float = 0.0
+    short_term_direction_text: str = "Flat to mixed"
 
-def fetch_holder_count(contract: str, chainid: str) -> Optional[int]:
-    payload = etherscan_get(
-        {
-            "chainid": chainid,
-            "module": "token",
-            "action": "tokenholdercount",
-            "contractaddress": contract,
-        }
-    )
-    if payload.get("status") == "1":
-        try:
-            return int(payload.get("result"))
-        except Exception:
-            return None
-    return None
+    price_stability_value: float = 0.5
+    price_stability_text: str = "Moderately stable"
 
+    breakout_potential_value: float = 0.0
+    breakout_potential_text: str = "No meaningful breakout setup"
 
-def fetch_total_supply(contract: str, chainid: str) -> Optional[float]:
-    payload = etherscan_get(
-        {
-            "chainid": chainid,
-            "module": "stats",
-            "action": "tokensupply",
-            "contractaddress": contract,
-        }
-    )
-    if payload.get("status") == "1":
-        return safe_float(payload.get("result"), None)
-    return None
+    noise_level_value: float = 0.5
+    noise_level_text: str = "Moderate noise"
 
+    market_structure: str = "Mixed structure"
+    timing_quality: str = "Average setup"
+    risk_posture: str = "Neutral risk"
+    momentum_view: str = "Momentum is mixed"
+    action_bias: str = "Wait for confirmation"
 
-def fetch_wallet_token_transfers(
-    wallet: str,
-    contract: str,
-    chainid: str,
-    offset: int = 100,
-) -> List[Dict[str, Any]]:
-    payload = etherscan_get(
-        {
-            "chainid": chainid,
-            "module": "account",
-            "action": "tokentx",
-            "address": wallet,
-            "contractaddress": contract,
-            "startblock": 0,
-            "endblock": 999999999,
-            "page": 1,
-            "offset": offset,
-            "sort": "desc",
-        }
-    )
-    if payload.get("status") == "1" and isinstance(payload.get("result"), list):
-        return payload["result"]
-    return []
+    conviction_score: float = 0.0
+    conviction_text: str = "Balanced"
 
+    summary_line: str = ""
 
-def compute_wallet_net_flow(wallet: str, transfers: List[Dict[str, Any]]) -> float:
-    wallet = wallet.lower()
-    net = 0.0
-    for tx in transfers:
-        decimals = int(tx.get("tokenDecimal", "18"))
-        value = safe_float(tx.get("value")) / (10 ** decimals)
-        to_addr = str(tx.get("to", "")).lower()
-        from_addr = str(tx.get("from", "")).lower()
-
-        if to_addr == wallet:
-            net += value
-        elif from_addr == wallet:
-            net -= value
-    return net
-
-
-def analyze_onchain(symbol: str) -> Dict[str, Any]:
-    token = get_token_map_entry(symbol)
-    if not token:
+    def to_agent_payload(self) -> Dict[str, Any]:
         return {
-            "enabled": False,
-            "smart_wallet_accumulation": False,
-            "repeat_buyer_presence": False,
-            "net_large_buyer_flow_positive": False,
-            "holder_growth_positive": False,
-            "top10_concentration": None,
-            "holder_count": None,
-            "exchange_inflow_tokens": 0.0,
-            "smart_wallet_net_flow_tokens": 0.0,
-            "penalty_concentration": 0,
-            "penalty_exchange_inflow": 0,
-            "notes": "No contract mapping found for this token.",
+            "volume_strength": {
+                "score_out_of_5": round(self.volume_strength_score, 2),
+                "assessment": self.volume_strength_text,
+            },
+            "price_expansion": {
+                "score_out_of_5": round(self.price_expansion_score, 2),
+                "assessment": self.price_expansion_text,
+            },
+            "position_in_range": {
+                "score_out_of_2": round(self.position_in_range_score, 2),
+                "assessment": self.position_in_range_text,
+            },
+            "trend_alignment": {
+                "score_out_of_3": round(self.trend_alignment_score, 2),
+                "assessment": self.trend_alignment_text,
+            },
+            "short_term_direction": self.short_term_direction_text,
+            "price_stability": self.price_stability_text,
+            "breakout_potential": self.breakout_potential_text,
+            "noise_level": self.noise_level_text,
+            "market_structure": self.market_structure,
+            "timing_quality": self.timing_quality,
+            "risk_posture": self.risk_posture,
+            "momentum_view": self.momentum_view,
+            "action_bias": self.action_bias,
+            "conviction": {
+                "score_out_of_10": round(self.conviction_score, 2),
+                "assessment": self.conviction_text,
+            },
+            "summary_line": self.summary_line,
         }
 
-    contract = token["contract"]
-    chainid = token.get("chainid", "1")
 
-    top_holders, got_top_holders = fetch_top_holders(contract, chainid)
-    holder_count = fetch_holder_count(contract, chainid)
-    total_supply = fetch_total_supply(contract, chainid)
-    holder_growth_positive = update_holder_growth(symbol, chainid, holder_count)
+# =========================================================
+# TRANSLATION LAYER
+# =========================================================
+def build_human_signal_components(
+    *,
+    volume_score: float,
+    price_expansion_score: float,
+    range_score: float,
+    trend_score: float,
+    slope_value: float,
+    stability_value: float,
+    breakout_value: float,
+    noise_value: float,
+) -> HumanSignalComponents:
+    volume_score = clamp(safe_float(volume_score), 0.0, 5.0)
+    price_expansion_score = clamp(safe_float(price_expansion_score), 0.0, 5.0)
+    range_score = clamp(safe_float(range_score), 0.0, 2.0)
+    trend_score = clamp(safe_float(trend_score), 0.0, 3.0)
 
-    top10_concentration = None
-    penalty_concentration = 0
-    if got_top_holders and top_holders and total_supply and total_supply > 0:
-        top_qty = sum(safe_float(x.get("TokenHolderQuantity")) for x in top_holders)
-        top10_concentration = top_qty / total_supply
-        penalty_concentration = 1 if top10_concentration >= 0.50 else 0
+    slope_value = clamp(safe_float(slope_value), -1.0, 1.0)
+    stability_value = clamp(safe_float(stability_value, 0.5), 0.0, 1.0)
+    breakout_value = clamp(safe_float(breakout_value), 0.0, 1.0)
+    noise_value = clamp(safe_float(noise_value, 0.5), 0.0, 1.0)
 
-    smart_positive_wallets = 0
-    smart_wallet_net_flow = 0.0
-    for wallet in SMART_WALLETS:
-        txs = fetch_wallet_token_transfers(wallet, contract, chainid)
-        net = compute_wallet_net_flow(wallet, txs)
-        smart_wallet_net_flow += net
-        if net > 0:
-            smart_positive_wallets += 1
+    conviction_raw = volume_score + price_expansion_score + range_score + trend_score
+    conviction_score = (conviction_raw / 15.0) * 10.0
 
-    exchange_inflow_tokens = 0.0
-    for wallet in EXCHANGE_WALLETS:
-        txs = fetch_wallet_token_transfers(wallet, contract, chainid)
-        net = compute_wallet_net_flow(wallet, txs)
-        if net > 0:
-            exchange_inflow_tokens += net
+    volume_text = f"{strength_label_5(volume_score)} participation"
+    price_text = f"{strength_label_5(price_expansion_score)} expansion"
 
-    smart_wallet_accumulation = smart_positive_wallets >= 1
-    repeat_buyer_presence = smart_positive_wallets >= 2
-    net_large_buyer_flow_positive = smart_wallet_net_flow > 0
-    penalty_exchange_inflow = 1 if exchange_inflow_tokens > 0 else 0
+    if range_score >= 1.6:
+        range_text = "Closing near the upper end of its range"
+    elif range_score >= 0.9:
+        range_text = "Holding in the middle of its range"
+    else:
+        range_text = "Sitting low in its range"
+
+    if trend_score >= 2.5:
+        trend_text = "Trend is aligned"
+    elif trend_score >= 1.8:
+        trend_text = "Trend is improving"
+    elif trend_score >= 1.1:
+        trend_text = "Trend is mixed"
+    else:
+        trend_text = "Trend is misaligned"
+
+    if conviction_raw >= 10.5:
+        momentum_view = "Momentum is expanding"
+    elif conviction_raw >= 8.0:
+        momentum_view = "Momentum is constructive"
+    elif conviction_raw >= 5.0:
+        momentum_view = "Momentum is mixed"
+    else:
+        momentum_view = "Momentum is weak"
+
+    if trend_score >= 2.2 and range_score >= 1.2 and slope_value > 0.15:
+        market_structure = "Bullish structure"
+    elif trend_score <= 1.0 and range_score <= 0.8 and slope_value < -0.15:
+        market_structure = "Bearish structure"
+    elif abs(slope_value) < 0.2 and breakout_value < 0.5:
+        market_structure = "Range-bound structure"
+    else:
+        market_structure = "Transitioning structure"
+
+    if breakout_value >= 0.7 and stability_value >= 0.5 and noise_value <= 0.45:
+        timing_quality = "High-quality setup"
+    elif breakout_value >= 0.55 and noise_value <= 0.60:
+        timing_quality = "Good setup"
+    elif breakout_value >= 0.35:
+        timing_quality = "Average setup"
+    else:
+        timing_quality = "Low-quality setup"
+
+    if conviction_raw >= 10.0 and noise_value <= 0.35 and stability_value >= 0.55:
+        risk_posture = "Aggressive risk is acceptable"
+    elif conviction_raw >= 7.0 and noise_value <= 0.60:
+        risk_posture = "Controlled risk is preferred"
+    elif conviction_raw >= 5.0:
+        risk_posture = "Small risk only"
+    else:
+        risk_posture = "Avoid size until conditions improve"
+
+    if market_structure == "Bullish structure" and breakout_value >= 0.55:
+        action_bias = "Lean long on pullbacks"
+    elif market_structure == "Bearish structure" and breakout_value >= 0.45:
+        action_bias = "Lean short into weakness"
+    elif breakout_value < 0.5:
+        action_bias = "Wait for confirmation"
+    else:
+        action_bias = "Trade only with tight risk"
+
+    summary_line = (
+        f"{momentum_view}. {market_structure}. {timing_quality}. "
+        f"Preferred stance: {action_bias.lower()}."
+    )
+
+    return HumanSignalComponents(
+        volume_strength_score=volume_score,
+        volume_strength_text=volume_text,
+        price_expansion_score=price_expansion_score,
+        price_expansion_text=price_text,
+        position_in_range_score=range_score,
+        position_in_range_text=range_text,
+        trend_alignment_score=trend_score,
+        trend_alignment_text=trend_text,
+        short_term_direction_value=slope_value,
+        short_term_direction_text=direction_label(slope_value),
+        price_stability_value=stability_value,
+        price_stability_text=stability_label(stability_value),
+        breakout_potential_value=breakout_value,
+        breakout_potential_text=breakout_label(breakout_value),
+        noise_level_value=noise_value,
+        noise_level_text=noise_label(noise_value),
+        market_structure=market_structure,
+        timing_quality=timing_quality,
+        risk_posture=risk_posture,
+        momentum_view=momentum_view,
+        action_bias=action_bias,
+        conviction_score=conviction_score,
+        conviction_text=score_band(conviction_raw, 15.0),
+        summary_line=summary_line,
+    )
+
+
+def make_human_language_components_from_signal_dict(signal: Dict[str, Any]) -> HumanSignalComponents:
+    volume_score = signal.get("volume_strength_score", signal.get("volume_score", 0.0))
+    price_score = signal.get("price_expansion_score", signal.get("price_score", 0.0))
+    range_score = signal.get("position_in_range_score", signal.get("range_score", 0.0))
+    trend_score = signal.get("trend_alignment_score", signal.get("trend_score", 0.0))
+
+    slope_value = signal.get("short_term_direction_value", signal.get("slope", 0.0))
+    stability_value = signal.get("price_stability_value", signal.get("stability", 0.5))
+    breakout_value = signal.get("breakout_potential_value", signal.get("breakout", 0.0))
+    noise_value = signal.get("noise_level_value", signal.get("volatility", signal.get("noise", 0.5)))
+
+    return build_human_signal_components(
+        volume_score=volume_score,
+        price_expansion_score=price_score,
+        range_score=range_score,
+        trend_score=trend_score,
+        slope_value=slope_value,
+        stability_value=stability_value,
+        breakout_value=breakout_value,
+        noise_value=noise_value,
+    )
+
+
+# =========================================================
+# AGENT PROMPTS
+# =========================================================
+def build_agent_system_prompt(role: str) -> str:
+    return textwrap.dedent(
+        f"""
+        You are the {role} agent inside a crypto intelligence app.
+
+        Rules:
+        1. Speak only in plain human language.
+        2. Never mention internal model names, internal labels, acronyms, factor codes, hidden references, or shorthand.
+        3. Use only these customer-facing terms:
+           Volume Strength
+           Price Expansion
+           Position in Range
+           Trend Alignment
+           Short-Term Direction
+           Price Stability
+           Breakout Potential
+           Noise Level
+           Market Structure
+           Timing Quality
+           Risk Posture
+           Momentum View
+           Action Bias
+        4. Be concise, clear, and decision-oriented.
+        5. Write like you are speaking to a customer, not an engineer.
+        """
+    ).strip()
+
+
+def build_agent_user_prompt(
+    role: str,
+    symbol: str,
+    timeframe: str,
+    components: HumanSignalComponents,
+    extra_context: Optional[Dict[str, Any]] = None,
+) -> str:
+    payload = components.to_agent_payload()
+    context = extra_context or {}
+
+    return textwrap.dedent(
+        f"""
+        Role: {role}
+        Asset: {symbol}
+        Timeframe: {timeframe}
+
+        Human-language signal components:
+        {json.dumps(payload, indent=2)}
+
+        Additional context:
+        {json.dumps(context, indent=2)}
+
+        Produce:
+        1. one sentence for the market read
+        2. one sentence for timing
+        3. one sentence for risk
+        4. one sentence for the next best action
+
+        Never mention hidden systems or internal mechanics.
+        """
+    ).strip()
+
+
+# =========================================================
+# LOCAL FALLBACK AGENTS
+# =========================================================
+def local_agent_response(
+    role: str,
+    symbol: str,
+    timeframe: str,
+    components: HumanSignalComponents,
+) -> str:
+    if role == "Market Analyst":
+        return (
+            f"{symbol} on {timeframe} shows {components.momentum_view.lower()} within "
+            f"{components.market_structure.lower()}. "
+            f"Volume Strength is described as {components.volume_strength_text.lower()} and "
+            f"Trend Alignment is {components.trend_alignment_text.lower()}."
+        )
+
+    if role == "Timing Analyst":
+        return (
+            f"Timing Quality is {components.timing_quality.lower()}. "
+            f"Short-Term Direction is {components.short_term_direction_text.lower()}, "
+            f"while Breakout Potential is {components.breakout_potential_text.lower()}."
+        )
+
+    if role == "Risk Analyst":
+        return (
+            f"Risk Posture is {components.risk_posture.lower()}. "
+            f"Price Stability is {components.price_stability_text.lower()} and Noise Level is "
+            f"{components.noise_level_text.lower()}, so position size should match setup quality."
+        )
+
+    if role == "Execution Coach":
+        return (
+            f"Action Bias is {components.action_bias.lower()}. "
+            f"Focus on clean confirmation rather than forcing activity, especially when conditions are mixed."
+        )
+
+    return components.summary_line
+
+
+# =========================================================
+# AI LAB PACK
+# =========================================================
+def generate_ai_lab_pack(
+    *,
+    symbol: str,
+    timeframe: str,
+    raw_signal: Dict[str, Any],
+    extra_context: Optional[Dict[str, Any]] = None,
+    llm_callable: Optional[Any] = None,
+) -> Dict[str, Any]:
+    components = make_human_language_components_from_signal_dict(raw_signal)
+
+    roles = [
+        "Market Analyst",
+        "Timing Analyst",
+        "Risk Analyst",
+        "Execution Coach",
+    ]
+
+    outputs: Dict[str, str] = {}
+
+    for role in roles:
+        system_prompt = build_agent_system_prompt(role)
+        user_prompt = build_agent_user_prompt(
+            role=role,
+            symbol=symbol,
+            timeframe=timeframe,
+            components=components,
+            extra_context=extra_context,
+        )
+
+        if llm_callable is not None:
+            try:
+                result = llm_callable(system_prompt, user_prompt)
+                outputs[role] = (result or "").strip()
+                if not outputs[role]:
+                    outputs[role] = local_agent_response(role, symbol, timeframe, components)
+            except Exception:
+                outputs[role] = local_agent_response(role, symbol, timeframe, components)
+        else:
+            outputs[role] = local_agent_response(role, symbol, timeframe, components)
 
     return {
-        "enabled": True,
-        "smart_wallet_accumulation": smart_wallet_accumulation,
-        "repeat_buyer_presence": repeat_buyer_presence,
-        "net_large_buyer_flow_positive": net_large_buyer_flow_positive,
-        "holder_growth_positive": holder_growth_positive,
-        "top10_concentration": top10_concentration,
-        "holder_count": holder_count,
-        "exchange_inflow_tokens": exchange_inflow_tokens,
-        "smart_wallet_net_flow_tokens": smart_wallet_net_flow,
-        "penalty_concentration": penalty_concentration,
-        "penalty_exchange_inflow": penalty_exchange_inflow,
-        "notes": "On-chain analysis active.",
+        "components": components,
+        "agent_payload": components.to_agent_payload(),
+        "agent_outputs": outputs,
     }
 
 
 # =========================================================
-# MIRO V2
+# RENDER HELPERS
 # =========================================================
-def compute_miro_components(metrics: CoinMetrics) -> Dict[str, float]:
-    if metrics.rv < 2:
-        v = 0
-    elif metrics.rv < 4:
-        v = 2
-    elif metrics.rv < 8:
-        v = 3
-    else:
-        v = 5
-
-    if metrics.close_now <= metrics.close_prev:
-        p = 0
-    elif metrics.atr_move < 1.5:
-        p = 0
-    elif metrics.atr_move < 2.5:
-        p = 1
-    elif metrics.atr_move < 4:
-        p = 2
-    else:
-        p = 3
-
-    if metrics.range_pos < 0.70:
-        r = 0
-    elif metrics.range_pos < 0.85:
-        r = 1
-    else:
-        r = 2
-
-    t = 0
-    if metrics.close_now > metrics.ema20:
-        t += 1
-    if metrics.ema20 > metrics.ema50:
-        t += 1
-    if metrics.adx14 >= 20:
-        t += 1
-
-    o = 0
-    if metrics.smart_wallet_accumulation:
-        o += 2
-    if metrics.repeat_buyer_presence:
-        o += 2
-    if metrics.net_large_buyer_flow_positive:
-        o += 1
-    if metrics.holder_growth_positive:
-        o += 1
-    o = min(o, 4)
-
-    x = (
-        metrics.penalty_low_liquidity
-        + metrics.penalty_concentration
-        + metrics.penalty_exchange_inflow
-        + metrics.penalty_wash_like_volume
-        + metrics.penalty_high_slippage
-    )
-    x = min(x, 5)
-
-    total = v + p + r + t + o - x
-    return {"V": v, "P": p, "R": r, "T": t, "O": o, "X": x, "total": total}
-
-
-def build_live_metrics(symbol: str) -> Tuple[CoinMetrics, pd.DataFrame]:
-    raw = fetch_ohlcv_cryptocompare(symbol)
-    df = add_indicators(raw)
-    latest = df.iloc[-1]
-    prev = df.iloc[-2]
-
-    vol_window = df["volume_quote"].tail(24)
-    prev_vol_mean = max(df["volume_quote"].tail(48).head(24).mean(), 1.0)
-    rv = latest["volume_quote"] / prev_vol_mean
-
-    atr14 = max(float(latest["atr14"]) if not math.isnan(latest["atr14"]) else 0.0, 1e-9)
-    atr_move = abs(float(latest["close"]) - float(prev["close"])) / atr14
-
-    lookback = df.tail(20)
-    range_high = float(lookback["high"].max())
-    range_low = float(lookback["low"].min())
-    if range_high <= range_low:
-        range_pos = 0.5
-    else:
-        range_pos = (float(latest["close"]) - range_low) / (range_high - range_low)
-
-    avg_dollar_volume = float(vol_window.mean())
-
-    penalty_low_liquidity = 1 if avg_dollar_volume < 500_000 else 0
-
-    true_range_pct = float(latest["tr"]) / max(float(latest["close"]), 1e-9)
-    penalty_wash_like_volume = 1 if rv >= 4 and true_range_pct < 0.01 else 0
-
-    hourly_range_pct = (float(latest["high"]) - float(latest["low"])) / max(float(latest["close"]), 1e-9)
-    penalty_high_slippage = 1 if avg_dollar_volume < 1_000_000 and hourly_range_pct > 0.03 else 0
-
-    onchain = analyze_onchain(symbol)
-
-    metrics = CoinMetrics(
-        rv=float(rv),
-        close_now=float(latest["close"]),
-        close_prev=float(prev["close"]),
-        atr_move=float(atr_move),
-        range_pos=float(range_pos),
-        ema20=float(latest["ema20"]),
-        ema50=float(latest["ema50"]),
-        adx14=float(latest["adx14"]) if not math.isnan(latest["adx14"]) else 0.0,
-        smart_wallet_accumulation=bool(onchain["smart_wallet_accumulation"]),
-        repeat_buyer_presence=bool(onchain["repeat_buyer_presence"]),
-        net_large_buyer_flow_positive=bool(onchain["net_large_buyer_flow_positive"]),
-        holder_growth_positive=bool(onchain["holder_growth_positive"]),
-        penalty_low_liquidity=penalty_low_liquidity,
-        penalty_concentration=int(onchain["penalty_concentration"]),
-        penalty_exchange_inflow=int(onchain["penalty_exchange_inflow"]),
-        penalty_wash_like_volume=penalty_wash_like_volume,
-        penalty_high_slippage=penalty_high_slippage,
-        avg_dollar_volume=avg_dollar_volume,
-        top10_concentration=onchain["top10_concentration"],
-        exchange_inflow_tokens=float(onchain["exchange_inflow_tokens"]),
-        smart_wallet_net_flow_tokens=float(onchain["smart_wallet_net_flow_tokens"]),
-        holder_count=onchain["holder_count"],
-        miro_components={},
-    )
-    metrics.miro_components = compute_miro_components(metrics)
-    return metrics, df
-
-
-# =========================================================
-# ENGINES
-# =========================================================
-def run_miro_score(symbol: str) -> Tuple[EngineSignal, CoinMetrics, pd.DataFrame]:
-    metrics, df = build_live_metrics(symbol)
-    comp = metrics.miro_components
-    score = float(comp["total"])
-
-    summary = (
-        f"Miro v2 = V({comp['V']}) + P({comp['P']}) + R({comp['R']}) + "
-        f"T({comp['T']}) + O({comp['O']}) - X({comp['X']}) = {comp['total']:.1f}."
-    )
-
-    signal = EngineSignal(
-        label="Miro Score",
-        bias=score_to_bias(score),
-        confidence=score_to_confidence(score),
-        score=score,
-        summary=summary,
-    )
-    return signal, metrics, df
-
-
-def run_kronos_logic(symbol: str, df: pd.DataFrame, miro_score: float) -> EngineSignal:
-    """
-    Live timing engine wrapper.
-    This is fed by live OHLCV now.
-    Replace only this function later if you install the Kronos model itself.
-    """
-    closes = df["close"].tail(24).reset_index(drop=True)
-    ema20 = float(df["ema20"].iloc[-1])
-    atr14 = max(float(df["atr14"].iloc[-1]) if not math.isnan(df["atr14"].iloc[-1]) else 0.0, 1e-9)
-    last_close = float(df["close"].iloc[-1])
-
-    x = np.arange(len(closes))
-    slope = np.polyfit(x, closes.values, 1)[0]
-    slope_norm = slope / max(last_close, 1e-9)
-
-    realized_vol = float(df["close"].pct_change().tail(24).std())
-    breakout = last_close > float(df["high"].tail(20).iloc[:-1].max())
-    above_ema = last_close > ema20
-    stable = realized_vol < 0.03
-
-    score = 4.5
-    if slope_norm > 0.0015:
-        score += 1.8
-    elif slope_norm > 0:
-        score += 0.9
-
-    if above_ema:
-        score += 1.2
-    if stable:
-        score += 1.0
-    if breakout:
-        score += 1.2
-
-    if miro_score >= 8.5:
-        score += 0.8
-    elif miro_score < 3.5:
-        score -= 0.6
-
-    score = round(max(0.0, min(10.0, score)), 1)
-
-    summary = (
-        f"Kronos Logic reads live timing from the recent OHLCV path and scores "
-        f"{symbol} at {score:.1f}/10."
-    )
-
-    return EngineSignal(
-        label="Kronos Logic",
-        bias=score_to_bias(score),
-        confidence=score_to_confidence(score),
-        score=score,
-        summary=summary,
-    )
-
-
-def run_ai_lab(symbol: str, miro: EngineSignal, kronos: EngineSignal, metrics: CoinMetrics) -> AILabDecision:
-    bull_points = []
-    bear_points = []
-    risk_points = []
-
-    if miro.score >= 8.5:
-        bull_points.append("Miro is already in the bullish zone.")
-    if kronos.score >= 7.0:
-        bull_points.append("Timing is supportive rather than fading.")
-    if metrics.smart_wallet_accumulation:
-        bull_points.append("Smart wallet accumulation is positive.")
-    if metrics.repeat_buyer_presence:
-        bull_points.append("More than one repeat buyer is showing up.")
-    if metrics.range_pos >= 0.85:
-        bull_points.append("Price is closing near the top of its recent range.")
-    if metrics.adx14 >= 20:
-        bull_points.append("Trend strength is not weak.")
-
-    if miro.score < 6.0:
-        bear_points.append("Miro structure is not strong enough.")
-    if kronos.score < 6.0:
-        bear_points.append("Timing is not clean.")
-    if metrics.penalty_concentration:
-        bear_points.append("Holder concentration is elevated.")
-    if metrics.penalty_exchange_inflow:
-        bear_points.append("Exchange inflow pressure is present.")
-    if metrics.penalty_low_liquidity:
-        bear_points.append("Liquidity is thin.")
-    if metrics.penalty_wash_like_volume:
-        bear_points.append("Volume quality looks suspicious.")
-    if metrics.penalty_high_slippage:
-        bear_points.append("Slippage risk is high.")
-
-    if metrics.penalty_concentration:
-        risk_points.append("Concentration can break market quality quickly.")
-    if metrics.penalty_exchange_inflow:
-        risk_points.append("Exchange deposits can precede distribution.")
-    if metrics.penalty_low_liquidity:
-        risk_points.append("Low liquidity can distort the signal.")
-    if metrics.penalty_high_slippage:
-        risk_points.append("Execution quality may be poor.")
-    if not risk_points:
-        risk_points.append("Risk is present but not dominant.")
-
-    bull = "Bull Agent: " + (
-        " ".join(bull_points) if bull_points else "Upside exists, but the setup is not screaming yet."
-    )
-    bear = "Bear Agent: " + (
-        " ".join(bear_points) if bear_points else "The downside case is present but not overwhelming."
-    )
-    risk_manager = "Risk Manager: " + " ".join(risk_points)
-
-    final_score = round((miro.score * 0.65) + (kronos.score * 0.35), 1)
-
-    if metrics.miro_components["X"] >= 3:
-        final_score -= 0.8
-    if metrics.miro_components["O"] >= 3:
-        final_score += 0.5
-    if metrics.range_pos >= 0.85 and metrics.close_now > metrics.ema20:
-        final_score += 0.3
-
-    final_score = round(max(0.0, final_score), 1)
-    final_bias = score_to_bias(final_score)
-    final_confidence = score_to_confidence(final_score)
-
-    chief_strategist = (
-        f"Chief Strategist: Final read is {final_bias} with {final_confidence} confidence. "
-        f"Miro contributes the structural edge, Kronos contributes timing quality, and the "
-        f"risk layer decides whether the setup should be pressed or handled cautiously."
-    )
-
-    return AILabDecision(
-        bull=bull,
-        bear=bear,
-        risk_manager=risk_manager,
-        chief_strategist=chief_strategist,
-        final_bias=final_bias,
-        final_confidence=final_confidence,
-        final_score=final_score,
-    )
-
-
-def run_engines(symbol: str) -> Tuple[Dict[str, EngineSignal], CoinMetrics, AILabDecision]:
-    miro, metrics, df = run_miro_score(symbol)
-    kronos = run_kronos_logic(symbol, df, miro.score)
-
-    ai_lab_decision = run_ai_lab(symbol, miro, kronos, metrics)
-    ai_lab_signal = EngineSignal(
-        label="AI Lab",
-        bias=ai_lab_decision.final_bias,
-        confidence=ai_lab_decision.final_confidence,
-        score=ai_lab_decision.final_score,
-        summary=ai_lab_decision.chief_strategist,
-    )
-
-    return {
-        "miro": miro,
-        "kronos": kronos,
-        "ai_lab": ai_lab_signal,
-    }, metrics, ai_lab_decision
-
-
-# =========================================================
-# RESPONSE COMPOSITION
-# =========================================================
-def compose_response(
-    symbol: str,
-    signals: Dict[str, EngineSignal],
-    ai_lab: AILabDecision,
-) -> FinalResponse:
-    final_score = signals["ai_lab"].score
-    bias = signals["ai_lab"].bias
-    confidence = signals["ai_lab"].confidence
-
-    if bias == "strong bullish":
-        action = "Strong watch"
-        risk = "Crowding and reversal risk if the move gets extended."
-    elif bias == "bullish":
-        action = "Watch closely"
-        risk = "Pullback risk if timing fades."
-    elif bias == "constructive":
-        action = "Early watch"
-        risk = "Still not a full confirmation."
-    elif bias == "neutral":
-        action = "Stay selective"
-        risk = "Directional edge is limited."
-    else:
-        action = "Avoid forcing"
-        risk = "Weak structure and penalty risk remain elevated."
-
-    answer = (
-        f"{symbol} currently reads as {bias} with {confidence} confidence after "
-        f"Miro Score, Kronos Logic, and AI Lab."
-    )
-
-    reasons = [
-        f"Miro Score: {signals['miro'].summary}",
-        f"Kronos Logic: {signals['kronos'].summary}",
-        f"AI Lab: {signals['ai_lab'].summary}",
-    ]
-
-    return FinalResponse(
-        coin=symbol,
-        answer=answer,
-        bias=bias,
-        confidence=confidence,
-        risk=risk,
-        action=action,
-        reasons=reasons,
-        miro_score=signals["miro"].score,
-        kronos_score=signals["kronos"].score,
-        ai_lab_score=final_score,
-        bull_case=ai_lab.bull,
-        bear_case=ai_lab.bear,
-        risk_case=ai_lab.risk_manager,
-        chief_strategist=ai_lab.chief_strategist,
-    )
-
-
-# =========================================================
-# PDF
-# =========================================================
-def wrap_text(text: str, font_name: str, font_size: int, max_width: float) -> List[str]:
-    words = text.split()
-    lines: List[str] = []
-    current = ""
-    for word in words:
-        test = word if not current else f"{current} {word}"
-        if stringWidth(test, font_name, font_size) <= max_width:
-            current = test
-        else:
-            if current:
-                lines.append(current)
-            current = word
-    if current:
-        lines.append(current)
-    return lines
-
-
-def draw_wrapped_text(
-    pdf: canvas.Canvas,
-    text: str,
-    x: float,
-    y: float,
-    max_width: float,
-    font_name: str = "Helvetica",
-    font_size: int = 11,
-    line_gap: int = 15,
-    color: HexColor = HexColor("#FFF7ED"),
-) -> float:
-    pdf.setFillColor(color)
-    pdf.setFont(font_name, font_size)
-    for line in wrap_text(text, font_name, font_size, max_width):
-        pdf.drawString(x, y, line)
-        y -= line_gap
-    return y
-
-
-def generate_pdf(response: FinalResponse) -> bytes:
-    buffer = io.BytesIO()
-    pdf = canvas.Canvas(buffer, pagesize=A4)
-    width, height = A4
-
-    margin_x = 18 * mm
-    y = height - 22 * mm
-    content_width = width - (2 * margin_x)
-
-    pdf.setFillColor(HexColor("#000000"))
-    pdf.rect(0, 0, width, height, fill=1, stroke=0)
-
-    pdf.setFillColor(HexColor("#FFFFFF"))
-    pdf.setFont("Helvetica-Bold", 22)
-    pdf.drawString(margin_x, y, APP_HEADING)
-    y -= 8 * mm
-
-    pdf.setFillColor(HexColor("#D7B37A"))
-    pdf.setFont("Helvetica", 11)
-    pdf.drawString(margin_x, y, APP_TAGLINE)
-    y -= 12 * mm
-
-    pdf.setFillColor(HexColor("#FF9933"))
-    pdf.setFont("Helvetica-Bold", 16)
-    pdf.drawString(margin_x, y, f"{response.coin} Signal Output")
-    y -= 8 * mm
-
-    y = draw_wrapped_text(pdf, response.answer, margin_x, y, content_width)
-    y -= 5 * mm
-
-    pdf.setFillColor(HexColor("#111111"))
-    pdf.roundRect(margin_x, y - 32 * mm, content_width, 30 * mm, 8, fill=1, stroke=0)
-
-    stat_y = y - 7 * mm
-    stats = [
-        ("Bias", response.bias.title()),
-        ("Confidence", response.confidence.title()),
-        ("Risk", response.risk),
-        ("Action", response.action),
-    ]
-
-    col_width = content_width / 2
-    row_gap = 15 * mm
-
-    for i, (label, value) in enumerate(stats):
-        col = i % 2
-        row = i // 2
-        x = margin_x + (col * col_width) + 5 * mm
-        sy = stat_y - (row * row_gap)
-
-        pdf.setFillColor(HexColor("#D7B37A"))
-        pdf.setFont("Helvetica", 9)
-        pdf.drawString(x, sy, label)
-
-        pdf.setFillColor(HexColor("#FFFFFF"))
-        pdf.setFont("Helvetica-Bold", 10)
-        value_lines = wrap_text(value, "Helvetica-Bold", 10, col_width - 12 * mm)
-        for idx, line in enumerate(value_lines[:2]):
-            pdf.drawString(x, sy - 5 - (idx * 11), line)
-
-    y -= 40 * mm
-
-    pdf.setFillColor(HexColor("#FF9933"))
-    pdf.setFont("Helvetica-Bold", 13)
-    pdf.drawString(margin_x, y, "Engine Scores")
-    y -= 8 * mm
-
-    for line in [
-        f"Miro Score: {response.miro_score:.1f} / 15",
-        f"Kronos Logic: {response.kronos_score:.1f} / 10",
-        f"AI Lab: {response.ai_lab_score:.1f}",
-    ]:
-        y = draw_wrapped_text(pdf, line, margin_x, y, content_width)
-
-    y -= 4 * mm
-
-    pdf.setFillColor(HexColor("#FF9933"))
-    pdf.setFont("Helvetica-Bold", 13)
-    pdf.drawString(margin_x, y, "AI Lab")
-    y -= 8 * mm
-
-    for text in [
-        response.bull_case,
-        response.bear_case,
-        response.risk_case,
-        response.chief_strategist,
-    ]:
-        y = draw_wrapped_text(pdf, f"• {text}", margin_x, y, content_width)
-        y -= 1 * mm
-        if y < 25 * mm:
-            pdf.showPage()
-            pdf.setFillColor(HexColor("#000000"))
-            pdf.rect(0, 0, width, height, fill=1, stroke=0)
-            y = height - 22 * mm
-
-    pdf.save()
-    buffer.seek(0)
-    return buffer.getvalue()
-
-
-# =========================================================
-# UI
-# =========================================================
-def render_header() -> None:
-    st.markdown('<div class="hero-wrap">', unsafe_allow_html=True)
-
-    if os.path.exists(LOGO_PATH):
-        st.markdown('<div class="hero-logo-wrap"><div class="hero-logo-glow">', unsafe_allow_html=True)
-        st.image(LOGO_PATH, width=120)
-        st.markdown("</div></div>", unsafe_allow_html=True)
-
+def metric_box(title: str, value: str, subtitle: str = "") -> None:
     st.markdown(
         f"""
-        <div class="hero-title">{APP_HEADING}</div>
-        <div class="hero-tagline">{APP_TAGLINE}</div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    st.markdown("</div>", unsafe_allow_html=True)
-
-
-def render_search() -> None:
-    st.markdown('<div class="search-shell">', unsafe_allow_html=True)
-
-    coin = st.text_input(
-        "",
-        value=st.session_state.coin_input,
-        placeholder="Enter coin",
-        label_visibility="collapsed",
-        key="coin_input_widget",
-    )
-
-    col1, col2, col3 = st.columns([3.4, 1.1, 1.1])
-    with col2:
-        analyze_clicked = st.button("Run Signal", use_container_width=True)
-    with col3:
-        clear_clicked = st.button("Clear", use_container_width=True)
-
-    st.markdown("</div>", unsafe_allow_html=True)
-
-    if clear_clicked:
-        st.session_state.coin_input = ""
-        st.session_state.last_coin = ""
-        st.session_state.last_response = None
-        st.session_state.last_signals = None
-        st.session_state.last_pdf = None
-        st.session_state.last_metrics = None
-        st.session_state.last_ai_lab = None
-        st.rerun()
-
-    if analyze_clicked:
-        symbol = normalize_coin(coin)
-        if not symbol:
-            st.warning("Enter a valid coin.")
-            return
-
-        st.session_state.coin_input = symbol
-        st.session_state.last_coin = symbol
-
-        with st.spinner("Running live engines..."):
-            time.sleep(0.2)
-            signals, metrics, ai_lab = run_engines(symbol)
-            response = compose_response(symbol, signals, ai_lab)
-            pdf_bytes = generate_pdf(response)
-
-        st.session_state.last_signals = signals
-        st.session_state.last_response = response
-        st.session_state.last_pdf = pdf_bytes
-        st.session_state.last_metrics = metrics
-        st.session_state.last_ai_lab = ai_lab
-        st.rerun()
-
-
-def render_output(response: FinalResponse, signals: Dict[str, EngineSignal], metrics: CoinMetrics) -> None:
-    st.markdown(
-        f"""
-        <div class="result-card">
-            <div class="result-title">{response.coin} Signal Output</div>
-            <div class="answer-text">{response.answer}</div>
-            <div class="signal-grid">
-                <div class="signal-box">
-                    <div class="signal-label">Bias</div>
-                    <div class="signal-value">{response.bias.title()}</div>
-                </div>
-                <div class="signal-box">
-                    <div class="signal-label">Confidence</div>
-                    <div class="signal-value">{response.confidence.title()}</div>
-                </div>
-                <div class="signal-box">
-                    <div class="signal-label">Risk</div>
-                    <div class="signal-value">{response.risk}</div>
-                </div>
-                <div class="signal-box">
-                    <div class="signal-label">Action</div>
-                    <div class="signal-value">{response.action}</div>
-                </div>
-            </div>
+        <div class="panel">
+            <div class="panel-title">{title}</div>
+            <div class="panel-value">{value}</div>
+            <div class="panel-sub">{subtitle}</div>
         </div>
         """,
         unsafe_allow_html=True,
     )
 
-    with st.expander("Why"):
-        for reason in response.reasons:
-            st.markdown(f'<div class="why-line">• {reason}</div>', unsafe_allow_html=True)
 
-    with st.expander("Engine Scores"):
-        st.markdown(
-            f'<div class="why-line">Miro Score: {signals["miro"].score:.1f} / 15 · {signals["miro"].confidence.title()}</div>',
-            unsafe_allow_html=True,
-        )
-        st.markdown(
-            f'<div class="why-line">Kronos Logic: {signals["kronos"].score:.1f} / 10 · {signals["kronos"].confidence.title()}</div>',
-            unsafe_allow_html=True,
-        )
-        st.markdown(
-            f'<div class="why-line">AI Lab: {signals["ai_lab"].score:.1f} · {signals["ai_lab"].confidence.title()}</div>',
-            unsafe_allow_html=True,
-        )
-
-    with st.expander("AI Lab"):
-        st.markdown(f'<div class="why-line">• {response.bull_case}</div>', unsafe_allow_html=True)
-        st.markdown(f'<div class="why-line">• {response.bear_case}</div>', unsafe_allow_html=True)
-        st.markdown(f'<div class="why-line">• {response.risk_case}</div>', unsafe_allow_html=True)
-        st.markdown(f'<div class="why-line">• {response.chief_strategist}</div>', unsafe_allow_html=True)
-
-    with st.expander("Miro Breakdown"):
-        comp = metrics.miro_components
-        st.markdown(f'<div class="why-line">V = {comp["V"]}</div>', unsafe_allow_html=True)
-        st.markdown(f'<div class="why-line">P = {comp["P"]}</div>', unsafe_allow_html=True)
-        st.markdown(f'<div class="why-line">R = {comp["R"]}</div>', unsafe_allow_html=True)
-        st.markdown(f'<div class="why-line">T = {comp["T"]}</div>', unsafe_allow_html=True)
-        st.markdown(f'<div class="why-line">O = {comp["O"]}</div>', unsafe_allow_html=True)
-        st.markdown(f'<div class="why-line">X = {comp["X"]}</div>', unsafe_allow_html=True)
-        st.markdown(
-            f'<div class="why-line">RV={metrics.rv:.2f} · ATR_move={metrics.atr_move:.2f} · '
-            f'RangePos={metrics.range_pos:.2f} · ADX14={metrics.adx14:.2f}</div>',
-            unsafe_allow_html=True,
-        )
-        st.markdown(
-            f'<div class="why-line">Avg $ Volume={metrics.avg_dollar_volume:,.0f}</div>',
-            unsafe_allow_html=True,
-        )
-        if metrics.top10_concentration is not None:
-            st.markdown(
-                f'<div class="why-line">Top-10 Concentration={metrics.top10_concentration:.2%}</div>',
-                unsafe_allow_html=True,
-            )
-        if metrics.holder_count is not None:
-            st.markdown(
-                f'<div class="why-line">Holder Count={metrics.holder_count:,}</div>',
-                unsafe_allow_html=True,
-            )
-        st.markdown(
-            f'<div class="why-line">Smart Wallet Net Flow={metrics.smart_wallet_net_flow_tokens:,.4f} tokens</div>',
-            unsafe_allow_html=True,
-        )
-        st.markdown(
-            f'<div class="why-line">Exchange Inflow={metrics.exchange_inflow_tokens:,.4f} tokens</div>',
-            unsafe_allow_html=True,
-        )
-
-    if st.session_state.last_pdf:
-        st.download_button(
-            label="Download PDF",
-            data=st.session_state.last_pdf,
-            file_name=f"{response.coin.lower()}_signal_output.pdf",
-            mime="application/pdf",
-            use_container_width=False,
-        )
+def agent_card(title: str, body: str) -> None:
+    st.markdown(
+        f"""
+        <div class="agent-card">
+            <div class="agent-title">{title}</div>
+            <div class="agent-body">{body}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
-def main() -> None:
-    init_state()
-    inject_styles()
-    render_header()
-    render_search()
+def render_translated_components(components: HumanSignalComponents) -> None:
+    st.markdown('<div class="section-head">Signal Breakdown</div>', unsafe_allow_html=True)
 
-    if st.session_state.last_response and st.session_state.last_signals and st.session_state.last_metrics:
-        render_output(
-            st.session_state.last_response,
-            st.session_state.last_signals,
-            st.session_state.last_metrics,
+    c1, c2 = st.columns(2)
+
+    with c1:
+        metric_box("Volume Strength", f"{components.volume_strength_score:.1f} / 5", components.volume_strength_text)
+        metric_box("Price Expansion", f"{components.price_expansion_score:.1f} / 5", components.price_expansion_text)
+        metric_box("Position in Range", f"{components.position_in_range_score:.1f} / 2", components.position_in_range_text)
+        metric_box("Trend Alignment", f"{components.trend_alignment_score:.1f} / 3", components.trend_alignment_text)
+
+    with c2:
+        metric_box("Short-Term Direction", components.short_term_direction_text)
+        metric_box("Price Stability", components.price_stability_text)
+        metric_box("Breakout Potential", components.breakout_potential_text)
+        metric_box("Noise Level", components.noise_level_text)
+
+    st.markdown('<div class="section-head">Market Read</div>', unsafe_allow_html=True)
+
+    a1, a2, a3 = st.columns(3)
+    with a1:
+        metric_box("Market Structure", components.market_structure)
+    with a2:
+        metric_box("Timing Quality", components.timing_quality)
+    with a3:
+        metric_box("Risk Posture", components.risk_posture)
+
+    b1, b2 = st.columns(2)
+    with b1:
+        metric_box("Momentum View", components.momentum_view)
+    with b2:
+        metric_box("Action Bias", components.action_bias)
+
+    st.markdown(
+        f'<div class="summary-box">{components.summary_line}</div>',
+        unsafe_allow_html=True,
+    )
+
+
+def render_ai_lab_output(
+    symbol: str,
+    timeframe: str,
+    components: HumanSignalComponents,
+    agent_outputs: Dict[str, str],
+) -> None:
+    st.markdown('<div class="section-head">AI Lab</div>', unsafe_allow_html=True)
+    st.markdown(
+        f'<div class="tiny-muted">{symbol} · {timeframe}</div>',
+        unsafe_allow_html=True,
+    )
+
+    render_translated_components(components)
+
+    st.markdown('<div class="section-head">Agent Desk</div>', unsafe_allow_html=True)
+
+    ordered_roles = [
+        "Market Analyst",
+        "Timing Analyst",
+        "Risk Analyst",
+        "Execution Coach",
+    ]
+
+    for role in ordered_roles:
+        agent_card(role, agent_outputs.get(role, ""))
+
+
+# =========================================================
+# OPTIONAL LLM CALL HOOK
+# Replace this with your real OpenAI call when ready.
+# =========================================================
+def llm_callable(system_prompt: str, user_prompt: str) -> str:
+    """
+    Plug your real LLM call here later.
+
+    Example shape:
+        response = client.responses.create(
+            model="gpt-5.4",
+            input=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+        )
+        return response.output_text.strip()
+
+    For now this returns an empty string so the local agent fallback is used.
+    """
+    return ""
+
+
+# =========================================================
+# SIDEBAR
+# =========================================================
+with st.sidebar:
+    st.markdown("## Crypto AI Lab")
+    st.markdown("Human-language agent intelligence")
+    st.markdown("---")
+
+    selected_symbol = st.text_input("Symbol", value="BTC")
+    selected_timeframe = st.selectbox("Timeframe", ["15m", "1h", "4h", "1d"], index=1)
+
+    st.markdown("### Input Signals")
+
+    volume_score = st.slider("Volume Strength", 0.0, 5.0, 3.7, 0.1)
+    price_expansion_score = st.slider("Price Expansion", 0.0, 5.0, 3.4, 0.1)
+    range_score = st.slider("Position in Range", 0.0, 2.0, 1.4, 0.1)
+    trend_score = st.slider("Trend Alignment", 0.0, 3.0, 2.2, 0.1)
+
+    slope_value = st.slider("Short-Term Direction", -1.0, 1.0, 0.35, 0.05)
+    stability_value = st.slider("Price Stability", 0.0, 1.0, 0.58, 0.05)
+    breakout_value = st.slider("Breakout Potential", 0.0, 1.0, 0.66, 0.05)
+    volatility_value = st.slider("Noise Level", 0.0, 1.0, 0.34, 0.05)
+
+    st.markdown("---")
+    last_price = st.number_input("Last Price", min_value=0.0, value=84250.0, step=10.0)
+    change_percent = st.number_input("24h Change %", value=2.35, step=0.1)
+
+    run_lab = st.button("Run AI Lab", use_container_width=True)
+
+
+# =========================================================
+# MAIN HEADER
+# =========================================================
+st.markdown('<div class="main-title">Crypto AI Lab</div>', unsafe_allow_html=True)
+st.markdown(
+    '<div class="sub-title">Agents consume only customer-facing language and respond without hidden references.</div>',
+    unsafe_allow_html=True,
+)
+
+
+# =========================================================
+# RAW SIGNAL ASSEMBLY
+# Replace these values with your real engine outputs later.
+# =========================================================
+raw_signal = {
+    "volume_score": volume_score,
+    "price_score": price_expansion_score,
+    "range_score": range_score,
+    "trend_score": trend_score,
+    "slope": slope_value,
+    "stability": stability_value,
+    "breakout": breakout_value,
+    "volatility": volatility_value,
+}
+
+
+# =========================================================
+# MAIN APP
+# =========================================================
+ai_lab_pack = generate_ai_lab_pack(
+    symbol=selected_symbol,
+    timeframe=selected_timeframe,
+    raw_signal=raw_signal,
+    extra_context={
+        "last_price": last_price,
+        "change_percent": change_percent,
+    },
+    llm_callable=llm_callable,
+)
+
+components = ai_lab_pack["components"]
+agent_payload = ai_lab_pack["agent_payload"]
+agent_outputs = ai_lab_pack["agent_outputs"]
+
+col_left, col_right = st.columns([2.2, 1.1])
+
+with col_left:
+    render_ai_lab_output(
+        symbol=selected_symbol,
+        timeframe=selected_timeframe,
+        components=components,
+        agent_outputs=agent_outputs,
+    )
+
+with col_right:
+    st.markdown('<div class="section-head">Snapshot</div>', unsafe_allow_html=True)
+    metric_box("Asset", selected_symbol)
+    metric_box("Timeframe", selected_timeframe)
+    metric_box("Last Price", f"{last_price:,.2f}")
+    metric_box("24h Change", f"{change_percent:.2f}%")
+    metric_box("Conviction", f"{components.conviction_score:.1f} / 10", components.conviction_text)
+
+    st.markdown('<div class="section-head">Download</div>', unsafe_allow_html=True)
+
+    report = {
+        "asset": selected_symbol,
+        "timeframe": selected_timeframe,
+        "components": agent_payload,
+        "agent_outputs": agent_outputs,
+        "market_context": {
+            "last_price": last_price,
+            "change_percent": change_percent,
+        },
+    }
+
+    st.download_button(
+        label="Download AI Lab Report",
+        data=json.dumps(report, indent=2),
+        file_name=f"{selected_symbol.lower()}_{selected_timeframe}_ai_lab_report.json",
+        mime="application/json",
+        use_container_width=True,
+    )
+
+    with st.expander("Payload sent to agents"):
+        st.json(agent_payload)
+
+    with st.expander("Prompt rule"):
+        st.code(
+            """
+Agents must speak only in human language.
+Never mention internal model names, internal factor names, acronyms,
+hidden references, shorthand labels, or engine terminology.
+            """.strip()
         )
 
 
-if __name__ == "__main__":
-    main()
+if not run_lab:
+    st.caption("Adjust the inputs in the sidebar and click Run AI Lab. The app already updates live.")
