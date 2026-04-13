@@ -835,14 +835,14 @@ def build_pdf(report: ReportData) -> bytes:
     story.append(Spacer(1, 4 * mm))
 
     # Left-aligned score block
-    story.append(Paragraph("01 · MIRO v2 SCORE", section_style))
+        story.append(Paragraph("01 · MIRO v2 SCORE", section_style))
+    story.append(Spacer(1, 1.2 * mm))
+
     score_line = Paragraph(
         f'<font size="20" color="{PDF_GREEN}"><b>{report.miro_total:.1f} / 15</b></font>'
         f'&nbsp;&nbsp;&nbsp;<font size="11" color="{PDF_TEXT}"><b>{report.status}</b></font>',
         body_style,
     )
-    story.append(score_line)
-    story.append(Spacer(1, 1.8 * mm))
 
     compact_score_table = Table(
         [
@@ -869,9 +869,28 @@ def build_pdf(report: ReportData) -> bytes:
             ]
         )
     )
-    story.append(compact_score_table)
-    story.append(Spacer(1, 4 * mm))
 
+    score_block = Table(
+        [
+            ["", score_line],
+            ["", compact_score_table],
+        ],
+        colWidths=[8 * mm, 48 * mm],
+    )
+    score_block.setStyle(
+        TableStyle(
+            [
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                ("TOPPADDING", (0, 0), (-1, -1), 0),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+            ]
+        )
+    )
+
+    story.append(score_block)
+    story.append(Spacer(1, 4 * mm))
     story.append(Paragraph("02 · SMART MONEY SNAPSHOT", section_style))
     story.append(
         Paragraph(
