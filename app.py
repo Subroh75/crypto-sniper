@@ -17,10 +17,10 @@ import streamlit as st
 warnings.filterwarnings("ignore")
 
 try:
-    import ccxt
-    HAS_CCXT = True
+    import yfinance as yf
+    HAS_YF = True
 except ImportError:
-    HAS_CCXT = False
+    HAS_YF = False
 
 try:
     import plotly.graph_objects as go
@@ -350,31 +350,51 @@ def compute_scores(df: pd.DataFrame) -> Optional[dict]:
 # DATA
 # ══════════════════════════════════════════════════════════════════════════════
 
-EXCHANGE_QUOTE_PRIORITY = ["USDT", "BUSD", "USDC"]
+# Interval → (yfinance interval, period to fetch)
+YF_INTERVAL_MAP = {
+    "1m":  ("1m",  "1d"),
+    "5m":  ("5m",  "5d"),
+    "15m": ("15m", "5d"),
+    "30m": ("30m", "30d"),
+    "1h":  ("1h",  "60d"),
+    "4h":  ("1h",  "60d"),   # resampled to 4h
+    "1d":  ("1d",  "1y"),
+}
 
 @st.cache_data(ttl=60, show_spinner=False)
 def fetch_ohlcv(base: str, interval: str, limit: int = 500) -> Optional[pd.DataFrame]:
-    if not HAS_CCXT:
+    if not HAS_YF:
         return None
-    exchange = ccxt.binance({"enableRateLimit": True})
-    # Try each quote currency
-    for quote in EXCHANGE_QUOTE_PRIORITY:
-        symbol = f"{base}/{quote}"
-        try:
-            raw = exchange.fetch_ohlcv(symbol, timeframe=interval, limit=limit)
-            if raw and len(raw) > 0:
-                df = pd.DataFrame(raw, columns=["timestamp","open","high","low","close","volume"])
-                df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms", utc=True)
-                return df.dropna().reset_index(drop=True)
-        except Exception:
-            continue
-    return None
+    yf_interval, period = YF_INTERVAL_MAP.get(interval, ("1h", "60d"))
+    ticker = f"{base}-USD"
+    try:
+        raw = yf.download(ticker, period=period, interval=yf_interval,
+                          progress=False, auto_adjust=True)
+        if raw is None or len(raw) == 0:
+            return None
+        # Flatten MultiIndex columns
+        if isinstance(raw.columns, pd.MultiIndex):
+            raw.columns = [c[0].lower() for c in raw.columns]
+        else:
+            raw.columns = [c.lower() for c in raw.columns]
+        raw = raw.reset_index().rename(columns={"datetime": "timestamp", "date": "timestamp", "index": "timestamp", "Datetime": "timestamp", "Date": "timestamp"})
+        if "timestamp" not in raw.columns:
+            raw = raw.reset_index()
+            raw.columns = ["timestamp"] + list(raw.columns[1:])
+        raw["timestamp"] = pd.to_datetime(raw["timestamp"], utc=True, errors="coerce")
+        raw = raw[["timestamp","open","high","low","close","volume"]].dropna().reset_index(drop=True)
+        # Resample to 4h if needed
+        if interval == "4h":
+            raw = raw.set_index("timestamp")
+            raw = raw.resample("4h").agg({"open":"first","high":"max","low":"min","close":"last","volume":"sum"}).dropna().reset_index()
+        return raw.tail(limit).reset_index(drop=True)
+    except Exception:
+        return None
 
 def clean_input(raw: str) -> str:
     """Strip everything to just the base asset ticker."""
     s = raw.strip().upper().replace(" ", "")
-    # If they type BTC/USDT or BTCUSDT, strip the quote side
-    for quote in ["USDT","BUSD","USDC","BTC","ETH","BNB"]:
+    for quote in ["USDT","BUSD","USDC","USD","BTC","ETH","BNB"]:
         if s.endswith(quote) and len(s) > len(quote):
             s = s[:-len(quote)]
             break
@@ -561,7 +581,7 @@ def build_pdf(symbol: str, interval: str, sc: dict, debate: dict, now: str) -> b
     pdf.ln(2)
     pdf.set_font("Helvetica", "I", 7)
     pdf.set_text_color(148, 163, 184)
-    pdf.cell(0, 5, "Signals are not financial advice. Past performance does not guarantee future results.", ln=True, align="C")
+    pdf.cell(0, 5, "Data via Yahoo Finance. Signals are not financial advice. Past performance does not guarantee future results.", ln=True, align="C")
 
     return bytes(pdf.output())
 
@@ -654,8 +674,8 @@ interval_map = {"1m":"1m","5m":"5m","15m":"15m","30m":"30m","1H":"1h","4H":"4h",
 interval_lbl = st.radio("", list(interval_map.keys()), index=4, horizontal=True, label_visibility="collapsed")
 interval     = interval_map[interval_lbl]
 
-if not HAS_CCXT:
-    st.error("ccxt not installed — add `ccxt` to requirements.txt")
+if not HAS_YF:
+    st.error("yfinance not installed — add `yfinance` to requirements.txt")
     st.stop()
 
 if not go_btn and not coin_raw:
@@ -675,7 +695,7 @@ with st.spinner(f"Fetching {base} data…"):
     df_raw = fetch_ohlcv(base, interval)
 
 if df_raw is None or len(df_raw) < 60:
-    st.error(f"Could not find **{base}** on Binance. Try: BTC · ETH · SOL · BNB · KAVA · DOGE")
+    st.error(f"Could not find **{base}** on Yahoo Finance. Try: BTC · ETH · SOL · BNB · KAVA · DOGE")
     st.stop()
 
 df = compute_indicators(df_raw)
@@ -881,5 +901,5 @@ with col_csv:
 st.markdown(f"""
 <div style="text-align:center;color:#1e293b;font-size:0.68rem;
             letter-spacing:0.1em;margin-top:3rem;text-transform:uppercase;">
-  Data via Binance &nbsp;·&nbsp; Not financial advice &nbsp;·&nbsp; {now_str}
+  Data via Yahoo Finance &nbsp;·&nbsp; Not financial advice &nbsp;·&nbsp; {now_str}
 </div>""", unsafe_allow_html=True)
