@@ -76,7 +76,7 @@ h1,h2,h3,h4 { color: #f1f5f9 !important; }
   -webkit-background-clip: text; -webkit-text-fill-color: transparent;
 }
 .hero-sub {
-  font-size: 0.85rem; font-weight: 500; color: #64748b;
+  font-size: 0.85rem; font-weight: 500; color: #94a3b8;
   letter-spacing: 0.08em; margin-top: 0.6rem;
   text-transform: uppercase;
 }
@@ -93,7 +93,7 @@ h1,h2,h3,h4 { color: #f1f5f9 !important; }
   letter-spacing: 0.05em;
   padding: 0.75rem 1rem !important;
 }
-.stTextInput > div > div > input::placeholder { color: #334155 !important; }
+.stTextInput > div > div > input::placeholder { color: #64748b !important; }
 .stTextInput > div > div > input:focus {
   border-color: #7c3aed !important;
   box-shadow: 0 0 0 3px rgba(124,58,237,0.2) !important;
@@ -112,15 +112,17 @@ h1,h2,h3,h4 { color: #f1f5f9 !important; }
 
 /* ── Radio interval pills ── */
 .stRadio [role="radiogroup"] { gap: 8px; justify-content: center; flex-wrap: wrap; }
+.stRadio > div { justify-content: center; }
 .stRadio label {
-  background: #0f1629 !important; border: 1px solid #1e293b !important;
-  border-radius: 8px !important; padding: 4px 14px !important;
-  color: #94a3b8 !important; font-size: 0.8rem !important;
-  font-weight: 600 !important; cursor: pointer;
+  background: #111827 !important; border: 1.5px solid #334155 !important;
+  border-radius: 8px !important; padding: 5px 16px !important;
+  color: #e2e8f0 !important; font-size: 0.82rem !important;
+  font-weight: 700 !important; cursor: pointer; letter-spacing: 0.05em;
 }
 .stRadio label:has(input:checked) {
-  border-color: #7c3aed !important; color: #c4b5fd !important;
-  background: #1a0f3a !important;
+  border-color: #7c3aed !important; color: #ffffff !important;
+  background: linear-gradient(135deg, #1a0f3a, #0f1a2e) !important;
+  box-shadow: 0 0 10px rgba(124,58,237,0.3) !important;
 }
 
 /* ── Section header ── */
@@ -133,7 +135,7 @@ h1,h2,h3,h4 { color: #f1f5f9 !important; }
 }
 .sec-hdr-text {
   font-size: 0.68rem; font-weight: 800; letter-spacing: 0.2em;
-  color: #475569; text-transform: uppercase; white-space: nowrap;
+  color: #94a3b8; text-transform: uppercase; white-space: nowrap;
 }
 .sec-hdr-dot {
   width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0;
@@ -158,12 +160,12 @@ h1,h2,h3,h4 { color: #f1f5f9 !important; }
   background: linear-gradient(135deg, #0a0e1a 0%, #0f172a 100%);
   border: 1px solid #1e293b;
 }
-.sig-symbol { font-size: 0.75rem; font-weight: 800; letter-spacing: 0.2em; color: #64748b; margin-bottom:0.5rem; text-transform:uppercase; }
+.sig-symbol { font-size: 0.75rem; font-weight: 800; letter-spacing: 0.2em; color: #94a3b8; margin-bottom:0.5rem; text-transform:uppercase; }
 .sig-label-strong   { font-size: 2.8rem; font-weight: 900; color: #10b981; letter-spacing: -1px; line-height:1; }
 .sig-label-moderate { font-size: 2.8rem; font-weight: 900; color: #f59e0b; letter-spacing: -1px; line-height:1; }
 .sig-label-weak     { font-size: 2.8rem; font-weight: 900; color: #334155; letter-spacing: -1px; line-height:1; }
 .sig-score { font-size: 1rem; font-weight: 700; margin-top: 0.6rem; }
-.sig-meta  { font-size: 0.78rem; color: #64748b; margin-top: 0.4rem; font-family: 'JetBrains Mono', monospace; }
+.sig-meta  { font-size: 0.78rem; color: #94a3b8; margin-top: 0.4rem; font-family: 'JetBrains Mono', monospace; }
 
 /* ── Metric grid ── */
 .mgrid { display:grid; grid-template-columns: repeat(4,1fr); gap:10px; margin: 1rem 0; }
@@ -171,7 +173,7 @@ h1,h2,h3,h4 { color: #f1f5f9 !important; }
   background: #0c1225; border: 1px solid #1a2540;
   border-radius: 14px; padding: 1rem; text-align:center;
 }
-.mcard-lbl { font-size:0.65rem; font-weight:700; letter-spacing:0.15em; color:#475569; text-transform:uppercase; margin-bottom:5px; }
+.mcard-lbl { font-size:0.65rem; font-weight:700; letter-spacing:0.15em; color:#94a3b8; text-transform:uppercase; margin-bottom:5px; }
 .mcard-val { font-size:1.3rem; font-weight:800; color:#e2e8f0; }
 .mcard-sub { font-size:0.68rem; font-weight:600; margin-top:3px; }
 
@@ -182,13 +184,13 @@ h1,h2,h3,h4 { color: #f1f5f9 !important; }
 .sbar-bg { flex:1; background:#0f172a; border-radius:999px; height:9px; overflow:hidden; }
 .sbar-fill { height:100%; border-radius:999px; }
 .sbar-num { font-size:0.78rem; font-weight:800; color:#f1f5f9; width:35px; text-align:right; font-family:'JetBrains Mono',monospace; }
-.sbar-hint { font-size:0.68rem; color:#475569; min-width:170px; }
+.sbar-hint { font-size:0.68rem; color:#94a3b8; min-width:170px; }
 
 /* ── Market structure table ── */
 .mkt-table { width:100%; border-collapse:collapse; margin:0.5rem 0; }
 .mkt-table td { padding: 10px 14px; font-size:0.82rem; border-bottom:1px solid #0f172a; }
 .mkt-table tr:last-child td { border-bottom:none; }
-.mkt-table .mkt-lbl { color:#64748b; font-weight:600; width:45%; }
+.mkt-table .mkt-lbl { color:#94a3b8; font-weight:600; width:45%; }
 .mkt-table .mkt-val { color:#e2e8f0; font-weight:700; font-family:'JetBrains Mono',monospace; }
 
 /* ── Timing quality ── */
@@ -197,7 +199,7 @@ h1,h2,h3,h4 { color: #f1f5f9 !important; }
   background:#0c1225; border:1px solid #1a2540;
   border-radius:14px; padding:1rem; text-align:center;
 }
-.tq-lbl { font-size:0.65rem; font-weight:700; letter-spacing:0.15em; color:#475569; text-transform:uppercase; margin-bottom:5px; }
+.tq-lbl { font-size:0.65rem; font-weight:700; letter-spacing:0.15em; color:#94a3b8; text-transform:uppercase; margin-bottom:5px; }
 .tq-val { font-size:1.1rem; font-weight:800; color:#e2e8f0; }
 .tq-sub { font-size:0.7rem; margin-top:3px; }
 
@@ -706,7 +708,7 @@ if not go_btn and not coin_raw:
     st.markdown("""
 <div style="text-align:center;padding:3rem 0;color:#1e293b;font-size:0.85rem;letter-spacing:0.08em;">
 TYPE A COIN SYMBOL ABOVE AND HIT ANALYSE
-</div>""", unsafe_allow_html=True)
+</div>""".replace('color:#1e293b', 'color:#64748b'), unsafe_allow_html=True)
     st.stop()
 
 if not coin_raw:
@@ -923,7 +925,7 @@ with col_csv:
     )
 
 st.markdown(f"""
-<div style="text-align:center;color:#1e293b;font-size:0.68rem;
+<div style="text-align:center;color:#475569;font-size:0.68rem;
             letter-spacing:0.1em;margin-top:3rem;text-transform:uppercase;">
   Data via Yahoo Finance &nbsp;·&nbsp; Not financial advice &nbsp;·&nbsp; {now_str}
 </div>""", unsafe_allow_html=True)
