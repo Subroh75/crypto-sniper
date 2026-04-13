@@ -63,7 +63,6 @@ PDF_ORANGE = "#8C5A12"
 
 LOGO_PATH = "assets/crypto_guru_logo.png"
 
-
 # =========================
 # DATA MODELS
 # =========================
@@ -364,7 +363,6 @@ def pdf_header_band(canvas, doc):
     page_width, page_height = A4
     canvas.setFillColor(colors.HexColor(PDF_BG_HEADER))
     canvas.rect(0, page_height - 28 * mm, page_width, 28 * mm, fill=1, stroke=0)
-
     canvas.setStrokeColor(colors.HexColor(PDF_RULE))
     canvas.setLineWidth(0.6)
     canvas.line(16 * mm, page_height - 29 * mm, page_width - 16 * mm, page_height - 29 * mm)
@@ -834,8 +832,8 @@ def build_pdf(report: ReportData) -> bytes:
     )
     story.append(Spacer(1, 4 * mm))
 
-    # Left-aligned score block
-        story.append(Paragraph("01 · MIRO v2 SCORE", section_style))
+    # Fixed indented score block
+    story.append(Paragraph("01 · MIRO v2 SCORE", section_style))
     story.append(Spacer(1, 1.2 * mm))
 
     score_line = Paragraph(
@@ -875,7 +873,7 @@ def build_pdf(report: ReportData) -> bytes:
             ["", score_line],
             ["", compact_score_table],
         ],
-        colWidths=[8 * mm, 48 * mm],
+        colWidths=[10 * mm, 48 * mm],
     )
     score_block.setStyle(
         TableStyle(
@@ -891,6 +889,7 @@ def build_pdf(report: ReportData) -> bytes:
 
     story.append(score_block)
     story.append(Spacer(1, 4 * mm))
+
     story.append(Paragraph("02 · SMART MONEY SNAPSHOT", section_style))
     story.append(
         Paragraph(
