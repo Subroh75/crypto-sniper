@@ -1,10 +1,16 @@
 import io
+import json
+import math
 import os
 import re
 import time
 from dataclasses import dataclass
-from typing import Dict, List
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional, Tuple
 
+import numpy as np
+import pandas as pd
+import requests
 import streamlit as st
 from reportlab.lib.colors import HexColor
 from reportlab.lib.pagesizes import A4
@@ -12,16 +18,14 @@ from reportlab.lib.units import mm
 from reportlab.pdfbase.pdfmetrics import stringWidth
 from reportlab.pdfgen import canvas
 
-
 # =========================================================
-# PAGE CONFIG
+# STREAMLIT PAGE
 # =========================================================
 st.set_page_config(
     page_title="Crypto Guru",
     layout="wide",
     initial_sidebar_state="collapsed",
 )
-
 
 # =========================================================
 # BRANDING
@@ -30,10 +34,76 @@ LOGO_PATH = "assets/crypto_guru_logo.png"
 APP_HEADING = "Crypto Guru"
 APP_TAGLINE = "Precision crypto intelligence."
 
+# =========================================================
+# SECRETS / CONFIG
+# Put these in Streamlit secrets:
+#
+# ETHERSCAN_API_KEY="your_key"
+# CRYPTOCOMPARE_API_KEY="your_key"
+#
+# Optional comma-separated smart wallets:
+# SMART_WALLETS="0xabc...,0xdef..."
+#
+# Optional comma-separated exchange wallets:
+# EXCHANGE_WALLETS="0x123...,0x456..."
+#
+# Optional JSON string map for ERC20 token contracts:
+# TOKEN_MAP_JSON='{
+#   "FET":{"contract":"0x....","chainid":"1"},
+#   "LINK":{"contract":"0x....","chainid":"1"}
+# }'
+# =========================================================
+ETHERSCAN_API_KEY = st.secrets.get("ETHERSCAN_API_KEY", "")
+CRYPTOCOMPARE_API_KEY = st.secrets.get("CRYPTOCOMPARE_API_KEY", "")
+
+SMART_WALLETS = [
+    w.strip().lower()
+    for w in st.secrets.get("SMART_WALLETS", "").split(",")
+    if w.strip()
+]
+EXCHANGE_WALLETS = [
+    w.strip().lower()
+    for w in st.secrets.get("EXCHANGE_WALLETS", "").split(",")
+    if w.strip()
+]
+
+try:
+    TOKEN_MAP = json.loads(st.secrets.get("TOKEN_MAP_JSON", "{}"))
+except Exception:
+    TOKEN_MAP = {}
+
+HOLDER_CACHE_FILE = "holder_cache.json"
 
 # =========================================================
 # DATA MODELS
 # =========================================================
+@dataclass
+class CoinMetrics:
+    rv: float
+    close_now: float
+    close_prev: float
+    atr_move: float
+    range_pos: float
+    ema20: float
+    ema50: float
+    adx14: float
+    smart_wallet_accumulation: bool
+    repeat_buyer_presence: bool
+    net_large_buyer_flow_positive: bool
+    holder_growth_positive: bool
+    penalty_low_liquidity: int
+    penalty_concentration: int
+    penalty_exchange_inflow: int
+    penalty_wash_like_volume: int
+    penalty_high_slippage: int
+    avg_dollar_volume: float
+    top10_concentration: Optional[float]
+    exchange_inflow_tokens: float
+    smart_wallet_net_flow_tokens: float
+    holder_count: Optional[int]
+    miro_components: Dict[str, float]
+
+
 @dataclass
 class EngineSignal:
     label: str
@@ -41,6 +111,17 @@ class EngineSignal:
     confidence: str
     score: float
     summary: str
+
+
+@dataclass
+class AILabDecision:
+    bull: str
+    bear: str
+    risk_manager: str
+    chief_strategist: str
+    final_bias: str
+    final_confidence: str
+    final_score: float
 
 
 @dataclass
@@ -54,7 +135,11 @@ class FinalResponse:
     reasons: List[str]
     miro_score: float
     kronos_score: float
-    debate_score: float
+    ai_lab_score: float
+    bull_case: str
+    bear_case: str
+    risk_case: str
+    chief_strategist: str
 
 
 # =========================================================
@@ -72,8 +157,6 @@ def inject_styles() -> None:
                 --text: #ffffff;
                 --muted: #d7b37a;
                 --accent: #ff9933;
-                --accent-2: #cc6f00;
-                --soft: rgba(255,153,51,0.08);
             }
 
             .stApp {
@@ -84,7 +167,7 @@ def inject_styles() -> None:
             }
 
             .block-container {
-                max-width: 900px;
+                max-width: 980px;
                 padding-top: 3rem;
                 padding-bottom: 3rem;
             }
@@ -222,9 +305,9 @@ def inject_styles() -> None:
                 color: #fff7ed;
                 line-height: 1.6;
                 margin-bottom: 0.45rem;
+                opacity: 1 !important;
             }
 
-            /* QUERY FIELD */
             .stTextInput > div > div > input {
                 background: linear-gradient(180deg, rgba(18,18,18,0.94) 0%, rgba(8,8,8,0.98) 100%) !important;
                 color: #ffffff !important;
@@ -234,22 +317,12 @@ def inject_styles() -> None:
                 font-size: 1.05rem !important;
                 text-align: center !important;
                 caret-color: #ff9933 !important;
-                box-shadow:
-                    inset 0 1px 0 rgba(255,255,255,0.03),
-                    0 0 0 1px rgba(255,153,51,0.02);
                 transition: all 0.22s ease !important;
             }
 
             .stTextInput > div > div > input::placeholder {
                 color: #c49352 !important;
                 opacity: 1 !important;
-            }
-
-            .stTextInput > div > div > input:hover {
-                border: 1px solid rgba(255,153,51,0.34) !important;
-                box-shadow:
-                    inset 0 1px 0 rgba(255,255,255,0.03),
-                    0 0 10px rgba(255,153,51,0.06) !important;
             }
 
             .stTextInput > div > div > input:focus {
@@ -291,32 +364,51 @@ def inject_styles() -> None:
                 transform: translateY(-1px);
             }
 
-            .stButton > button:focus,
-            .stDownloadButton > button:focus {
-                outline: none !important;
-                box-shadow: 0 0 0 2px rgba(255,153,51,0.18) !important;
-            }
-
             div[data-testid="stExpander"] {
                 border: 1px solid rgba(255,153,51,0.16) !important;
                 border-radius: 16px !important;
                 background: rgba(255,153,51,0.03) !important;
+                overflow: hidden !important;
+            }
+
+            div[data-testid="stExpander"] summary {
+                background: rgba(255,153,51,0.04) !important;
+                color: #ffffff !important;
+                border-radius: 16px !important;
+            }
+
+            div[data-testid="stExpander"] summary p {
+                color: #ffffff !important;
+                font-weight: 700 !important;
+                opacity: 1 !important;
+            }
+
+            div[data-testid="stExpander"] summary svg {
+                fill: #ff9933 !important;
+                color: #ff9933 !important;
+                opacity: 1 !important;
+            }
+
+            div[data-testid="stExpanderDetails"] {
+                color: #fff7ed !important;
+                opacity: 1 !important;
+            }
+
+            div[data-testid="stExpanderDetails"] p,
+            div[data-testid="stExpanderDetails"] div,
+            div[data-testid="stExpanderDetails"] span,
+            div[data-testid="stExpanderDetails"] label {
+                color: #fff7ed !important;
+                opacity: 1 !important;
             }
 
             @media (max-width: 820px) {
-                .hero-title {
-                    font-size: 2.15rem;
-                }
-
-                .signal-grid {
-                    grid-template-columns: 1fr 1fr;
-                }
+                .hero-title { font-size: 2.15rem; }
+                .signal-grid { grid-template-columns: 1fr 1fr; }
             }
 
             @media (max-width: 580px) {
-                .signal-grid {
-                    grid-template-columns: 1fr;
-                }
+                .signal-grid { grid-template-columns: 1fr; }
             }
         </style>
         """,
@@ -325,7 +417,7 @@ def inject_styles() -> None:
 
 
 # =========================================================
-# SESSION STATE
+# STATE
 # =========================================================
 def init_state() -> None:
     defaults = {
@@ -334,6 +426,8 @@ def init_state() -> None:
         "last_response": None,
         "last_signals": None,
         "last_pdf": None,
+        "last_metrics": None,
+        "last_ai_lab": None,
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -347,126 +441,666 @@ def normalize_coin(raw: str) -> str:
     return re.sub(r"[^A-Za-z0-9]", "", raw.strip().upper())
 
 
-def pseudo_score(seed_text: str, modifier: int) -> float:
-    base = sum(ord(c) for c in seed_text) % 100
-    value = (base + modifier) / 10
-    return max(4.8, min(9.4, round(value, 1)))
-
-
 def score_to_bias(score: float) -> str:
-    if score >= 8.1:
+    if score >= 11.0:
         return "strong bullish"
-    if score >= 7.2:
+    if score >= 8.5:
         return "bullish"
-    if score >= 6.4:
+    if score >= 6.0:
         return "constructive"
-    if score >= 5.7:
+    if score >= 3.5:
         return "neutral"
     return "cautious"
 
 
 def score_to_confidence(score: float) -> str:
-    if score >= 8.0:
+    if score >= 10.0:
         return "high"
-    if score >= 6.7:
+    if score >= 6.0:
         return "medium"
     return "low"
 
 
+def safe_float(value: Any, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except Exception:
+        return default
+
+
+def get_token_map_entry(symbol: str) -> Optional[Dict[str, str]]:
+    entry = TOKEN_MAP.get(symbol.upper())
+    if isinstance(entry, dict):
+        return entry
+    return None
+
+
+def load_holder_cache() -> Dict[str, Any]:
+    if not os.path.exists(HOLDER_CACHE_FILE):
+        return {}
+    try:
+        with open(HOLDER_CACHE_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def save_holder_cache(data: Dict[str, Any]) -> None:
+    try:
+        with open(HOLDER_CACHE_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f)
+    except Exception:
+        pass
+
+
+def update_holder_growth(symbol: str, chainid: str, holder_count: Optional[int]) -> bool:
+    if holder_count is None:
+        return False
+    cache = load_holder_cache()
+    key = f"{chainid}:{symbol.upper()}"
+    prev = cache.get(key, {}).get("holder_count")
+    cache[key] = {
+        "holder_count": holder_count,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    save_holder_cache(cache)
+    if prev is None:
+        return False
+    return holder_count > int(prev)
+
+
 # =========================================================
-# ENGINE ORDER
+# MARKET DATA - CRYPTOCOMPARE
 # =========================================================
-def run_miro_logic(coin: str) -> EngineSignal:
-    score = pseudo_score(coin + "miro_logic", 19)
-    return EngineSignal(
-        label="Miro",
+@st.cache_data(ttl=300, show_spinner=False)
+def fetch_ohlcv_cryptocompare(symbol: str, limit: int = 240) -> pd.DataFrame:
+    """
+    Uses the widely deployed CryptoCompare histohour endpoint.
+    Replace only this function if you move to a different CoinDesk Data API path.
+    """
+    url = "https://min-api.cryptocompare.com/data/v2/histohour"
+    params = {
+        "fsym": symbol.upper(),
+        "tsym": "USD",
+        "limit": limit,
+        "aggregate": 1,
+    }
+    headers = {}
+    if CRYPTOCOMPARE_API_KEY:
+        headers["authorization"] = f"Apikey {CRYPTOCOMPARE_API_KEY}"
+
+    resp = requests.get(url, params=params, headers=headers, timeout=20)
+    resp.raise_for_status()
+    payload = resp.json()
+
+    data = payload.get("Data", {}).get("Data", [])
+    if not data:
+        raise ValueError(f"No market data returned for {symbol}")
+
+    df = pd.DataFrame(data)
+    df["time"] = pd.to_datetime(df["time"], unit="s", utc=True)
+    df = df.rename(
+        columns={
+            "volumefrom": "volume_base",
+            "volumeto": "volume_quote",
+        }
+    )
+    required = ["time", "open", "high", "low", "close", "volume_base", "volume_quote"]
+    for col in required:
+        if col not in df.columns:
+            raise ValueError(f"Missing market column: {col}")
+    return df[required].copy()
+
+
+def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
+    out = df.copy()
+
+    out["ema20"] = out["close"].ewm(span=20, adjust=False).mean()
+    out["ema50"] = out["close"].ewm(span=50, adjust=False).mean()
+
+    prev_close = out["close"].shift(1)
+    tr_components = pd.concat(
+        [
+            (out["high"] - out["low"]).abs(),
+            (out["high"] - prev_close).abs(),
+            (out["low"] - prev_close).abs(),
+        ],
+        axis=1,
+    )
+    out["tr"] = tr_components.max(axis=1)
+    out["atr14"] = out["tr"].rolling(14).mean()
+
+    up_move = out["high"].diff()
+    down_move = -out["low"].diff()
+
+    plus_dm = np.where((up_move > down_move) & (up_move > 0), up_move, 0.0)
+    minus_dm = np.where((down_move > up_move) & (down_move > 0), down_move, 0.0)
+
+    atr14 = out["atr14"].replace(0, np.nan)
+    plus_di = 100 * pd.Series(plus_dm, index=out.index).rolling(14).mean() / atr14
+    minus_di = 100 * pd.Series(minus_dm, index=out.index).rolling(14).mean() / atr14
+    dx = (abs(plus_di - minus_di) / (plus_di + minus_di).replace(0, np.nan)) * 100
+    out["adx14"] = dx.rolling(14).mean()
+
+    return out
+
+
+# =========================================================
+# ON-CHAIN DATA - ETHERSCAN
+# =========================================================
+@st.cache_data(ttl=300, show_spinner=False)
+def etherscan_get(params: Dict[str, Any]) -> Dict[str, Any]:
+    if not ETHERSCAN_API_KEY:
+        return {"status": "0", "message": "Missing Etherscan API key", "result": []}
+
+    query = {"apikey": ETHERSCAN_API_KEY}
+    query.update(params)
+    resp = requests.get("https://api.etherscan.io/v2/api", params=query, timeout=20)
+    resp.raise_for_status()
+    return resp.json()
+
+
+def fetch_top_holders(contract: str, chainid: str) -> Tuple[Optional[List[Dict[str, Any]]], bool]:
+    payload = etherscan_get(
+        {
+            "chainid": chainid,
+            "module": "token",
+            "action": "topholders",
+            "contractaddress": contract,
+            "offset": 10,
+        }
+    )
+    ok = payload.get("status") == "1" and isinstance(payload.get("result"), list)
+    return (payload.get("result") if ok else None, ok)
+
+
+def fetch_holder_count(contract: str, chainid: str) -> Optional[int]:
+    payload = etherscan_get(
+        {
+            "chainid": chainid,
+            "module": "token",
+            "action": "tokenholdercount",
+            "contractaddress": contract,
+        }
+    )
+    if payload.get("status") == "1":
+        try:
+            return int(payload.get("result"))
+        except Exception:
+            return None
+    return None
+
+
+def fetch_total_supply(contract: str, chainid: str) -> Optional[float]:
+    payload = etherscan_get(
+        {
+            "chainid": chainid,
+            "module": "stats",
+            "action": "tokensupply",
+            "contractaddress": contract,
+        }
+    )
+    if payload.get("status") == "1":
+        return safe_float(payload.get("result"), None)
+    return None
+
+
+def fetch_wallet_token_transfers(
+    wallet: str,
+    contract: str,
+    chainid: str,
+    offset: int = 100,
+) -> List[Dict[str, Any]]:
+    payload = etherscan_get(
+        {
+            "chainid": chainid,
+            "module": "account",
+            "action": "tokentx",
+            "address": wallet,
+            "contractaddress": contract,
+            "startblock": 0,
+            "endblock": 999999999,
+            "page": 1,
+            "offset": offset,
+            "sort": "desc",
+        }
+    )
+    if payload.get("status") == "1" and isinstance(payload.get("result"), list):
+        return payload["result"]
+    return []
+
+
+def compute_wallet_net_flow(wallet: str, transfers: List[Dict[str, Any]]) -> float:
+    wallet = wallet.lower()
+    net = 0.0
+    for tx in transfers:
+        decimals = int(tx.get("tokenDecimal", "18"))
+        value = safe_float(tx.get("value")) / (10 ** decimals)
+        to_addr = str(tx.get("to", "")).lower()
+        from_addr = str(tx.get("from", "")).lower()
+
+        if to_addr == wallet:
+            net += value
+        elif from_addr == wallet:
+            net -= value
+    return net
+
+
+def analyze_onchain(symbol: str) -> Dict[str, Any]:
+    token = get_token_map_entry(symbol)
+    if not token:
+        return {
+            "enabled": False,
+            "smart_wallet_accumulation": False,
+            "repeat_buyer_presence": False,
+            "net_large_buyer_flow_positive": False,
+            "holder_growth_positive": False,
+            "top10_concentration": None,
+            "holder_count": None,
+            "exchange_inflow_tokens": 0.0,
+            "smart_wallet_net_flow_tokens": 0.0,
+            "penalty_concentration": 0,
+            "penalty_exchange_inflow": 0,
+            "notes": "No contract mapping found for this token.",
+        }
+
+    contract = token["contract"]
+    chainid = token.get("chainid", "1")
+
+    top_holders, got_top_holders = fetch_top_holders(contract, chainid)
+    holder_count = fetch_holder_count(contract, chainid)
+    total_supply = fetch_total_supply(contract, chainid)
+    holder_growth_positive = update_holder_growth(symbol, chainid, holder_count)
+
+    top10_concentration = None
+    penalty_concentration = 0
+    if got_top_holders and top_holders and total_supply and total_supply > 0:
+        top_qty = sum(safe_float(x.get("TokenHolderQuantity")) for x in top_holders)
+        top10_concentration = top_qty / total_supply
+        penalty_concentration = 1 if top10_concentration >= 0.50 else 0
+
+    smart_positive_wallets = 0
+    smart_wallet_net_flow = 0.0
+    for wallet in SMART_WALLETS:
+        txs = fetch_wallet_token_transfers(wallet, contract, chainid)
+        net = compute_wallet_net_flow(wallet, txs)
+        smart_wallet_net_flow += net
+        if net > 0:
+            smart_positive_wallets += 1
+
+    exchange_inflow_tokens = 0.0
+    for wallet in EXCHANGE_WALLETS:
+        txs = fetch_wallet_token_transfers(wallet, contract, chainid)
+        net = compute_wallet_net_flow(wallet, txs)
+        if net > 0:
+            exchange_inflow_tokens += net
+
+    smart_wallet_accumulation = smart_positive_wallets >= 1
+    repeat_buyer_presence = smart_positive_wallets >= 2
+    net_large_buyer_flow_positive = smart_wallet_net_flow > 0
+    penalty_exchange_inflow = 1 if exchange_inflow_tokens > 0 else 0
+
+    return {
+        "enabled": True,
+        "smart_wallet_accumulation": smart_wallet_accumulation,
+        "repeat_buyer_presence": repeat_buyer_presence,
+        "net_large_buyer_flow_positive": net_large_buyer_flow_positive,
+        "holder_growth_positive": holder_growth_positive,
+        "top10_concentration": top10_concentration,
+        "holder_count": holder_count,
+        "exchange_inflow_tokens": exchange_inflow_tokens,
+        "smart_wallet_net_flow_tokens": smart_wallet_net_flow,
+        "penalty_concentration": penalty_concentration,
+        "penalty_exchange_inflow": penalty_exchange_inflow,
+        "notes": "On-chain analysis active.",
+    }
+
+
+# =========================================================
+# MIRO V2
+# =========================================================
+def compute_miro_components(metrics: CoinMetrics) -> Dict[str, float]:
+    if metrics.rv < 2:
+        v = 0
+    elif metrics.rv < 4:
+        v = 2
+    elif metrics.rv < 8:
+        v = 3
+    else:
+        v = 5
+
+    if metrics.close_now <= metrics.close_prev:
+        p = 0
+    elif metrics.atr_move < 1.5:
+        p = 0
+    elif metrics.atr_move < 2.5:
+        p = 1
+    elif metrics.atr_move < 4:
+        p = 2
+    else:
+        p = 3
+
+    if metrics.range_pos < 0.70:
+        r = 0
+    elif metrics.range_pos < 0.85:
+        r = 1
+    else:
+        r = 2
+
+    t = 0
+    if metrics.close_now > metrics.ema20:
+        t += 1
+    if metrics.ema20 > metrics.ema50:
+        t += 1
+    if metrics.adx14 >= 20:
+        t += 1
+
+    o = 0
+    if metrics.smart_wallet_accumulation:
+        o += 2
+    if metrics.repeat_buyer_presence:
+        o += 2
+    if metrics.net_large_buyer_flow_positive:
+        o += 1
+    if metrics.holder_growth_positive:
+        o += 1
+    o = min(o, 4)
+
+    x = (
+        metrics.penalty_low_liquidity
+        + metrics.penalty_concentration
+        + metrics.penalty_exchange_inflow
+        + metrics.penalty_wash_like_volume
+        + metrics.penalty_high_slippage
+    )
+    x = min(x, 5)
+
+    total = v + p + r + t + o - x
+    return {"V": v, "P": p, "R": r, "T": t, "O": o, "X": x, "total": total}
+
+
+def build_live_metrics(symbol: str) -> Tuple[CoinMetrics, pd.DataFrame]:
+    raw = fetch_ohlcv_cryptocompare(symbol)
+    df = add_indicators(raw)
+    latest = df.iloc[-1]
+    prev = df.iloc[-2]
+
+    vol_window = df["volume_quote"].tail(24)
+    prev_vol_mean = max(df["volume_quote"].tail(48).head(24).mean(), 1.0)
+    rv = latest["volume_quote"] / prev_vol_mean
+
+    atr14 = max(float(latest["atr14"]) if not math.isnan(latest["atr14"]) else 0.0, 1e-9)
+    atr_move = abs(float(latest["close"]) - float(prev["close"])) / atr14
+
+    lookback = df.tail(20)
+    range_high = float(lookback["high"].max())
+    range_low = float(lookback["low"].min())
+    if range_high <= range_low:
+        range_pos = 0.5
+    else:
+        range_pos = (float(latest["close"]) - range_low) / (range_high - range_low)
+
+    avg_dollar_volume = float(vol_window.mean())
+
+    penalty_low_liquidity = 1 if avg_dollar_volume < 500_000 else 0
+
+    true_range_pct = float(latest["tr"]) / max(float(latest["close"]), 1e-9)
+    penalty_wash_like_volume = 1 if rv >= 4 and true_range_pct < 0.01 else 0
+
+    hourly_range_pct = (float(latest["high"]) - float(latest["low"])) / max(float(latest["close"]), 1e-9)
+    penalty_high_slippage = 1 if avg_dollar_volume < 1_000_000 and hourly_range_pct > 0.03 else 0
+
+    onchain = analyze_onchain(symbol)
+
+    metrics = CoinMetrics(
+        rv=float(rv),
+        close_now=float(latest["close"]),
+        close_prev=float(prev["close"]),
+        atr_move=float(atr_move),
+        range_pos=float(range_pos),
+        ema20=float(latest["ema20"]),
+        ema50=float(latest["ema50"]),
+        adx14=float(latest["adx14"]) if not math.isnan(latest["adx14"]) else 0.0,
+        smart_wallet_accumulation=bool(onchain["smart_wallet_accumulation"]),
+        repeat_buyer_presence=bool(onchain["repeat_buyer_presence"]),
+        net_large_buyer_flow_positive=bool(onchain["net_large_buyer_flow_positive"]),
+        holder_growth_positive=bool(onchain["holder_growth_positive"]),
+        penalty_low_liquidity=penalty_low_liquidity,
+        penalty_concentration=int(onchain["penalty_concentration"]),
+        penalty_exchange_inflow=int(onchain["penalty_exchange_inflow"]),
+        penalty_wash_like_volume=penalty_wash_like_volume,
+        penalty_high_slippage=penalty_high_slippage,
+        avg_dollar_volume=avg_dollar_volume,
+        top10_concentration=onchain["top10_concentration"],
+        exchange_inflow_tokens=float(onchain["exchange_inflow_tokens"]),
+        smart_wallet_net_flow_tokens=float(onchain["smart_wallet_net_flow_tokens"]),
+        holder_count=onchain["holder_count"],
+        miro_components={},
+    )
+    metrics.miro_components = compute_miro_components(metrics)
+    return metrics, df
+
+
+# =========================================================
+# ENGINES
+# =========================================================
+def run_miro_score(symbol: str) -> Tuple[EngineSignal, CoinMetrics, pd.DataFrame]:
+    metrics, df = build_live_metrics(symbol)
+    comp = metrics.miro_components
+    score = float(comp["total"])
+
+    summary = (
+        f"Miro v2 = V({comp['V']}) + P({comp['P']}) + R({comp['R']}) + "
+        f"T({comp['T']}) + O({comp['O']}) - X({comp['X']}) = {comp['total']:.1f}."
+    )
+
+    signal = EngineSignal(
+        label="Miro Score",
         bias=score_to_bias(score),
         confidence=score_to_confidence(score),
         score=score,
-        summary=f"Miro logic reads {coin} through momentum and structure as {score_to_bias(score)}.",
+        summary=summary,
+    )
+    return signal, metrics, df
+
+
+def run_kronos_logic(symbol: str, df: pd.DataFrame, miro_score: float) -> EngineSignal:
+    """
+    Live timing engine wrapper.
+    This is fed by live OHLCV now.
+    Replace only this function later if you install the Kronos model itself.
+    """
+    closes = df["close"].tail(24).reset_index(drop=True)
+    ema20 = float(df["ema20"].iloc[-1])
+    atr14 = max(float(df["atr14"].iloc[-1]) if not math.isnan(df["atr14"].iloc[-1]) else 0.0, 1e-9)
+    last_close = float(df["close"].iloc[-1])
+
+    x = np.arange(len(closes))
+    slope = np.polyfit(x, closes.values, 1)[0]
+    slope_norm = slope / max(last_close, 1e-9)
+
+    realized_vol = float(df["close"].pct_change().tail(24).std())
+    breakout = last_close > float(df["high"].tail(20).iloc[:-1].max())
+    above_ema = last_close > ema20
+    stable = realized_vol < 0.03
+
+    score = 4.5
+    if slope_norm > 0.0015:
+        score += 1.8
+    elif slope_norm > 0:
+        score += 0.9
+
+    if above_ema:
+        score += 1.2
+    if stable:
+        score += 1.0
+    if breakout:
+        score += 1.2
+
+    if miro_score >= 8.5:
+        score += 0.8
+    elif miro_score < 3.5:
+        score -= 0.6
+
+    score = round(max(0.0, min(10.0, score)), 1)
+
+    summary = (
+        f"Kronos Logic reads live timing from the recent OHLCV path and scores "
+        f"{symbol} at {score:.1f}/10."
     )
 
-
-def run_kronos_logic(coin: str) -> EngineSignal:
-    score = pseudo_score(coin + "kronos_logic", 7)
     return EngineSignal(
-        label="Kronos",
+        label="Kronos Logic",
         bias=score_to_bias(score),
         confidence=score_to_confidence(score),
         score=score,
-        summary=f"Kronos logic reads the timing quality on {coin} as {score_to_bias(score)}.",
+        summary=summary,
     )
 
 
-def run_ai_debate(coin: str, miro: EngineSignal, kronos: EngineSignal) -> EngineSignal:
-    blended_seed = f"{coin}|{miro.score:.1f}|{miro.bias}|{kronos.score:.1f}|{kronos.bias}|ai_debate"
-    score = pseudo_score(blended_seed, 13)
+def run_ai_lab(symbol: str, miro: EngineSignal, kronos: EngineSignal, metrics: CoinMetrics) -> AILabDecision:
+    bull_points = []
+    bear_points = []
+    risk_points = []
 
-    if miro.score >= 7.2 and kronos.score >= 7.2:
-        score = min(9.4, round(score + 0.4, 1))
-    elif miro.score < 6.0 and kronos.score < 6.0:
-        score = max(4.8, round(score - 0.4, 1))
+    if miro.score >= 8.5:
+        bull_points.append("Miro is already in the bullish zone.")
+    if kronos.score >= 7.0:
+        bull_points.append("Timing is supportive rather than fading.")
+    if metrics.smart_wallet_accumulation:
+        bull_points.append("Smart wallet accumulation is positive.")
+    if metrics.repeat_buyer_presence:
+        bull_points.append("More than one repeat buyer is showing up.")
+    if metrics.range_pos >= 0.85:
+        bull_points.append("Price is closing near the top of its recent range.")
+    if metrics.adx14 >= 20:
+        bull_points.append("Trend strength is not weak.")
 
-    return EngineSignal(
-        label="AI Debate",
-        bias=score_to_bias(score),
-        confidence=score_to_confidence(score),
-        score=score,
-        summary=(
-            f"AI Debate weighs Miro ({miro.bias}) against Kronos ({kronos.bias}) "
-            f"and concludes {coin} is {score_to_bias(score)}."
-        ),
+    if miro.score < 6.0:
+        bear_points.append("Miro structure is not strong enough.")
+    if kronos.score < 6.0:
+        bear_points.append("Timing is not clean.")
+    if metrics.penalty_concentration:
+        bear_points.append("Holder concentration is elevated.")
+    if metrics.penalty_exchange_inflow:
+        bear_points.append("Exchange inflow pressure is present.")
+    if metrics.penalty_low_liquidity:
+        bear_points.append("Liquidity is thin.")
+    if metrics.penalty_wash_like_volume:
+        bear_points.append("Volume quality looks suspicious.")
+    if metrics.penalty_high_slippage:
+        bear_points.append("Slippage risk is high.")
+
+    if metrics.penalty_concentration:
+        risk_points.append("Concentration can break market quality quickly.")
+    if metrics.penalty_exchange_inflow:
+        risk_points.append("Exchange deposits can precede distribution.")
+    if metrics.penalty_low_liquidity:
+        risk_points.append("Low liquidity can distort the signal.")
+    if metrics.penalty_high_slippage:
+        risk_points.append("Execution quality may be poor.")
+    if not risk_points:
+        risk_points.append("Risk is present but not dominant.")
+
+    bull = "Bull Agent: " + (
+        " ".join(bull_points) if bull_points else "Upside exists, but the setup is not screaming yet."
+    )
+    bear = "Bear Agent: " + (
+        " ".join(bear_points) if bear_points else "The downside case is present but not overwhelming."
+    )
+    risk_manager = "Risk Manager: " + " ".join(risk_points)
+
+    final_score = round((miro.score * 0.65) + (kronos.score * 0.35), 1)
+
+    if metrics.miro_components["X"] >= 3:
+        final_score -= 0.8
+    if metrics.miro_components["O"] >= 3:
+        final_score += 0.5
+    if metrics.range_pos >= 0.85 and metrics.close_now > metrics.ema20:
+        final_score += 0.3
+
+    final_score = round(max(0.0, final_score), 1)
+    final_bias = score_to_bias(final_score)
+    final_confidence = score_to_confidence(final_score)
+
+    chief_strategist = (
+        f"Chief Strategist: Final read is {final_bias} with {final_confidence} confidence. "
+        f"Miro contributes the structural edge, Kronos contributes timing quality, and the "
+        f"risk layer decides whether the setup should be pressed or handled cautiously."
+    )
+
+    return AILabDecision(
+        bull=bull,
+        bear=bear,
+        risk_manager=risk_manager,
+        chief_strategist=chief_strategist,
+        final_bias=final_bias,
+        final_confidence=final_confidence,
+        final_score=final_score,
     )
 
 
-def run_engines(coin: str) -> Dict[str, EngineSignal]:
-    miro = run_miro_logic(coin)
-    kronos = run_kronos_logic(coin)
-    ai_debate = run_ai_debate(coin, miro, kronos)
+def run_engines(symbol: str) -> Tuple[Dict[str, EngineSignal], CoinMetrics, AILabDecision]:
+    miro, metrics, df = run_miro_score(symbol)
+    kronos = run_kronos_logic(symbol, df, miro.score)
+
+    ai_lab_decision = run_ai_lab(symbol, miro, kronos, metrics)
+    ai_lab_signal = EngineSignal(
+        label="AI Lab",
+        bias=ai_lab_decision.final_bias,
+        confidence=ai_lab_decision.final_confidence,
+        score=ai_lab_decision.final_score,
+        summary=ai_lab_decision.chief_strategist,
+    )
+
     return {
         "miro": miro,
         "kronos": kronos,
-        "ai_debate": ai_debate,
-    }
+        "ai_lab": ai_lab_signal,
+    }, metrics, ai_lab_decision
 
 
 # =========================================================
 # RESPONSE COMPOSITION
 # =========================================================
-def compose_response(coin: str, signals: Dict[str, EngineSignal]) -> FinalResponse:
-    avg_score = sum(s.score for s in signals.values()) / len(signals)
-    bias = score_to_bias(avg_score)
-    confidence = score_to_confidence(avg_score)
+def compose_response(
+    symbol: str,
+    signals: Dict[str, EngineSignal],
+    ai_lab: AILabDecision,
+) -> FinalResponse:
+    final_score = signals["ai_lab"].score
+    bias = signals["ai_lab"].bias
+    confidence = signals["ai_lab"].confidence
 
     if bias == "strong bullish":
         action = "Strong watch"
-        risk = "Overextension risk if the move gets crowded."
+        risk = "Crowding and reversal risk if the move gets extended."
     elif bias == "bullish":
         action = "Watch closely"
-        risk = "Pullback risk if timing weakens."
+        risk = "Pullback risk if timing fades."
     elif bias == "constructive":
         action = "Early watch"
         risk = "Still not a full confirmation."
     elif bias == "neutral":
         action = "Stay selective"
-        risk = "Direction is not yet strong enough."
+        risk = "Directional edge is limited."
     else:
         action = "Avoid forcing"
-        risk = "Weak setup and false signal risk remain elevated."
+        risk = "Weak structure and penalty risk remain elevated."
 
     answer = (
-        f"{coin} currently reads as {bias} with {confidence} confidence after "
-        f"Miro logic, Kronos logic, and the final AI debate."
+        f"{symbol} currently reads as {bias} with {confidence} confidence after "
+        f"Miro Score, Kronos Logic, and AI Lab."
     )
 
     reasons = [
-        f"Miro: {signals['miro'].summary}",
-        f"Kronos: {signals['kronos'].summary}",
-        f"AI Debate: {signals['ai_debate'].summary}",
+        f"Miro Score: {signals['miro'].summary}",
+        f"Kronos Logic: {signals['kronos'].summary}",
+        f"AI Lab: {signals['ai_lab'].summary}",
     ]
 
     return FinalResponse(
-        coin=coin,
+        coin=symbol,
         answer=answer,
         bias=bias,
         confidence=confidence,
@@ -475,7 +1109,11 @@ def compose_response(coin: str, signals: Dict[str, EngineSignal]) -> FinalRespon
         reasons=reasons,
         miro_score=signals["miro"].score,
         kronos_score=signals["kronos"].score,
-        debate_score=signals["ai_debate"].score,
+        ai_lab_score=final_score,
+        bull_case=ai_lab.bull,
+        bear_case=ai_lab.bear,
+        risk_case=ai_lab.risk_manager,
+        chief_strategist=ai_lab.chief_strategist,
     )
 
 
@@ -586,9 +1224,9 @@ def generate_pdf(response: FinalResponse) -> bytes:
     y -= 8 * mm
 
     for line in [
-        f"Miro: {response.miro_score:.1f} / 10",
-        f"Kronos: {response.kronos_score:.1f} / 10",
-        f"AI Debate: {response.debate_score:.1f} / 10",
+        f"Miro Score: {response.miro_score:.1f} / 15",
+        f"Kronos Logic: {response.kronos_score:.1f} / 10",
+        f"AI Lab: {response.ai_lab_score:.1f}",
     ]:
         y = draw_wrapped_text(pdf, line, margin_x, y, content_width)
 
@@ -596,11 +1234,16 @@ def generate_pdf(response: FinalResponse) -> bytes:
 
     pdf.setFillColor(HexColor("#FF9933"))
     pdf.setFont("Helvetica-Bold", 13)
-    pdf.drawString(margin_x, y, "Why")
+    pdf.drawString(margin_x, y, "AI Lab")
     y -= 8 * mm
 
-    for reason in response.reasons:
-        y = draw_wrapped_text(pdf, f"• {reason}", margin_x, y, content_width)
+    for text in [
+        response.bull_case,
+        response.bear_case,
+        response.risk_case,
+        response.chief_strategist,
+    ]:
+        y = draw_wrapped_text(pdf, f"• {text}", margin_x, y, content_width)
         y -= 1 * mm
         if y < 25 * mm:
             pdf.showPage()
@@ -622,7 +1265,7 @@ def render_header() -> None:
     if os.path.exists(LOGO_PATH):
         st.markdown('<div class="hero-logo-wrap"><div class="hero-logo-glow">', unsafe_allow_html=True)
         st.image(LOGO_PATH, width=120)
-        st.markdown('</div></div>', unsafe_allow_html=True)
+        st.markdown("</div></div>", unsafe_allow_html=True)
 
     st.markdown(
         f"""
@@ -660,30 +1303,34 @@ def render_search() -> None:
         st.session_state.last_response = None
         st.session_state.last_signals = None
         st.session_state.last_pdf = None
+        st.session_state.last_metrics = None
+        st.session_state.last_ai_lab = None
         st.rerun()
 
     if analyze_clicked:
-        clean_coin = normalize_coin(coin)
-        if not clean_coin:
+        symbol = normalize_coin(coin)
+        if not symbol:
             st.warning("Enter a valid coin.")
             return
 
-        st.session_state.coin_input = clean_coin
-        st.session_state.last_coin = clean_coin
+        st.session_state.coin_input = symbol
+        st.session_state.last_coin = symbol
 
-        with st.spinner("Running engines..."):
-            time.sleep(0.3)
-            signals = run_engines(clean_coin)
-            response = compose_response(clean_coin, signals)
+        with st.spinner("Running live engines..."):
+            time.sleep(0.2)
+            signals, metrics, ai_lab = run_engines(symbol)
+            response = compose_response(symbol, signals, ai_lab)
             pdf_bytes = generate_pdf(response)
 
         st.session_state.last_signals = signals
         st.session_state.last_response = response
         st.session_state.last_pdf = pdf_bytes
+        st.session_state.last_metrics = metrics
+        st.session_state.last_ai_lab = ai_lab
         st.rerun()
 
 
-def render_output(response: FinalResponse, signals: Dict[str, EngineSignal]) -> None:
+def render_output(response: FinalResponse, signals: Dict[str, EngineSignal], metrics: CoinMetrics) -> None:
     st.markdown(
         f"""
         <div class="result-card">
@@ -717,9 +1364,60 @@ def render_output(response: FinalResponse, signals: Dict[str, EngineSignal]) -> 
             st.markdown(f'<div class="why-line">• {reason}</div>', unsafe_allow_html=True)
 
     with st.expander("Engine Scores"):
-        st.write(f"Miro: {signals['miro'].score:.1f} / 10 · {signals['miro'].confidence.title()}")
-        st.write(f"Kronos: {signals['kronos'].score:.1f} / 10 · {signals['kronos'].confidence.title()}")
-        st.write(f"AI Debate: {signals['ai_debate'].score:.1f} / 10 · {signals['ai_debate'].confidence.title()}")
+        st.markdown(
+            f'<div class="why-line">Miro Score: {signals["miro"].score:.1f} / 15 · {signals["miro"].confidence.title()}</div>',
+            unsafe_allow_html=True,
+        )
+        st.markdown(
+            f'<div class="why-line">Kronos Logic: {signals["kronos"].score:.1f} / 10 · {signals["kronos"].confidence.title()}</div>',
+            unsafe_allow_html=True,
+        )
+        st.markdown(
+            f'<div class="why-line">AI Lab: {signals["ai_lab"].score:.1f} · {signals["ai_lab"].confidence.title()}</div>',
+            unsafe_allow_html=True,
+        )
+
+    with st.expander("AI Lab"):
+        st.markdown(f'<div class="why-line">• {response.bull_case}</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="why-line">• {response.bear_case}</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="why-line">• {response.risk_case}</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="why-line">• {response.chief_strategist}</div>', unsafe_allow_html=True)
+
+    with st.expander("Miro Breakdown"):
+        comp = metrics.miro_components
+        st.markdown(f'<div class="why-line">V = {comp["V"]}</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="why-line">P = {comp["P"]}</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="why-line">R = {comp["R"]}</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="why-line">T = {comp["T"]}</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="why-line">O = {comp["O"]}</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="why-line">X = {comp["X"]}</div>', unsafe_allow_html=True)
+        st.markdown(
+            f'<div class="why-line">RV={metrics.rv:.2f} · ATR_move={metrics.atr_move:.2f} · '
+            f'RangePos={metrics.range_pos:.2f} · ADX14={metrics.adx14:.2f}</div>',
+            unsafe_allow_html=True,
+        )
+        st.markdown(
+            f'<div class="why-line">Avg $ Volume={metrics.avg_dollar_volume:,.0f}</div>',
+            unsafe_allow_html=True,
+        )
+        if metrics.top10_concentration is not None:
+            st.markdown(
+                f'<div class="why-line">Top-10 Concentration={metrics.top10_concentration:.2%}</div>',
+                unsafe_allow_html=True,
+            )
+        if metrics.holder_count is not None:
+            st.markdown(
+                f'<div class="why-line">Holder Count={metrics.holder_count:,}</div>',
+                unsafe_allow_html=True,
+            )
+        st.markdown(
+            f'<div class="why-line">Smart Wallet Net Flow={metrics.smart_wallet_net_flow_tokens:,.4f} tokens</div>',
+            unsafe_allow_html=True,
+        )
+        st.markdown(
+            f'<div class="why-line">Exchange Inflow={metrics.exchange_inflow_tokens:,.4f} tokens</div>',
+            unsafe_allow_html=True,
+        )
 
     if st.session_state.last_pdf:
         st.download_button(
@@ -731,17 +1429,18 @@ def render_output(response: FinalResponse, signals: Dict[str, EngineSignal]) -> 
         )
 
 
-# =========================================================
-# MAIN
-# =========================================================
 def main() -> None:
     init_state()
     inject_styles()
     render_header()
     render_search()
 
-    if st.session_state.last_response and st.session_state.last_signals:
-        render_output(st.session_state.last_response, st.session_state.last_signals)
+    if st.session_state.last_response and st.session_state.last_signals and st.session_state.last_metrics:
+        render_output(
+            st.session_state.last_response,
+            st.session_state.last_signals,
+            st.session_state.last_metrics,
+        )
 
 
 if __name__ == "__main__":
