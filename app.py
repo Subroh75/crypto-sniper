@@ -82,21 +82,24 @@ h1,h2,h3,h4 { color: #f1f5f9 !important; }
 }
 
 /* ── Input + button ── */
-.stTextInput > div > div > input {
+div[data-testid="stTextInput"] input {
   background: #0f1629 !important;
-  border: 1.5px solid #1e293b !important;
-  color: #f1f5f9 !important;
+  border: 1.5px solid #334155 !important;
+  color: #ffffff !important;
   border-radius: 12px !important;
-  font-size: 1.15rem !important;
+  font-size: 1.2rem !important;
   font-weight: 700 !important;
   text-align: center;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.06em;
   padding: 0.75rem 1rem !important;
 }
-.stTextInput > div > div > input::placeholder { color: #64748b !important; }
-.stTextInput > div > div > input:focus {
+div[data-testid="stTextInput"] input::placeholder {
+  color: #64748b !important;
+  font-weight: 500 !important;
+}
+div[data-testid="stTextInput"] input:focus {
   border-color: #7c3aed !important;
-  box-shadow: 0 0 0 3px rgba(124,58,237,0.2) !important;
+  box-shadow: 0 0 0 3px rgba(124,58,237,0.25) !important;
 }
 .stButton > button {
   width: 100%;
@@ -111,18 +114,24 @@ h1,h2,h3,h4 { color: #f1f5f9 !important; }
 .stButton > button:hover { opacity: 0.88; }
 
 /* ── Radio interval pills ── */
-.stRadio [role="radiogroup"] { gap: 8px; justify-content: center; flex-wrap: wrap; }
-.stRadio > div { justify-content: center; }
-.stRadio label {
-  background: #111827 !important; border: 1.5px solid #334155 !important;
-  border-radius: 8px !important; padding: 5px 16px !important;
-  color: #e2e8f0 !important; font-size: 0.82rem !important;
-  font-weight: 700 !important; cursor: pointer; letter-spacing: 0.05em;
+div[data-testid="stRadio"] > div { display:flex; flex-wrap:wrap; gap:8px; justify-content:center; }
+div[data-testid="stRadio"] label {
+  background: #111827 !important; border: 1.5px solid #475569 !important;
+  border-radius: 8px !important; padding: 5px 18px !important;
+  color: #e2e8f0 !important; font-size: 0.85rem !important;
+  font-weight: 700 !important; cursor: pointer; letter-spacing: 0.06em;
 }
-.stRadio label:has(input:checked) {
-  border-color: #7c3aed !important; color: #ffffff !important;
+div[data-testid="stRadio"] label p {
+  color: #e2e8f0 !important; font-weight: 700 !important;
+  font-size: 0.85rem !important; margin: 0 !important;
+}
+div[data-testid="stRadio"] label:has(input:checked) {
+  border-color: #7c3aed !important;
   background: linear-gradient(135deg, #1a0f3a, #0f1a2e) !important;
-  box-shadow: 0 0 10px rgba(124,58,237,0.3) !important;
+  box-shadow: 0 0 12px rgba(124,58,237,0.4) !important;
+}
+div[data-testid="stRadio"] label:has(input:checked) p {
+  color: #ffffff !important;
 }
 
 /* ── Section header ── */
@@ -689,10 +698,15 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# Input
+# Input — Enter key OR button both trigger analysis
 c1, c2 = st.columns([3, 1])
 with c1:
-    coin_raw = st.text_input("", placeholder="BTC  ·  ETH  ·  SOL  ·  KAVA", label_visibility="collapsed")
+    coin_raw = st.text_input(
+        "",
+        placeholder="BTC  ·  ETH  ·  SOL  ·  KAVA",
+        label_visibility="collapsed",
+        key="coin_input",
+    )
 with c2:
     go_btn = st.button("ANALYSE", use_container_width=True)
 
@@ -704,15 +718,15 @@ if not HAS_YF:
     st.error("yfinance not installed — add `yfinance` to requirements.txt")
     st.stop()
 
-if not go_btn and not coin_raw:
-    st.markdown("""
-<div style="text-align:center;padding:3rem 0;color:#1e293b;font-size:0.85rem;letter-spacing:0.08em;">
-TYPE A COIN SYMBOL ABOVE AND HIT ANALYSE
-</div>""".replace('color:#1e293b', 'color:#64748b'), unsafe_allow_html=True)
-    st.stop()
+# Trigger on Enter (coin_raw populated) OR button click
+should_run = bool(coin_raw)  # Enter key re-runs script with coin_raw set
 
-if not coin_raw:
-    st.warning("Enter a coin symbol to analyse.")
+if not should_run:
+    st.markdown("""
+<div style="text-align:center;padding:3rem 0;color:#64748b;
+            font-size:0.88rem;letter-spacing:0.1em;font-weight:600;">
+TYPE A COIN ABOVE &nbsp;&nbsp;&middot;&nbsp;&nbsp; PRESS ENTER OR CLICK ANALYSE
+</div>""", unsafe_allow_html=True)
     st.stop()
 
 base = clean_input(coin_raw)
