@@ -2,10 +2,11 @@ services:
   - type: web
     name: crypto-sniper-api
     runtime: python
-    region: singapore          # closest to AU — change to oregon or frankfurt if preferred
+    region: singapore
     plan: standard
-    buildCommand: pip install -r backend/requirements.txt
-    startCommand: cd backend && uvicorn main:app --host 0.0.0.0 --port $PORT
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /
     envVars:
       - key: ALLOWED_ORIGINS
