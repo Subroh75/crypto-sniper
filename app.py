@@ -5,7 +5,6 @@ Sections: Signal Output · Signal Components · Market Structure ·
           Timing Quality · AI Lab (4-agent debate) · PDF Download
 """
 
-import io
 import warnings
 from datetime import datetime, timezone
 from typing import Optional
@@ -912,8 +911,7 @@ sec("06 — Export", "#334155")
 
 fname = f"{base}-{interval_lbl}-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M')}"
 
-col_pdf, col_csv = st.columns(2)
-
+_, col_pdf, _ = st.columns([1, 2, 1])
 with col_pdf:
     if HAS_FPDF:
         pdf_bytes = build_pdf(base, interval_lbl, sc, debate, now_str)
@@ -926,20 +924,6 @@ with col_pdf:
         )
     else:
         st.info("Install fpdf2 for PDF export.")
-
-with col_csv:
-    buf = io.StringIO()
-    buf.write(f"Symbol,{base}/USDT\nInterval,{interval_lbl}\nGenerated,{now_str}\n")
-    buf.write(f"Score,{score}/13\nSignal,{label}\n\n")
-    buf.write(f"V,{sc['V']}/5\nP,{sc['P']}/3\nR,{sc['R']}/2\nT,{sc['T']}/3\n\n")
-    df.tail(100).to_csv(buf, index=False)
-    st.download_button(
-        label="⬇  Download Data (CSV)",
-        data=buf.getvalue().encode(),
-        file_name=f"{fname}.csv",
-        mime="text/csv",
-        use_container_width=True,
-    )
 
 st.markdown(f"""
 <div style="text-align:center;color:#475569;font-size:0.68rem;
