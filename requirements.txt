@@ -4,7 +4,19 @@ pandas>=2.0.0
 numpy>=1.24.0
 plotly>=5.18.0
 fpdf2>=2.7.0
-# Kronos-mini (optional AI forecast toggle)
-# Requires torch and the kronos-ts package. Only installed if Kronos toggle is used.
-# torch>=2.0.0   # ~500MB — not pre-installed on Streamlit Cloud free tier
-# kronos-ts      # pip install kronos-ts (installs Kronos + KronosTokenizer + KronosPredictor)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# KRONOS-MINI  (optional — off by default, toggle in the AI Lab section)
+# ─────────────────────────────────────────────────────────────────────────────
+# To run Kronos locally, uncomment the two lines below and reinstall:
+#
+#   pip install -r requirements.txt
+#
+# Notes:
+#   • torch ships as ~500 MB on PyPI — first install is slow
+#   • kronos-ts installs the Kronos, KronosTokenizer and KronosPredictor classes
+#   • Streamlit Cloud free tier has a 1 GB memory cap — leave these commented out
+#     unless you are on a paid tier or running the app locally
+#
+# torch>=2.0.0
+# kronos-ts
