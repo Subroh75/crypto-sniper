@@ -846,6 +846,51 @@ elif kronos_summary is not None:
 else:
     st.warning("Kronos forecast unavailable for this symbol.")
 
+# ── Kronos backtest accuracy (silent, cached 1h per symbol) ──────────────────
+_API_BASE = os.getenv("API_BASE", "https://crypto-sniper-api.onrender.com")
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _fetch_backtest_summary(symbol):
+    try:
+        import requests as _rq
+        _resp = _rq.post(
+            f"{_API_BASE}/backtest",
+            json={"symbol": symbol, "pred_len": 24, "lookback": 200, "step": 24},
+            timeout=420,
+        )
+        _resp.raise_for_status()
+        return _resp.json()
+    except Exception:
+        return None
+
+with st.spinner("Computing Kronos backtest accuracy…"):
+    _bt = _fetch_backtest_summary(base)
+
+if _bt and _bt.get("available") and not _bt.get("error"):
+    _da   = _bt["direction_accuracy"]
+    _wr   = _bt["win_rate"]
+    _tw   = _bt["total_windows"]
+    _sh   = _bt["sharpe"]
+    _da_c = "#10b981" if _da >= 55 else ("#f59e0b" if _da >= 48 else "#f87171")
+    _sh_c = "#10b981" if _sh >= 1  else ("#f59e0b" if _sh >= 0  else "#f87171")
+    st.markdown(
+        f'''<div style="background:#0d1b2a;border:1px solid #1e293b;border-radius:10px;
+                        padding:0.65rem 1.1rem;margin:1rem 0 0;
+                        display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;">
+  <span style="font-size:0.62rem;font-weight:700;letter-spacing:0.15em;
+               color:#64748b;text-transform:uppercase;white-space:nowrap;">Kronos Backtest</span>
+  <span style="color:#334155;font-size:0.9rem;">&nbsp;|&nbsp;</span>
+  <span style="font-size:0.78rem;color:#e2e8f0;">
+    {_tw}-window walk-forward &middot;
+    Direction accuracy <b style="color:{_da_c}">{_da:.0f}%</b>
+    &middot; Win rate <b style="color:{_da_c}">{_wr:.0f}%</b>
+    &middot; Sharpe <b style="color:{_sh_c}">{_sh:.2f}</b>
+  </span>
+</div>''',
+        unsafe_allow_html=True,
+    )
+
+
 # ─── 6. AI LAB ───────────────────────────────────────────────────────────────
 sec("06 — AI Lab", "#c084fc")
 
@@ -870,55 +915,6 @@ st.markdown(f"""
   {agent_card("agent-cio",  "👁 CIO Verdict",  "Morgan — CIO",    debate['cio'])}
 </div>
 """, unsafe_allow_html=True)
-
-# --- 7. BACKTEST (silent background) -------------------------------------------
-# Fire-and-forget: call /backtest for the current symbol and surface a one-liner.
-# No buttons, no selections — result appears automatically after analysis.
-_API_BASE = os.getenv("API_BASE", "https://crypto-sniper-api.onrender.com")
-
-@st.cache_data(ttl=3600, show_spinner=False)
-def _fetch_backtest_summary(symbol: str) -> dict | None:
-    """Cache backtest result per symbol for 1 hour so re-runs don't re-fire."""
-    try:
-        import requests as _rq
-        _resp = _rq.post(
-            f"{_API_BASE}/backtest",
-            json={"symbol": symbol, "pred_len": 24, "lookback": 200, "step": 24},
-            timeout=420,
-        )
-        _resp.raise_for_status()
-        return _resp.json()
-    except Exception:
-        return None
-
-# Run silently — Streamlit will show the spinner only on first load per symbol
-with st.spinner("Running Kronos backtest in background…"):
-    _bt = _fetch_backtest_summary(base)
-
-if _bt and _bt.get("available") and not _bt.get("error"):
-    _da   = _bt["direction_accuracy"]
-    _wr   = _bt["win_rate"]
-    _tw   = _bt["total_windows"]
-    _sh   = _bt["sharpe"]
-    _da_c = "#10b981" if _da >= 55 else ("#f59e0b" if _da >= 48 else "#f87171")
-    _sh_c = "#10b981" if _sh >= 1  else ("#f59e0b" if _sh >= 0  else "#f87171")
-    st.markdown(
-        f'''<div style="background:#0d1b2a;border:1px solid #1e293b;border-radius:10px;
-                        padding:0.65rem 1.1rem;margin:1.2rem 0 0.5rem;
-                        display:flex;align-items:center;gap:0.6rem;flex-wrap:wrap;">
-  <span style="font-size:0.65rem;font-weight:700;letter-spacing:0.15em;
-               color:#64748b;text-transform:uppercase;">Kronos Backtest</span>
-  <span style="font-size:0.75rem;color:#e2e8f0;">
-    {_tw}-period walk-forward on <b>{base}</b> &nbsp;&middot;&nbsp;
-    Direction accuracy&nbsp;<b style="color:{_da_c}">{_da:.0f}%</b>
-    &nbsp;&middot;&nbsp;
-    Win rate&nbsp;<b style="color:{_da_c}">{_wr:.0f}%</b>
-    &nbsp;&middot;&nbsp;
-    Sharpe&nbsp;<b style="color:{_sh_c}">{_sh:.2f}</b>
-  </span>
-</div>''',
-        unsafe_allow_html=True,
-    )
 
 # ─── 8. DOWNLOAD ─────────────────────────────────────────────────────────────
 sec("07 — Export", "#334155")
