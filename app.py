@@ -1167,6 +1167,123 @@ with bt_tab2:
                     st.plotly_chart(_fig4, use_container_width=True,
                                     config={"displayModeBar": False})
 
+                # ---- correlation heatmap of equity curves -------------------
+                _eq_series = {}
+                for _r in ok:
+                    if _r.get("equity_curve"):
+                        _eq_s = pd.DataFrame(_r["equity_curve"]).set_index("date")["strategy"]
+                        _eq_s.index = pd.to_datetime(_eq_s.index)
+                        _eq_series[_r["symbol"]] = _eq_s
+
+                if len(_eq_series) >= 2:
+                    st.markdown("#### Equity Curve Correlation Heatmap")
+                    st.markdown(
+                        '<div style="color:#94a3b8;font-size:0.80rem;margin-bottom:0.75rem;">'
+                        "Pearson correlation of Kronos strategy equity curves. "
+                        "High correlation (dark purple) means the two assets move together "
+                        "under Kronos signals -- less diversification benefit. "
+                        "Low / negative correlation (dark teal) means better diversification."
+                        "</div>",
+                        unsafe_allow_html=True,
+                    )
+                    # Align on common timestamps via outer join, forward-fill gaps
+                    _eq_df = pd.DataFrame(_eq_series).sort_index()
+                    _eq_df = _eq_df.ffill().dropna(how="all")
+                    _eq_df = _eq_df.dropna(axis=1, thresh=int(len(_eq_df) * 0.5))
+
+                    _corr = _eq_df.corr(method="pearson").round(2)
+                    _syms_corr = list(_corr.columns)
+                    _zvals = _corr.values.tolist()
+
+                    # Custom diverging colorscale: teal (low) -> white -> purple (high)
+                    _colorscale = [
+                        [0.0,  "#0f766e"],   # teal-700  -- strong neg corr
+                        [0.25, "#5eead4"],   # teal-300
+                        [0.5,  "#1e293b"],   # slate -- zero corr (neutral)
+                        [0.75, "#a78bfa"],   # violet-400
+                        [1.0,  "#7c3aed"],   # violet-700 -- strong pos corr
+                    ]
+
+                    _annotations = []
+                    for _ri, _row in enumerate(_zvals):
+                        for _ci, _val in enumerate(_row):
+                            _annotations.append(dict(
+                                x=_syms_corr[_ci], y=_syms_corr[_ri],
+                                text=f"{_val:.2f}",
+                                showarrow=False,
+                                font=dict(
+                                    color="#ffffff" if abs(_val) > 0.4 else "#94a3b8",
+                                    size=12,
+                                ),
+                            ))
+
+                    _fig5 = _go2.Figure(_go2.Heatmap(
+                        z=_zvals,
+                        x=_syms_corr,
+                        y=_syms_corr,
+                        colorscale=_colorscale,
+                        zmin=-1, zmax=1,
+                        colorbar=dict(
+                            title="Corr",
+                            titleside="right",
+                            tickvals=[-1, -0.5, 0, 0.5, 1],
+                            ticktext=["-1.0", "-0.5", "0.0", "+0.5", "+1.0"],
+                            tickfont=dict(color="#94a3b8", size=10),
+                            titlefont=dict(color="#94a3b8", size=11),
+                            len=0.9,
+                        ),
+                        hoverongaps=False,
+                        hovertemplate="%{y} vs %{x}: %{z:.2f}<extra></extra>",
+                    ))
+                    _fig5.update_layout(
+                        paper_bgcolor="#060912",
+                        plot_bgcolor="#060912",
+                        font_color="#e2e8f0",
+                        height=max(300, 60 * len(_syms_corr) + 80),
+                        margin=dict(l=60, r=20, t=20, b=60),
+                        annotations=_annotations,
+                        xaxis=dict(side="bottom", tickfont=dict(size=12, color="#e2e8f0")),
+                        yaxis=dict(tickfont=dict(size=12, color="#e2e8f0"), autorange="reversed"),
+                    )
+                    st.plotly_chart(_fig5, use_container_width=True,
+                                    config={"displayModeBar": False})
+
+                    # Lowest-corr pair callout
+                    _min_val, _min_pair = 1.0, ("", "")
+                    for _ai in range(len(_syms_corr)):
+                        for _bi in range(_ai + 1, len(_syms_corr)):
+                            _v = _corr.iloc[_ai, _bi]
+                            if _v < _min_val:
+                                _min_val, _min_pair = _v, (_syms_corr[_ai], _syms_corr[_bi])
+
+                    _max_val, _max_pair = -1.0, ("", "")
+                    for _ai in range(len(_syms_corr)):
+                        for _bi in range(_ai + 1, len(_syms_corr)):
+                            _v = _corr.iloc[_ai, _bi]
+                            if _v > _max_val:
+                                _max_val, _max_pair = _v, (_syms_corr[_ai], _syms_corr[_bi])
+
+                    _div_col  = "#10b981" if _min_val < 0.4 else ("#f59e0b" if _min_val < 0.7 else "#f87171")
+                    _conc_col = "#f87171" if _max_val > 0.7 else ("#f59e0b" if _max_val > 0.4 else "#10b981")
+
+                    st.markdown(
+                        f'<div style="display:flex;gap:1rem;margin-top:0.75rem">'
+                        f'<div class="tq-card" style="flex:1">'
+                        f'<div class="tq-lbl">Best diversifier pair</div>'
+                        f'<div class="tq-val" style="color:{_div_col};font-size:1.1rem">'
+                        f'{_min_pair[0]} + {_min_pair[1]}</div>'
+                        f'<div class="tq-sub">corr = {_min_val:.2f} -- lowest co-movement</div>'
+                        f'</div>'
+                        f'<div class="tq-card" style="flex:1">'
+                        f'<div class="tq-lbl">Most concentrated pair</div>'
+                        f'<div class="tq-val" style="color:{_conc_col};font-size:1.1rem">'
+                        f'{_max_pair[0]} + {_max_pair[1]}</div>'
+                        f'<div class="tq-sub">corr = {_max_val:.2f} -- highest co-movement</div>'
+                        f'</div>'
+                        f'</div>',
+                        unsafe_allow_html=True,
+                    )
+
             if fail:
                 with st.expander(f"{len(fail)} asset(s) failed"):
                     for _f in fail:
