@@ -33,6 +33,13 @@ try:
 except ImportError:
     HAS_FPDF = False
 
+try:
+    from model import Kronos, KronosTokenizer, KronosPredictor  # type: ignore
+    HAS_KRONOS = True
+except ImportError:
+    HAS_KRONOS = False
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 st.set_page_config(
     page_title="Crypto Sniper",
@@ -415,11 +422,117 @@ def clean_input(raw: str) -> str:
     return s
 
 
+
+# ══════════════════════════════════════════════════════════════════════════════
+# KRONOS
+# ══════════════════════════════════════════════════════════════════════════════
+
+@st.cache_resource(show_spinner=False)
+def load_kronos_model():
+    """Load Kronos-mini once and cache for the session lifetime."""
+    if not HAS_KRONOS:
+        return None
+    try:
+        tokenizer = KronosTokenizer.from_pretrained("NeoQuasar/Kronos-Tokenizer-base")
+        model     = Kronos.from_pretrained("NeoQuasar/Kronos-mini")
+        return KronosPredictor(model, tokenizer, max_context=512)
+    except Exception:
+        return None
+
+
+def run_kronos_forecast(df, pred_len=24, lookback=256):
+    """Run Kronos-mini forecast. Returns predicted OHLCV DataFrame or None."""
+    predictor = load_kronos_model()
+    if predictor is None:
+        return None
+    try:
+        df       = df.sort_values("timestamp").reset_index(drop=True)
+        lookback = min(lookback, len(df), 512)
+        ctx      = df.tail(lookback).reset_index(drop=True)
+        x_ts     = ctx["timestamp"]
+        delta    = ctx["timestamp"].iloc[-1] - ctx["timestamp"].iloc[-2]
+        y_ts     = pd.Series(pd.date_range(
+            start=ctx["timestamp"].iloc[-1] + delta,
+            periods=pred_len, freq=delta,
+        ))
+        cols = [c for c in ["open","high","low","close","volume"] if c in ctx.columns]
+        pred = predictor.predict(
+            df=ctx[cols], x_timestamp=x_ts, y_timestamp=y_ts,
+            pred_len=pred_len, T=1.0, top_p=0.9, sample_count=1,
+        )
+        return pred
+    except Exception:
+        return None
+
+
+def summarise_kronos(pred, current_close):
+    """Extract key stats from a Kronos forecast DataFrame."""
+    if pred is None or pred.empty:
+        return {}
+    closes    = pred["close"].values
+    final     = float(closes[-1])
+    peak      = float(pred["high"].max())
+    trough    = float(pred["low"].min())
+    pct       = (final - current_close) / current_close * 100
+    bull_pct  = float((pred["close"] > pred["open"]).mean() * 100)
+    direction = "UP" if final > current_close else "DOWN"
+    return {
+        "final_close": round(final, 6),
+        "pct_change":  round(pct, 2),
+        "peak":        round(peak, 6),
+        "trough":      round(trough, 6),
+        "bull_pct":    round(bull_pct, 1),
+        "direction":   direction,
+        "candles":     len(pred),
+    }
+
+
+def make_kronos_chart(pred_df, current_close, symbol):
+    """Build a Plotly forecast chart from Kronos predictions."""
+    if pred_df is None or not HAS_PLOTLY:
+        return None
+    color = "#10b981" if float(pred_df["close"].iloc[-1]) > current_close else "#f87171"
+    fill_rgba = "rgba(16,185,129,0.06)" if color == "#10b981" else "rgba(248,113,113,0.06)"
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=list(range(len(pred_df))), y=pred_df["close"].tolist(),
+        mode="lines", name="Predicted Close",
+        line=dict(color=color, width=2.5),
+        fill="tozeroy", fillcolor=fill_rgba,
+    ))
+    if "high" in pred_df.columns and "low" in pred_df.columns:
+        xs = list(range(len(pred_df))) + list(range(len(pred_df)-1, -1, -1))
+        ys = pred_df["high"].tolist() + pred_df["low"].tolist()[::-1]
+        fig.add_trace(go.Scatter(
+            x=xs, y=ys,
+            fill="toself",
+            fillcolor="rgba(124,58,237,0.08)",
+            line=dict(color="rgba(124,58,237,0.3)", width=1),
+            name="High/Low Band",
+        ))
+    fig.add_hline(
+        y=current_close, line_dash="dot",
+        line_color="#475569", annotation_text="Current",
+        annotation_font_color="#94a3b8",
+    )
+    fig.update_layout(
+        paper_bgcolor="#060912", plot_bgcolor="#060912",
+        font=dict(color="#94a3b8", family="Inter, sans-serif", size=11),
+        xaxis=dict(showgrid=False, tickfont=dict(color="#475569"), title=dict(text="Future Candles", font=dict(color="#64748b", size=10))),
+        yaxis=dict(showgrid=True, gridcolor="#0f172a", tickfont=dict(color="#475569")),
+        margin=dict(l=10, r=10, t=40, b=30), height=220,
+        legend=dict(orientation="h", y=1.08, x=1, xanchor="right", font=dict(size=10, color="#94a3b8")),
+        hovermode="x unified",
+        title=dict(text=f"Kronos-mini \u2014 Predicted Close ({len(pred_df)} candles forward)",
+                   font=dict(color="#94a3b8", size=11), x=0.5),
+    )
+    return fig
+
 # ══════════════════════════════════════════════════════════════════════════════
 # AI AGENT DEBATE
 # ══════════════════════════════════════════════════════════════════════════════
 
-def generate_agent_debate(symbol: str, sc: dict, interval: str) -> dict:
+def generate_agent_debate(symbol: str, sc: dict, interval: str, kronos_summary: dict = None) -> dict:
     score   = sc["score"]
     rsi     = sc["rsi14"]
     adx     = sc["adx14"]
@@ -428,9 +541,15 @@ def generate_agent_debate(symbol: str, sc: dict, interval: str) -> dict:
     trend_up = sc["ema20"] > sc["ema50"]
     above_200 = sc["close"] > sc["ema200"]
     bb_pos  = (sc["close"] - sc["bb_lower"]) / (sc["bb_upper"] - sc["bb_lower"]) if (sc["bb_upper"] - sc["bb_lower"]) > 0 else 0.5
+    has_kronos = bool(kronos_summary)
 
     # ── Bull ──────────────────────────────────────────────────────────────────
     bull_points = []
+    if has_kronos and kronos_summary.get("direction") == "UP":
+        bull_points.append(
+            f"Kronos-mini forecasts +{kronos_summary['pct_change']:.1f}% over next "
+            f"{kronos_summary['candles']} candles — model aligns with the bull case"
+        )
     if trend_up:
         bull_points.append("EMA20 > EMA50 confirms bullish structure")
     if above_200:
@@ -449,6 +568,16 @@ def generate_agent_debate(symbol: str, sc: dict, interval: str) -> dict:
 
     # ── Bear ──────────────────────────────────────────────────────────────────
     bear_points = []
+    if has_kronos and kronos_summary.get("direction") == "DOWN":
+        bear_points.append(
+            f"Kronos-mini model predicts {kronos_summary['pct_change']:.1f}% move "
+            f"lower — AI forecast supports the bear thesis"
+        )
+    elif has_kronos and kronos_summary.get("direction") == "UP":
+        bear_points.append(
+            f"Kronos shows upside to {kronos_summary['final_close']:.6g} "
+            f"but bull% only {kronos_summary['bull_pct']:.0f}% — fragile conviction"
+        )
     if rsi >= 70:
         bear_points.append(f"RSI {rsi:.0f} is overbought — fade the rally")
     if not trend_up:
@@ -474,25 +603,36 @@ def generate_agent_debate(symbol: str, sc: dict, interval: str) -> dict:
         f"Suggested stop: {sc['close'] - 1.5 * sc['atr14']:.6g} (1.5× ATR below close)",
         f"ADX {adx:.0f} — {'trending market, trend-following rules apply' if adx >= 20 else 'ranging market, reduce size and widen stops'}",
     ]
+    if has_kronos:
+        risk_points.append(
+            f"Kronos model peak: {kronos_summary['peak']:.6g}, trough: {kronos_summary['trough']:.6g} "
+            f"— use trough as hard floor for stop placement"
+        )
     if rv >= 4:
         risk_points.append(f"Volume {rv:.1f}× above average — watch for exhaustion spike")
     risk_text = ". ".join(risk_points[:3]) + "."
     risk_verdict = "HOLD" if score < 5 else ("BUY" if score >= 8 else "HOLD")
 
     # ── CIO ───────────────────────────────────────────────────────────────────
+    kronos_lead = ""
+    if has_kronos:
+        kronos_lead = (
+            f"Kronos-mini AI forecasts {kronos_summary['direction']} "
+            f"({kronos_summary['pct_change']:+.1f}%) over {kronos_summary['candles']} candles. "
+        )
     if score >= 9:
-        cio_text = (f"Score {score}/13 with {rv:.1f}× volume, ADX {adx:.0f}, and "
+        cio_text = (kronos_lead + f"Score {score}/13 with {rv:.1f}× volume, ADX {adx:.0f}, and "
                     f"bullish EMA stack. This is a textbook high-conviction setup. "
                     f"Allocate with defined risk. {'Macro trend is supportive.' if above_200 else 'Be mindful this is counter-trend.'}")
         cio_verdict = "BUY"
     elif score >= 5:
-        cio_text = (f"Mixed signals at score {score}/13. "
+        cio_text = (kronos_lead + f"Mixed signals at score {score}/13. "
                     f"{'Trend is constructive but' if trend_up else 'Trend is bearish and'} "
                     f"volume {'confirms' if rv >= 2 else 'does not confirm'} the move. "
                     f"Reduce size and wait for cleaner confirmation before committing capital.")
         cio_verdict = "WATCHLIST"
     else:
-        cio_text = (f"Score {score}/13 — setup does not meet minimum thresholds. "
+        cio_text = (kronos_lead + f"Score {score}/13 — setup does not meet minimum thresholds. "
                     f"RSI {rsi:.0f}, ADX {adx:.0f}, volume {rv:.1f}× average. "
                     f"No edge present. Preserve capital and wait for a proper signal.")
         cio_verdict = "HOLD"
@@ -533,7 +673,7 @@ def _p(text: str) -> str:
     # Strip any remaining non-Latin-1 characters
     return text.encode("latin-1", errors="ignore").decode("latin-1")
 
-def build_pdf(symbol: str, interval: str, sc: dict, debate: dict, now: str) -> bytes:
+def build_pdf(symbol: str, interval: str, sc: dict, debate: dict, now: str, kronos_summary: dict = None) -> bytes:
     if not HAS_FPDF:
         return b""
 
@@ -613,6 +753,19 @@ def build_pdf(symbol: str, interval: str, sc: dict, debate: dict, now: str) -> b
         pdf.set_text_color(15, 23, 42)
         pdf.cell(0, 6, _p(f"{lbl} - Verdict: {debate[agent]['verdict']}"), ln=True)
         body(debate[agent]["text"])
+
+    # Kronos forecast section (if available)
+    if kronos_summary:
+        section("KRONOS-MINI AI FORECAST")
+        direction_label = "UP" if kronos_summary.get("direction") == "UP" else "DOWN"
+        row("Direction",        direction_label)
+        row("Predicted Change",  f"{kronos_summary.get('pct_change', 0):+.2f}%")
+        row("Predicted Close",   f"{kronos_summary.get('final_close', 0):.6g}")
+        row("Forecast Peak",     f"{kronos_summary.get('peak', 0):.6g}")
+        row("Forecast Trough",   f"{kronos_summary.get('trough', 0):.6g}")
+        row("Bull Candle %",     f"{kronos_summary.get('bull_pct', 0):.1f}%")
+        row("Candles Forecast",  str(kronos_summary.get('candles', 0)))
+        pdf.ln(2)
 
     pdf.ln(2)
     pdf.set_font("Helvetica", "I", 7)
@@ -752,7 +905,58 @@ if sc is None:
     st.error("Scoring failed.")
     st.stop()
 
-debate  = generate_agent_debate(base, sc, interval)
+# Kronos toggle (off by default, placed just above AI Lab)
+kronos_summary = None
+use_kronos = st.toggle(
+    "🔮  Kronos AI Forecast",
+    value=False,
+    help="Loads Kronos-mini model (~60-90s on first run). Feeds predicted OHLCV into the AI debate.",
+)
+if use_kronos:
+    if not HAS_KRONOS:
+        st.warning(
+            "⚠️  Kronos is not installed in this environment. "
+            "Add `kronos-ts` (or the Kronos package) to your requirements and redeploy.",
+            icon="🚫",
+        )
+        kronos_summary = None
+    else:
+        st.info(
+            "⏳  Loading Kronos-mini... first run can take 60-90 seconds while the model downloads (~300MB). "
+            "Results are cached for your session.",
+            icon="📡",
+        )
+        with st.spinner("Running Kronos-mini forecast..."):
+            pred_df = run_kronos_forecast(df, pred_len=24)
+        if pred_df is not None and not pred_df.empty:
+            kronos_summary = summarise_kronos(pred_df, sc["close"])
+            # Show forecast chart
+            kfig = make_kronos_chart(pred_df, sc["close"], base)
+            if kfig:
+                st.plotly_chart(kfig, use_container_width=True, config={"displayModeBar": False})
+            # Summary metrics
+            kdir_color = "#10b981" if kronos_summary["direction"] == "UP" else "#f87171"
+            st.markdown(f"""
+<div class="tq-grid" style="margin-top:0.5rem">
+  <div class="tq-card">
+    <div class="tq-lbl">Direction</div>
+    <div class="tq-val" style="color:{kdir_color}">{kronos_summary["direction"]}</div>
+  </div>
+  <div class="tq-card">
+    <div class="tq-lbl">Predicted Change</div>
+    <div class="tq-val" style="color:{kdir_color}">{kronos_summary["pct_change"]:+.2f}%</div>
+  </div>
+  <div class="tq-card">
+    <div class="tq-lbl">Peak / Trough</div>
+    <div class="tq-val" style="font-size:0.85rem">{kronos_summary["peak"]:.5g} / {kronos_summary["trough"]:.5g}</div>
+  </div>
+</div>
+""", unsafe_allow_html=True)
+        else:
+            st.error("Kronos forecast failed. Check model availability.")
+            kronos_summary = None
+
+debate  = generate_agent_debate(base, sc, interval, kronos_summary=kronos_summary)
 score   = sc["score"]
 now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
@@ -914,7 +1118,7 @@ fname = f"{base}-{interval_lbl}-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%
 _, col_pdf, _ = st.columns([1, 2, 1])
 with col_pdf:
     if HAS_FPDF:
-        pdf_bytes = build_pdf(base, interval_lbl, sc, debate, now_str)
+        pdf_bytes = build_pdf(base, interval_lbl, sc, debate, now_str, kronos_summary=kronos_summary)
         st.download_button(
             label="⬇  Download Report (PDF)",
             data=pdf_bytes,
