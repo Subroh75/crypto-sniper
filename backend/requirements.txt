@@ -1,5 +1,3 @@
---extra-index-url https://download.pytorch.org/whl/cpu
-
 fastapi==0.115.5
 uvicorn==0.32.1
 pydantic==2.11.3
@@ -8,7 +6,8 @@ pandas>=2.0.0
 numpy>=1.24.0
 
 # ── Kronos AI Forecast ──────────────────────────────────────────────────────
-# CPU-only torch (~200MB) — avoids the 2GB GPU wheel
-# PyTorch CPU wheel index is embedded above (self-contained, no buildCommand dependency)
-torch==2.2.2+cpu
+# Plain torch from PyPI (no +cpu suffix) — Render is Linux CPU-only so pip
+# resolves the cpu wheel automatically. The +cpu local-version label only
+# exists on the PyTorch wheel index and breaks standard pip installs.
+torch==2.2.2
 kronos-ts>=0.1.0
