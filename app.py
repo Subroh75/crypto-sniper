@@ -637,10 +637,6 @@ with st.form(key="sniper_form", enter_to_submit=True, border=False):
     with c2:
         go_btn = st.form_submit_button("ANALYSE", use_container_width=True)
 
-if not HAS_YF:
-    st.error("yfinance not installed — add `yfinance` to requirements.txt")
-    st.stop()
-
 # Run if form was submitted (Enter or button) AND a coin was typed
 should_run = go_btn and bool(coin_raw)
 
