@@ -871,7 +871,155 @@ st.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
-# ─── 6. DOWNLOAD ─────────────────────────────────────────────────────────────
+# ─── 7. BACKTEST ────────────────────────────────────────────────────────────
+sec("08 — Backtest", "#0f4c81")
+
+st.markdown("""
+<div style="color:#94a3b8;font-size:0.82rem;margin-bottom:1rem;">
+  Walk-forward Kronos accuracy test over 6 months of hourly data.
+  At each 24h window Kronos predicts UP or DOWN — results are compared to
+  what actually happened. Runs ~90 windows; may take 2–5 min.
+</div>""", unsafe_allow_html=True)
+
+bt_col1, bt_col2, bt_col3 = st.columns([2, 1, 1])
+with bt_col1:
+    bt_symbol = st.text_input("Symbol for backtest", value=base,
+                               key="bt_sym", label_visibility="collapsed")
+with bt_col2:
+    bt_pred = st.selectbox("Forecast candles", [12, 24, 48], index=1, key="bt_pred")
+with bt_col3:
+    run_bt = st.button("▶  Run Backtest", use_container_width=True, key="run_bt")
+
+if run_bt:
+    import requests as _req
+    API_BASE = os.getenv("API_BASE", "https://crypto-sniper-api.onrender.com")
+    with st.spinner(f"Running walk-forward backtest on {bt_symbol.upper()} — this takes 2–5 min…"):
+        try:
+            resp = _req.post(
+                f"{API_BASE}/backtest",
+                json={"symbol": bt_symbol.strip().upper(),
+                      "pred_len": bt_pred, "lookback": 200, "step": 24},
+                timeout=360,
+            )
+            resp.raise_for_status()
+            bt = resp.json()
+        except Exception as e:
+            bt = None
+            st.error(f"Backtest request failed: {e}")
+
+    if bt and bt.get("available"):
+        if bt.get("error"):
+            st.error(bt["error"])
+        else:
+            # ── headline metrics ──────────────────────────────────────────────
+            da  = bt["direction_accuracy"]
+            wr  = bt["win_rate"]
+            sh  = bt["sharpe"]
+            sr  = bt["strategy_return"]
+            bhr = bt["bh_return"]
+            mdd = bt["max_drawdown"]
+            tw  = bt["total_windows"]
+
+            da_col  = "#10b981" if da >= 55 else ("#f59e0b" if da >= 48 else "#f87171")
+            sh_col  = "#10b981" if sh >= 1   else ("#f59e0b" if sh >= 0  else "#f87171")
+            sr_col  = "#10b981" if sr >= 0   else "#f87171"
+            bh_col  = "#10b981" if bhr >= 0  else "#f87171"
+
+            st.markdown(f"""
+<div class="tq-grid" style="grid-template-columns:repeat(3,1fr);margin-bottom:1rem">
+  <div class="tq-card">
+    <div class="tq-lbl">Direction Accuracy</div>
+    <div class="tq-val" style="color:{da_col}">{da:.1f}%</div>
+    <div class="tq-sub" style="color:#64748b">{tw} windows · 24h step</div>
+  </div>
+  <div class="tq-card">
+    <div class="tq-lbl">Win Rate</div>
+    <div class="tq-val" style="color:{da_col}">{wr:.1f}%</div>
+    <div class="tq-sub" style="color:#64748b">profitable trade windows</div>
+  </div>
+  <div class="tq-card">
+    <div class="tq-lbl">Sharpe Ratio</div>
+    <div class="tq-val" style="color:{sh_col}">{sh:.2f}</div>
+    <div class="tq-sub" style="color:#64748b">annualised vs 5% risk-free</div>
+  </div>
+  <div class="tq-card">
+    <div class="tq-lbl">Strategy Return</div>
+    <div class="tq-val" style="color:{sr_col}">{sr:+.1f}%</div>
+    <div class="tq-sub" style="color:#64748b">Kronos long/short</div>
+  </div>
+  <div class="tq-card">
+    <div class="tq-lbl">Buy & Hold</div>
+    <div class="tq-val" style="color:{bh_col}">{bhr:+.1f}%</div>
+    <div class="tq-sub" style="color:#64748b">same period</div>
+  </div>
+  <div class="tq-card">
+    <div class="tq-lbl">Max Drawdown</div>
+    <div class="tq-val" style="color:#f87171">{mdd:.1f}%</div>
+    <div class="tq-sub" style="color:#64748b">peak-to-trough</div>
+  </div>
+</div>""", unsafe_allow_html=True)
+
+            # ── equity curve chart ────────────────────────────────────────────
+            if bt.get("equity_curve"):
+                import plotly.graph_objects as _go
+                eq_df = pd.DataFrame(bt["equity_curve"])
+                eq_df["date"] = pd.to_datetime(eq_df["date"])
+                fig_bt = _go.Figure()
+                fig_bt.add_trace(_go.Scatter(
+                    x=eq_df["date"], y=eq_df["strategy"],
+                    name="Kronos Strategy", line=dict(color="#7c3aed", width=2)
+                ))
+                fig_bt.add_trace(_go.Scatter(
+                    x=eq_df["date"], y=eq_df["buy_hold"],
+                    name="Buy & Hold", line=dict(color="#38bdf8", width=2, dash="dot")
+                ))
+                fig_bt.add_hline(y=1.0, line_dash="dash",
+                                 line_color="#475569", line_width=1)
+                fig_bt.update_layout(
+                    paper_bgcolor="#060912", plot_bgcolor="#060912",
+                    font_color="#e2e8f0", height=300,
+                    margin=dict(l=0, r=0, t=24, b=0),
+                    legend=dict(bgcolor="rgba(0,0,0,0)"),
+                    xaxis=dict(gridcolor="#1e293b", showgrid=True),
+                    yaxis=dict(gridcolor="#1e293b", showgrid=True,
+                               title="Equity (normalised to 1.0)"),
+                    title=dict(text=f"Kronos vs Buy-and-Hold — {bt_symbol.upper()} 6m hourly",
+                               font=dict(size=13, color="#94a3b8")),
+                )
+                st.plotly_chart(fig_bt, use_container_width=True,
+                                config={"displayModeBar": False})
+
+            # ── avg return table ──────────────────────────────────────────────
+            st.markdown(f"""
+<div style="display:flex;gap:1rem;margin-top:0.5rem">
+  <div class="tq-card" style="flex:1">
+    <div class="tq-lbl">Avg return · Kronos UP</div>
+    <div class="tq-val" style="color:#10b981">{bt['avg_return_up']:+.2f}%</div>
+    <div class="tq-sub">{bt['windows_up']} windows</div>
+  </div>
+  <div class="tq-card" style="flex:1">
+    <div class="tq-lbl">Avg return · Kronos DOWN</div>
+    <div class="tq-val" style="color:#f87171">{bt['avg_return_down']:+.2f}%</div>
+    <div class="tq-sub">{bt['windows_down']} windows</div>
+  </div>
+</div>""", unsafe_allow_html=True)
+
+            # ── trade log ────────────────────────────────────────────────────
+            if bt.get("trades"):
+                with st.expander("Trade log (last 50 windows)"):
+                    trade_df = pd.DataFrame(bt["trades"])
+                    trade_df["correct"] = trade_df["correct"].map(
+                        {True: "✓", False: "✗"})
+                    st.dataframe(
+                        trade_df[["date", "direction", "pred_pct",
+                                  "actual_pct", "correct"]],
+                        use_container_width=True, hide_index=True,
+                    )
+    elif bt and not bt.get("available"):
+        st.warning("Kronos is not yet available on the backend. "
+                   "Wait for the Render deploy to complete, then try again.")
+
+# ─── 8. DOWNLOAD ─────────────────────────────────────────────────────────────
 sec("07 — Export", "#334155")
 
 fname = f"{base}-{interval_lbl}-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M')}"

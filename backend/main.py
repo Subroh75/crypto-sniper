@@ -98,6 +98,32 @@ class KronosResponse(BaseModel):
     available:   bool
 
 
+class BacktestRequest(BaseModel):
+    symbol:   str = Field("BTC", example="BTC")
+    pred_len: int = Field(24, ge=4, le=96, description="Candles Kronos forecasts per window")
+    lookback: int = Field(200, ge=50, le=500, description="Context candles fed to Kronos")
+    step:     int = Field(24, ge=4, le=96, description="Candles between walk-forward steps")
+
+
+class BacktestResponse(BaseModel):
+    symbol:             str
+    total_windows:      int
+    windows_up:         int
+    windows_down:       int
+    direction_accuracy: float   # %
+    win_rate:           float   # %
+    strategy_return:    float   # %
+    bh_return:          float   # %
+    avg_return_up:      float   # % per window when Kronos said UP
+    avg_return_down:    float   # % per window when Kronos said DOWN
+    sharpe:             float
+    max_drawdown:       float   # %
+    equity_curve:       list[dict]
+    trades:             list[dict]
+    available:          bool
+    error:              Optional[str] = None
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # KRONOS MODEL (loaded once per worker, reused across requests)
 # ──────────────────────────────────────────────────────────────────────────────
@@ -324,3 +350,83 @@ def kronos_get(
 ):
     """GET convenience wrapper for Kronos forecast."""
     return kronos_forecast(KronosRequest(symbol=symbol, interval=interval, pred_len=pred_len))
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# BACKTEST
+# ──────────────────────────────────────────────────────────────────────────────
+
+@app.post("/backtest", response_model=BacktestResponse, tags=["Backtest"])
+def backtest(req: BacktestRequest):
+    """
+    Walk-forward Kronos backtest over 6 months of hourly data.
+
+    At each step the model is given `lookback` candles of context and asked
+    to forecast the next `pred_len` candles.  The predicted direction (UP/DOWN)
+    is compared to what actually happened.
+
+    Warning: this is a slow endpoint — each window calls Kronos inference.
+    Expect 2–5 minutes for BTC at default settings (~90 windows).
+    Run it as a background / async job in production.
+    """
+    from backtest import run_backtest   # lazy import avoids load cost on startup
+
+    base      = clean_symbol(req.symbol)
+    predictor = _get_kronos_predictor()
+
+    if predictor is None:
+        return BacktestResponse(
+            symbol=base, total_windows=0, windows_up=0, windows_down=0,
+            direction_accuracy=0, win_rate=0, strategy_return=0, bh_return=0,
+            avg_return_up=0, avg_return_down=0, sharpe=0, max_drawdown=0,
+            equity_curve=[], trades=[], available=False,
+            error="Kronos predictor not available — check /kronos first.",
+        )
+
+    result = run_backtest(
+        symbol    = base,
+        pred_len  = req.pred_len,
+        lookback  = req.lookback,
+        step      = req.step,
+        predictor = predictor,
+    )
+
+    if "error" in result:
+        return BacktestResponse(
+            symbol=base, total_windows=0, windows_up=0, windows_down=0,
+            direction_accuracy=0, win_rate=0, strategy_return=0, bh_return=0,
+            avg_return_up=0, avg_return_down=0, sharpe=0, max_drawdown=0,
+            equity_curve=[], trades=[], available=True,
+            error=result["error"],
+        )
+
+    return BacktestResponse(
+        symbol             = result["symbol"],
+        total_windows      = result["total_windows"],
+        windows_up         = result["windows_up"],
+        windows_down       = result["windows_down"],
+        direction_accuracy = result["direction_accuracy"],
+        win_rate           = result["win_rate"],
+        strategy_return    = result["strategy_return"],
+        bh_return          = result["bh_return"],
+        avg_return_up      = result["avg_return_up"],
+        avg_return_down    = result["avg_return_down"],
+        sharpe             = result["sharpe"],
+        max_drawdown       = result["max_drawdown"],
+        equity_curve       = result["equity_curve"],
+        trades             = result["trades"],
+        available          = True,
+        error              = None,
+    )
+
+
+@app.get("/backtest/{symbol}", response_model=BacktestResponse, tags=["Backtest"])
+def backtest_get(
+    symbol:   str,
+    pred_len: int = Query(24, ge=4, le=96),
+    lookback: int = Query(200, ge=50, le=500),
+    step:     int = Query(24, ge=4, le=96),
+):
+    """GET convenience wrapper for backtest (useful for testing)."""
+    return backtest(BacktestRequest(symbol=symbol, pred_len=pred_len,
+                                   lookback=lookback, step=step))
