@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: crypto-sniper-api
+    runtime: python
+    region: singapore          # closest to AU — change to oregon or frankfurt if preferred
+    plan: starter              # upgrade to standard for Kronos (needs ~1.5 GB RAM)
+    buildCommand: pip install -r backend/requirements.txt
+    startCommand: uvicorn backend.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /
+    envVars:
+      - key: ALLOWED_ORIGINS
+        value: https://crypto.guru,http://localhost:5173
+      - key: PYTHON_VERSION
+        value: "3.11.9"
+    autoDeploy: true
