@@ -33,11 +33,19 @@ try:
 except ImportError:
     HAS_FPDF = False
 
+# KRONOS_ENABLED is read from Streamlit secrets so Streamlit Cloud can opt-in
+# without touching requirements.txt.  Local users who have installed torch +
+# kronos-ts can also set KRONOS_ENABLED = true in .streamlit/secrets.toml.
+# If the secret is absent the flag defaults to False and Kronos is never loaded.
+KRONOS_ENABLED: bool = st.secrets.get("KRONOS_ENABLED", False)
+
 try:
-    from model import Kronos, KronosTokenizer, KronosPredictor  # type: ignore
-    HAS_KRONOS = True
+    if KRONOS_ENABLED:
+        from model import Kronos, KronosTokenizer, KronosPredictor  # type: ignore
+    HAS_KRONOS = KRONOS_ENABLED
 except ImportError:
     HAS_KRONOS = False
+    KRONOS_ENABLED = False
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -905,18 +913,29 @@ if sc is None:
     st.error("Scoring failed.")
     st.stop()
 
-# Kronos toggle (off by default, placed just above AI Lab)
+# Kronos toggle — only shown when KRONOS_ENABLED secret is True
 kronos_summary = None
-use_kronos = st.toggle(
-    "🔮  Kronos AI Forecast",
-    value=False,
-    help="Loads Kronos-mini model (~60-90s on first run). Feeds predicted OHLCV into the AI debate.",
-)
+if not KRONOS_ENABLED:
+    # Secret not set (or False): show a muted hint so users know how to unlock it
+    st.markdown(
+        '<div style="text-align:center;color:#334155;font-size:0.72rem;'
+        'letter-spacing:0.08em;margin:0.5rem 0 1.5rem;font-weight:600;">'
+        'KRONOS AI FORECAST &nbsp;·&nbsp; set <code>KRONOS_ENABLED = true</code> '
+        'in Streamlit secrets to enable</div>',
+        unsafe_allow_html=True,
+    )
+    use_kronos = False
+else:
+    use_kronos = st.toggle(
+        "🔮  Kronos AI Forecast",
+        value=False,
+        help="Loads Kronos-mini model (~60-90s on first run). Feeds predicted OHLCV into the AI debate.",
+    )
 if use_kronos:
     if not HAS_KRONOS:
         st.warning(
-            "⚠️  Kronos is not installed in this environment. "
-            "Add `kronos-ts` (or the Kronos package) to your requirements and redeploy.",
+            "⚠️  Kronos is enabled but the package is not installed. "
+            "Uncomment `torch` and `kronos-ts` in requirements.txt and redeploy.",
             icon="🚫",
         )
         kronos_summary = None
