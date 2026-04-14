@@ -4,3 +4,9 @@ pydantic==2.11.3
 yfinance>=0.2.40
 pandas>=2.0.0
 numpy>=1.24.0
+
+# ── Kronos AI Forecast ──────────────────────────────────────────────────────
+# CPU-only torch (~200MB) — avoids the 2GB GPU wheel
+# PyTorch CPU index is set in render.yaml buildCommand via --extra-index-url
+torch==2.2.2+cpu
+kronos-ts>=0.1.0
