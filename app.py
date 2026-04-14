@@ -872,7 +872,7 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 # --- 7. BACKTEST ---------------------------------------------------------------
-sec("08 -- Backtest", "#0f4c81")
+sec("08 — Backtest", "#0f4c81")
 
 _TOP_ASSETS = ["BTC", "ETH", "SOL", "BNB", "XRP", "DOGE", "ADA", "AVAX", "LINK", "DOT"]
 _API_BASE   = os.getenv("API_BASE", "https://crypto-sniper-api.onrender.com")
@@ -889,13 +889,13 @@ with bt_tab1:
         unsafe_allow_html=True,
     )
 
-    bt_c1, bt_c2, bt_c3 = st.columns([2, 1, 1])
-    with bt_c1:
-        bt_sym = st.text_input("Symbol", value=base, key="bt_sym",
-                               label_visibility="collapsed")
-    with bt_c2:
+    bt_row1a, bt_row1b, bt_row1c = st.columns([3, 1, 1])
+    with bt_row1a:
+        bt_sym = st.text_input("Symbol to backtest", value=base, key="bt_sym")
+    with bt_row1b:
         bt_pred = st.selectbox("Forecast candles", [12, 24, 48], index=1, key="bt_pred")
-    with bt_c3:
+    with bt_row1c:
+        st.markdown("<div style='margin-top:1.75rem'></div>", unsafe_allow_html=True)
         run_bt = st.button("Run Backtest", use_container_width=True, key="run_bt")
 
     if run_bt:
