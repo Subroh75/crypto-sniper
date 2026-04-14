@@ -33,19 +33,11 @@ try:
 except ImportError:
     HAS_FPDF = False
 
-# KRONOS_ENABLED is read from Streamlit secrets so Streamlit Cloud can opt-in
-# without touching requirements.txt.  Local users who have installed torch +
-# kronos-ts can also set KRONOS_ENABLED = true in .streamlit/secrets.toml.
-# If the secret is absent the flag defaults to False and Kronos is never loaded.
-KRONOS_ENABLED: bool = st.secrets.get("KRONOS_ENABLED", False)
-
 try:
-    if KRONOS_ENABLED:
-        from model import Kronos, KronosTokenizer, KronosPredictor  # type: ignore
-    HAS_KRONOS = KRONOS_ENABLED
+    from model import Kronos, KronosTokenizer, KronosPredictor  # type: ignore
+    HAS_KRONOS = True
 except ImportError:
     HAS_KRONOS = False
-    KRONOS_ENABLED = False
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -913,67 +905,57 @@ if sc is None:
     st.error("Scoring failed.")
     st.stop()
 
-# Kronos toggle — only shown when KRONOS_ENABLED secret is True
+# ── 5. KRONOS AI FORECAST (always-on, runs automatically) ────────────────────
+sec("05 — Kronos AI Forecast", "#7c3aed")
+
 kronos_summary = None
-if not KRONOS_ENABLED:
-    # Secret not set (or False): show a muted hint so users know how to unlock it
+if not HAS_KRONOS:
     st.markdown(
-        '<div style="text-align:center;color:#334155;font-size:0.72rem;'
-        'letter-spacing:0.08em;margin:0.5rem 0 1.5rem;font-weight:600;">'
-        'KRONOS AI FORECAST &nbsp;·&nbsp; set <code>KRONOS_ENABLED = true</code> '
-        'in Streamlit secrets to enable</div>',
+        '<div style="text-align:center;padding:1.5rem 0;color:#334155;'
+        'font-size:0.78rem;letter-spacing:0.08em;font-weight:600;">'
+        'KRONOS-MINI NOT INSTALLED · '
+        'uncomment <code>torch</code> and <code>kronos-ts</code> '
+        'in requirements.txt to enable AI forecasting</div>',
         unsafe_allow_html=True,
     )
-    use_kronos = False
 else:
-    use_kronos = st.toggle(
-        "🔮  Kronos AI Forecast",
-        value=False,
-        help="Loads Kronos-mini model (~60-90s on first run). Feeds predicted OHLCV into the AI debate.",
-    )
-if use_kronos:
-    if not HAS_KRONOS:
-        st.warning(
-            "⚠️  Kronos is enabled but the package is not installed. "
-            "Uncomment `torch` and `kronos-ts` in requirements.txt and redeploy.",
-            icon="🚫",
-        )
-        kronos_summary = None
-    else:
-        st.info(
-            "⏳  Loading Kronos-mini... first run can take 60-90 seconds while the model downloads (~300MB). "
-            "Results are cached for your session.",
-            icon="📡",
-        )
-        with st.spinner("Running Kronos-mini forecast..."):
-            pred_df = run_kronos_forecast(df, pred_len=24)
-        if pred_df is not None and not pred_df.empty:
-            kronos_summary = summarise_kronos(pred_df, sc["close"])
-            # Show forecast chart
-            kfig = make_kronos_chart(pred_df, sc["close"], base)
-            if kfig:
-                st.plotly_chart(kfig, use_container_width=True, config={"displayModeBar": False})
-            # Summary metrics
-            kdir_color = "#10b981" if kronos_summary["direction"] == "UP" else "#f87171"
-            st.markdown(f"""
-<div class="tq-grid" style="margin-top:0.5rem">
+    with st.spinner("Running Kronos-mini forecast… (~60-90s on first load, cached after)"):
+        pred_df = run_kronos_forecast(df, pred_len=24)
+    if pred_df is not None and not pred_df.empty:
+        kronos_summary = summarise_kronos(pred_df, sc["close"])
+        kdir_color = "#10b981" if kronos_summary["direction"] == "UP" else "#f87171"
+        # Forecast chart
+        kfig = make_kronos_chart(pred_df, sc["close"], base)
+        if kfig:
+            st.plotly_chart(kfig, use_container_width=True, config={"displayModeBar": False})
+        # 4-card summary row
+        bull_color = "#10b981" if kronos_summary["bull_pct"] >= 50 else "#f87171"
+        st.markdown(f"""
+<div class="tq-grid">
   <div class="tq-card">
     <div class="tq-lbl">Direction</div>
     <div class="tq-val" style="color:{kdir_color}">{kronos_summary["direction"]}</div>
+    <div class="tq-sub" style="color:{kdir_color}">next {kronos_summary["candles"]} candles</div>
   </div>
   <div class="tq-card">
     <div class="tq-lbl">Predicted Change</div>
     <div class="tq-val" style="color:{kdir_color}">{kronos_summary["pct_change"]:+.2f}%</div>
+    <div class="tq-sub" style="color:#64748b">vs current close</div>
   </div>
   <div class="tq-card">
     <div class="tq-lbl">Peak / Trough</div>
-    <div class="tq-val" style="font-size:0.85rem">{kronos_summary["peak"]:.5g} / {kronos_summary["trough"]:.5g}</div>
+    <div class="tq-val" style="font-size:0.9rem;color:#e2e8f0">{kronos_summary["peak"]:.5g}</div>
+    <div class="tq-sub" style="color:#f87171">{kronos_summary["trough"]:.5g}</div>
+  </div>
+  <div class="tq-card">
+    <div class="tq-lbl">Bull Candles</div>
+    <div class="tq-val" style="color:{bull_color}">{kronos_summary["bull_pct"]:.0f}%</div>
+    <div class="tq-sub" style="color:#64748b">of forecast candles</div>
   </div>
 </div>
 """, unsafe_allow_html=True)
-        else:
-            st.error("Kronos forecast failed. Check model availability.")
-            kronos_summary = None
+    else:
+        st.warning("Kronos forecast unavailable for this symbol.")
 
 debate  = generate_agent_debate(base, sc, interval, kronos_summary=kronos_summary)
 score   = sc["score"]
@@ -1105,7 +1087,7 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 # ─── 5. AI LAB ───────────────────────────────────────────────────────────────
-sec("05 — AI Lab", "#c084fc")
+sec("06 — AI Lab", "#c084fc")
 
 VERDICT_CLASS = {"BUY": "verdict-buy", "SELL": "verdict-sell",
                  "HOLD": "verdict-hold", "WATCHLIST": "verdict-watchlist"}
@@ -1130,7 +1112,7 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 # ─── 6. DOWNLOAD ─────────────────────────────────────────────────────────────
-sec("06 — Export", "#334155")
+sec("07 — Export", "#334155")
 
 fname = f"{base}-{interval_lbl}-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M')}"
 
