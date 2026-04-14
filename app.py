@@ -663,57 +663,14 @@ if sc is None:
     st.error("Scoring failed.")
     st.stop()
 
-# ── 5. KRONOS AI FORECAST (always-on, runs automatically) ────────────────────
-sec("05 — Kronos AI Forecast", "#7c3aed")
-
+# Run Kronos silently here so kronos_summary is ready for the debate
 kronos_summary = None
-if not HAS_KRONOS:
-    st.markdown(
-        '<div style="text-align:center;padding:1.5rem 0;color:#334155;'
-        'font-size:0.78rem;letter-spacing:0.08em;font-weight:600;">'
-        'KRONOS-MINI NOT INSTALLED · '
-        'uncomment <code>torch</code> and <code>kronos-ts</code> '
-        'in requirements.txt to enable AI forecasting</div>',
-        unsafe_allow_html=True,
-    )
-else:
+pred_df        = None
+if HAS_KRONOS:
     with st.spinner("Running Kronos-mini forecast… (~60-90s on first load, cached after)"):
         pred_df = run_kronos_forecast(df, pred_len=24)
     if pred_df is not None and not pred_df.empty:
         kronos_summary = summarise_kronos(pred_df, sc["close"])
-        kdir_color = "#10b981" if kronos_summary["direction"] == "UP" else "#f87171"
-        # Forecast chart
-        kfig = make_kronos_chart(pred_df, sc["close"], base)
-        if kfig:
-            st.plotly_chart(kfig, use_container_width=True, config={"displayModeBar": False})
-        # 4-card summary row
-        bull_color = "#10b981" if kronos_summary["bull_pct"] >= 50 else "#f87171"
-        st.markdown(f"""
-<div class="tq-grid">
-  <div class="tq-card">
-    <div class="tq-lbl">Direction</div>
-    <div class="tq-val" style="color:{kdir_color}">{kronos_summary["direction"]}</div>
-    <div class="tq-sub" style="color:{kdir_color}">next {kronos_summary["candles"]} candles</div>
-  </div>
-  <div class="tq-card">
-    <div class="tq-lbl">Predicted Change</div>
-    <div class="tq-val" style="color:{kdir_color}">{kronos_summary["pct_change"]:+.2f}%</div>
-    <div class="tq-sub" style="color:#64748b">vs current close</div>
-  </div>
-  <div class="tq-card">
-    <div class="tq-lbl">Peak / Trough</div>
-    <div class="tq-val" style="font-size:0.9rem;color:#e2e8f0">{kronos_summary["peak"]:.5g}</div>
-    <div class="tq-sub" style="color:#f87171">{kronos_summary["trough"]:.5g}</div>
-  </div>
-  <div class="tq-card">
-    <div class="tq-lbl">Bull Candles</div>
-    <div class="tq-val" style="color:{bull_color}">{kronos_summary["bull_pct"]:.0f}%</div>
-    <div class="tq-sub" style="color:#64748b">of forecast candles</div>
-  </div>
-</div>
-""", unsafe_allow_html=True)
-    else:
-        st.warning("Kronos forecast unavailable for this symbol.")
 
 debate  = generate_agent_debate(base, sc, interval, kronos_summary=kronos_summary)
 score   = sc["score"]
@@ -844,7 +801,52 @@ st.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
-# ─── 5. AI LAB ───────────────────────────────────────────────────────────────
+# ─── 5. KRONOS AI FORECAST ──────────────────────────────────────────────────
+sec("05 — Kronos AI Forecast", "#7c3aed")
+
+if not HAS_KRONOS:
+    st.markdown(
+        '<div style="text-align:center;padding:1.5rem 0;color:#334155;'
+        'font-size:0.78rem;letter-spacing:0.08em;font-weight:600;">'
+        'KRONOS-MINI NOT INSTALLED &nbsp;·&nbsp; '
+        'uncomment <code>torch</code> and <code>kronos-ts</code> '
+        'in requirements.txt to enable AI forecasting</div>',
+        unsafe_allow_html=True,
+    )
+elif kronos_summary is not None:
+    kdir_color = "#10b981" if kronos_summary["direction"] == "UP" else "#f87171"
+    kfig = make_kronos_chart(pred_df, sc["close"], base)
+    if kfig:
+        st.plotly_chart(kfig, use_container_width=True, config={"displayModeBar": False})
+    bull_color = "#10b981" if kronos_summary["bull_pct"] >= 50 else "#f87171"
+    st.markdown(f"""
+<div class="tq-grid">
+  <div class="tq-card">
+    <div class="tq-lbl">Direction</div>
+    <div class="tq-val" style="color:{kdir_color}">{kronos_summary["direction"]}</div>
+    <div class="tq-sub" style="color:{kdir_color}">next {kronos_summary["candles"]} candles</div>
+  </div>
+  <div class="tq-card">
+    <div class="tq-lbl">Predicted Change</div>
+    <div class="tq-val" style="color:{kdir_color}">{kronos_summary["pct_change"]:+.2f}%</div>
+    <div class="tq-sub" style="color:#64748b">vs current close</div>
+  </div>
+  <div class="tq-card">
+    <div class="tq-lbl">Peak / Trough</div>
+    <div class="tq-val" style="font-size:0.9rem;color:#e2e8f0">{kronos_summary["peak"]:.5g}</div>
+    <div class="tq-sub" style="color:#f87171">{kronos_summary["trough"]:.5g}</div>
+  </div>
+  <div class="tq-card">
+    <div class="tq-lbl">Bull Candles</div>
+    <div class="tq-val" style="color:{bull_color}">{kronos_summary["bull_pct"]:.0f}%</div>
+    <div class="tq-sub" style="color:#64748b">of forecast candles</div>
+  </div>
+</div>
+""", unsafe_allow_html=True)
+else:
+    st.warning("Kronos forecast unavailable for this symbol.")
+
+# ─── 6. AI LAB ───────────────────────────────────────────────────────────────
 sec("06 — AI Lab", "#c084fc")
 
 VERDICT_CLASS = {"BUY": "verdict-buy", "SELL": "verdict-sell",
