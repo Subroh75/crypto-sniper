@@ -420,6 +420,41 @@ def backtest(req: BacktestRequest):
     )
 
 
+
+
+@app.post("/backtest/multi", tags=["Backtest"])
+def backtest_multi(req: MultiBacktestRequest):
+    """
+    Run walk-forward Kronos backtests for multiple symbols in parallel.
+
+    Symbols default to the top-10 most-traded crypto assets.
+    Returns a list of result dicts sorted by Sharpe ratio (desc).
+    Expect 5-15 minutes for all 10 assets at default settings.
+    """
+    from backtest import run_multi_backtest, TOP_ASSETS
+
+    # Sanitise + deduplicate
+    symbols   = list(dict.fromkeys(clean_symbol(s) for s in req.symbols)) or TOP_ASSETS
+    predictor = _get_kronos_predictor()
+
+    if predictor is None:
+        return [{"symbol": s, "error": "Kronos not available.", "available": False}
+                for s in symbols]
+
+    results = run_multi_backtest(
+        symbols     = symbols,
+        pred_len    = req.pred_len,
+        lookback    = req.lookback,
+        step        = req.step,
+        predictor   = predictor,
+        max_workers = 3,
+    )
+    # Tag each result with available flag
+    for r in results:
+        r["available"] = "error" not in r
+    return results
+
+
 @app.get("/backtest/{symbol}", response_model=BacktestResponse, tags=["Backtest"])
 def backtest_get(
     symbol:   str,

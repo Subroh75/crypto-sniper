@@ -871,153 +871,310 @@ st.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
-# ─── 7. BACKTEST ────────────────────────────────────────────────────────────
-sec("08 — Backtest", "#0f4c81")
+# --- 7. BACKTEST ---------------------------------------------------------------
+sec("08 -- Backtest", "#0f4c81")
 
-st.markdown("""
-<div style="color:#94a3b8;font-size:0.82rem;margin-bottom:1rem;">
-  Walk-forward Kronos accuracy test over 6 months of hourly data.
-  At each 24h window Kronos predicts UP or DOWN — results are compared to
-  what actually happened. Runs ~90 windows; may take 2–5 min.
-</div>""", unsafe_allow_html=True)
+_TOP_ASSETS = ["BTC", "ETH", "SOL", "BNB", "XRP", "DOGE", "ADA", "AVAX", "LINK", "DOT"]
+_API_BASE   = os.getenv("API_BASE", "https://crypto-sniper-api.onrender.com")
 
-bt_col1, bt_col2, bt_col3 = st.columns([2, 1, 1])
-with bt_col1:
-    bt_symbol = st.text_input("Symbol for backtest", value=base,
-                               key="bt_sym", label_visibility="collapsed")
-with bt_col2:
-    bt_pred = st.selectbox("Forecast candles", [12, 24, 48], index=1, key="bt_pred")
-with bt_col3:
-    run_bt = st.button("▶  Run Backtest", use_container_width=True, key="run_bt")
+bt_tab1, bt_tab2 = st.tabs(["Single Asset", "Multi-Asset Comparison"])
 
-if run_bt:
-    import requests as _req
-    API_BASE = os.getenv("API_BASE", "https://crypto-sniper-api.onrender.com")
-    with st.spinner(f"Running walk-forward backtest on {bt_symbol.upper()} — this takes 2–5 min…"):
-        try:
-            resp = _req.post(
-                f"{API_BASE}/backtest",
-                json={"symbol": bt_symbol.strip().upper(),
-                      "pred_len": bt_pred, "lookback": 200, "step": 24},
-                timeout=360,
-            )
-            resp.raise_for_status()
-            bt = resp.json()
-        except Exception as e:
-            bt = None
-            st.error(f"Backtest request failed: {e}")
+# ---- Tab 1: single asset -----------------------------------------------------
+with bt_tab1:
+    st.markdown(
+        '<div style="color:#94a3b8;font-size:0.82rem;margin-bottom:1rem;">'
+        "Walk-forward accuracy test over 6 months of hourly data (~90 windows). "
+        "Kronos predicts UP or DOWN at each 24h step. May take 2-5 min."
+        "</div>",
+        unsafe_allow_html=True,
+    )
 
-    if bt and bt.get("available"):
-        if bt.get("error"):
-            st.error(bt["error"])
-        else:
-            # ── headline metrics ──────────────────────────────────────────────
-            da  = bt["direction_accuracy"]
-            wr  = bt["win_rate"]
-            sh  = bt["sharpe"]
-            sr  = bt["strategy_return"]
-            bhr = bt["bh_return"]
-            mdd = bt["max_drawdown"]
-            tw  = bt["total_windows"]
+    bt_c1, bt_c2, bt_c3 = st.columns([2, 1, 1])
+    with bt_c1:
+        bt_sym = st.text_input("Symbol", value=base, key="bt_sym",
+                               label_visibility="collapsed")
+    with bt_c2:
+        bt_pred = st.selectbox("Forecast candles", [12, 24, 48], index=1, key="bt_pred")
+    with bt_c3:
+        run_bt = st.button("Run Backtest", use_container_width=True, key="run_bt")
 
-            da_col  = "#10b981" if da >= 55 else ("#f59e0b" if da >= 48 else "#f87171")
-            sh_col  = "#10b981" if sh >= 1   else ("#f59e0b" if sh >= 0  else "#f87171")
-            sr_col  = "#10b981" if sr >= 0   else "#f87171"
-            bh_col  = "#10b981" if bhr >= 0  else "#f87171"
-
-            st.markdown(f"""
-<div class="tq-grid" style="grid-template-columns:repeat(3,1fr);margin-bottom:1rem">
-  <div class="tq-card">
-    <div class="tq-lbl">Direction Accuracy</div>
-    <div class="tq-val" style="color:{da_col}">{da:.1f}%</div>
-    <div class="tq-sub" style="color:#64748b">{tw} windows · 24h step</div>
-  </div>
-  <div class="tq-card">
-    <div class="tq-lbl">Win Rate</div>
-    <div class="tq-val" style="color:{da_col}">{wr:.1f}%</div>
-    <div class="tq-sub" style="color:#64748b">profitable trade windows</div>
-  </div>
-  <div class="tq-card">
-    <div class="tq-lbl">Sharpe Ratio</div>
-    <div class="tq-val" style="color:{sh_col}">{sh:.2f}</div>
-    <div class="tq-sub" style="color:#64748b">annualised vs 5% risk-free</div>
-  </div>
-  <div class="tq-card">
-    <div class="tq-lbl">Strategy Return</div>
-    <div class="tq-val" style="color:{sr_col}">{sr:+.1f}%</div>
-    <div class="tq-sub" style="color:#64748b">Kronos long/short</div>
-  </div>
-  <div class="tq-card">
-    <div class="tq-lbl">Buy & Hold</div>
-    <div class="tq-val" style="color:{bh_col}">{bhr:+.1f}%</div>
-    <div class="tq-sub" style="color:#64748b">same period</div>
-  </div>
-  <div class="tq-card">
-    <div class="tq-lbl">Max Drawdown</div>
-    <div class="tq-val" style="color:#f87171">{mdd:.1f}%</div>
-    <div class="tq-sub" style="color:#64748b">peak-to-trough</div>
-  </div>
-</div>""", unsafe_allow_html=True)
-
-            # ── equity curve chart ────────────────────────────────────────────
-            if bt.get("equity_curve"):
-                import plotly.graph_objects as _go
-                eq_df = pd.DataFrame(bt["equity_curve"])
-                eq_df["date"] = pd.to_datetime(eq_df["date"])
-                fig_bt = _go.Figure()
-                fig_bt.add_trace(_go.Scatter(
-                    x=eq_df["date"], y=eq_df["strategy"],
-                    name="Kronos Strategy", line=dict(color="#7c3aed", width=2)
-                ))
-                fig_bt.add_trace(_go.Scatter(
-                    x=eq_df["date"], y=eq_df["buy_hold"],
-                    name="Buy & Hold", line=dict(color="#38bdf8", width=2, dash="dot")
-                ))
-                fig_bt.add_hline(y=1.0, line_dash="dash",
-                                 line_color="#475569", line_width=1)
-                fig_bt.update_layout(
-                    paper_bgcolor="#060912", plot_bgcolor="#060912",
-                    font_color="#e2e8f0", height=300,
-                    margin=dict(l=0, r=0, t=24, b=0),
-                    legend=dict(bgcolor="rgba(0,0,0,0)"),
-                    xaxis=dict(gridcolor="#1e293b", showgrid=True),
-                    yaxis=dict(gridcolor="#1e293b", showgrid=True,
-                               title="Equity (normalised to 1.0)"),
-                    title=dict(text=f"Kronos vs Buy-and-Hold — {bt_symbol.upper()} 6m hourly",
-                               font=dict(size=13, color="#94a3b8")),
+    if run_bt:
+        import requests as _req
+        with st.spinner(f"Running backtest on {bt_sym.upper()} -- 2-5 min..."):
+            try:
+                _r = _req.post(
+                    f"{_API_BASE}/backtest",
+                    json={"symbol": bt_sym.strip().upper(),
+                          "pred_len": bt_pred, "lookback": 200, "step": 24},
+                    timeout=360,
                 )
-                st.plotly_chart(fig_bt, use_container_width=True,
-                                config={"displayModeBar": False})
+                _r.raise_for_status()
+                bt = _r.json()
+            except Exception as _e:
+                bt = None
+                st.error(f"Backtest failed: {_e}")
 
-            # ── avg return table ──────────────────────────────────────────────
-            st.markdown(f"""
-<div style="display:flex;gap:1rem;margin-top:0.5rem">
-  <div class="tq-card" style="flex:1">
-    <div class="tq-lbl">Avg return · Kronos UP</div>
-    <div class="tq-val" style="color:#10b981">{bt['avg_return_up']:+.2f}%</div>
-    <div class="tq-sub">{bt['windows_up']} windows</div>
-  </div>
-  <div class="tq-card" style="flex:1">
-    <div class="tq-lbl">Avg return · Kronos DOWN</div>
-    <div class="tq-val" style="color:#f87171">{bt['avg_return_down']:+.2f}%</div>
-    <div class="tq-sub">{bt['windows_down']} windows</div>
-  </div>
-</div>""", unsafe_allow_html=True)
+        if bt and bt.get("available"):
+            if bt.get("error"):
+                st.error(bt["error"])
+            else:
+                da  = bt["direction_accuracy"]
+                wr  = bt["win_rate"]
+                sh  = bt["sharpe"]
+                sr  = bt["strategy_return"]
+                bhr = bt["bh_return"]
+                mdd = bt["max_drawdown"]
+                tw  = bt["total_windows"]
 
-            # ── trade log ────────────────────────────────────────────────────
-            if bt.get("trades"):
-                with st.expander("Trade log (last 50 windows)"):
-                    trade_df = pd.DataFrame(bt["trades"])
-                    trade_df["correct"] = trade_df["correct"].map(
-                        {True: "✓", False: "✗"})
-                    st.dataframe(
-                        trade_df[["date", "direction", "pred_pct",
-                                  "actual_pct", "correct"]],
-                        use_container_width=True, hide_index=True,
+                da_col = "#10b981" if da >= 55 else ("#f59e0b" if da >= 48 else "#f87171")
+                sh_col = "#10b981" if sh >= 1  else ("#f59e0b" if sh >= 0  else "#f87171")
+                sr_col = "#10b981" if sr >= 0  else "#f87171"
+                bh_col = "#10b981" if bhr >= 0 else "#f87171"
+
+                st.markdown(
+                    f'<div class="tq-grid" style="grid-template-columns:repeat(3,1fr);margin-bottom:1rem">'
+                    f'<div class="tq-card"><div class="tq-lbl">Direction Accuracy</div>'
+                    f'<div class="tq-val" style="color:{da_col}">{da:.1f}%</div>'
+                    f'<div class="tq-sub" style="color:#64748b">{tw} windows</div></div>'
+                    f'<div class="tq-card"><div class="tq-lbl">Win Rate</div>'
+                    f'<div class="tq-val" style="color:{da_col}">{wr:.1f}%</div>'
+                    f'<div class="tq-sub" style="color:#64748b">profitable windows</div></div>'
+                    f'<div class="tq-card"><div class="tq-lbl">Sharpe Ratio</div>'
+                    f'<div class="tq-val" style="color:{sh_col}">{sh:.2f}</div>'
+                    f'<div class="tq-sub" style="color:#64748b">annualised vs 5% rf</div></div>'
+                    f'<div class="tq-card"><div class="tq-lbl">Strategy Return</div>'
+                    f'<div class="tq-val" style="color:{sr_col}">{sr:+.1f}%</div>'
+                    f'<div class="tq-sub" style="color:#64748b">Kronos long/short</div></div>'
+                    f'<div class="tq-card"><div class="tq-lbl">Buy and Hold</div>'
+                    f'<div class="tq-val" style="color:{bh_col}">{bhr:+.1f}%</div>'
+                    f'<div class="tq-sub" style="color:#64748b">same period</div></div>'
+                    f'<div class="tq-card"><div class="tq-lbl">Max Drawdown</div>'
+                    f'<div class="tq-val" style="color:#f87171">{mdd:.1f}%</div>'
+                    f'<div class="tq-sub" style="color:#64748b">peak-to-trough</div></div>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+
+                if bt.get("equity_curve"):
+                    import plotly.graph_objects as _go
+                    _eq = pd.DataFrame(bt["equity_curve"])
+                    _eq["date"] = pd.to_datetime(_eq["date"])
+                    _fig = _go.Figure()
+                    _fig.add_trace(_go.Scatter(
+                        x=_eq["date"], y=_eq["strategy"],
+                        name="Kronos Strategy", line=dict(color="#7c3aed", width=2),
+                    ))
+                    _fig.add_trace(_go.Scatter(
+                        x=_eq["date"], y=_eq["buy_hold"],
+                        name="Buy & Hold", line=dict(color="#38bdf8", width=2, dash="dot"),
+                    ))
+                    _fig.add_hline(y=1.0, line_dash="dash", line_color="#475569", line_width=1)
+                    _fig.update_layout(
+                        paper_bgcolor="#060912", plot_bgcolor="#060912",
+                        font_color="#e2e8f0", height=300,
+                        margin=dict(l=0, r=0, t=24, b=0),
+                        legend=dict(bgcolor="rgba(0,0,0,0)"),
+                        xaxis=dict(gridcolor="#1e293b"),
+                        yaxis=dict(gridcolor="#1e293b", title="Equity (base 1.0)"),
+                        title=dict(
+                            text=f"Kronos vs Buy-and-Hold -- {bt_sym.upper()} 6m hourly",
+                            font=dict(size=13, color="#94a3b8"),
+                        ),
                     )
-    elif bt and not bt.get("available"):
-        st.warning("Kronos is not yet available on the backend. "
-                   "Wait for the Render deploy to complete, then try again.")
+                    st.plotly_chart(_fig, use_container_width=True,
+                                    config={"displayModeBar": False})
+
+                st.markdown(
+                    f'<div style="display:flex;gap:1rem;margin-top:0.5rem">'
+                    f'<div class="tq-card" style="flex:1"><div class="tq-lbl">Avg return when UP</div>'
+                    f'<div class="tq-val" style="color:#10b981">{bt["avg_return_up"]:+.2f}%</div>'
+                    f'<div class="tq-sub">{bt["windows_up"]} windows</div></div>'
+                    f'<div class="tq-card" style="flex:1"><div class="tq-lbl">Avg return when DOWN</div>'
+                    f'<div class="tq-val" style="color:#f87171">{bt["avg_return_down"]:+.2f}%</div>'
+                    f'<div class="tq-sub">{bt["windows_down"]} windows</div></div>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+
+                if bt.get("trades"):
+                    with st.expander("Trade log (last 50 windows)"):
+                        _tdf = pd.DataFrame(bt["trades"])
+                        _tdf["correct"] = _tdf["correct"].map({True: "OK", False: "X"})
+                        st.dataframe(
+                            _tdf[["date", "direction", "pred_pct", "actual_pct", "correct"]],
+                            use_container_width=True, hide_index=True,
+                        )
+        elif bt and not bt.get("available"):
+            st.warning("Kronos not yet available -- wait for Render deploy, then retry.")
+
+# ---- Tab 2: multi-asset comparison -------------------------------------------
+with bt_tab2:
+    st.markdown(
+        '<div style="color:#94a3b8;font-size:0.82rem;margin-bottom:1rem;">'
+        "Runs Kronos backtests across multiple assets in parallel and ranks by Sharpe. "
+        "Default selection: top 5 by market cap. Expect 10-20 min for all 10."
+        "</div>",
+        unsafe_allow_html=True,
+    )
+
+    mbt_c1, mbt_c2 = st.columns([3, 1])
+    with mbt_c1:
+        mbt_syms = st.multiselect(
+            "Assets to backtest",
+            options=_TOP_ASSETS + ["LTC", "MATIC", "ATOM", "UNI", "FIL"],
+            default=_TOP_ASSETS[:5],
+            key="mbt_syms",
+        )
+    with mbt_c2:
+        run_mbt = st.button("Run Comparison", use_container_width=True, key="run_mbt")
+
+    if run_mbt and mbt_syms:
+        import requests as _req2
+        with st.spinner(f"Running parallel backtests for {', '.join(mbt_syms)} -- please wait..."):
+            try:
+                _mr = _req2.post(
+                    f"{_API_BASE}/backtest/multi",
+                    json={"symbols": mbt_syms, "pred_len": 24, "lookback": 200, "step": 24},
+                    timeout=1200,
+                )
+                _mr.raise_for_status()
+                mbt_results = _mr.json()
+            except Exception as _me:
+                mbt_results = None
+                st.error(f"Multi-backtest failed: {_me}")
+
+        if mbt_results:
+            import plotly.graph_objects as _go2
+            import plotly.subplots as _sp
+
+            ok   = [r for r in mbt_results if "error" not in r]
+            fail = [r for r in mbt_results if "error" in r]
+
+            if ok:
+                # Comparison table
+                _tbl = []
+                for r in mbt_results:
+                    if "error" in r:
+                        _tbl.append({"Asset": r["symbol"], "Dir Acc%": "--",
+                                     "Win Rate%": "--", "Sharpe": "--",
+                                     "Max DD%": "--", "Strat Ret%": "--",
+                                     "B&H Ret%": "--", "Status": "Error"})
+                    else:
+                        _tbl.append({
+                            "Asset":      r["symbol"],
+                            "Dir Acc%":   f"{r['direction_accuracy']:.1f}",
+                            "Win Rate%":  f"{r['win_rate']:.1f}",
+                            "Sharpe":     f"{r['sharpe']:.2f}",
+                            "Max DD%":    f"{r['max_drawdown']:.1f}",
+                            "Strat Ret%": f"{r['strategy_return']:+.1f}",
+                            "B&H Ret%":   f"{r['bh_return']:+.1f}",
+                            "Windows":    r["total_windows"],
+                            "Status":     "OK",
+                        })
+
+                st.markdown("#### Comparison Table")
+                st.dataframe(pd.DataFrame(_tbl), use_container_width=True, hide_index=True)
+
+                # Sharpe + Max Drawdown side by side
+                _syms  = [r["symbol"]            for r in ok]
+                _sh    = [r["sharpe"]             for r in ok]
+                _mdd   = [abs(r["max_drawdown"])  for r in ok]
+                _dacc  = [r["direction_accuracy"] for r in ok]
+                _wrate = [r["win_rate"]           for r in ok]
+
+                _sh_col  = ["#10b981" if s >= 1 else ("#f59e0b" if s >= 0 else "#f87171") for s in _sh]
+                _da_col  = ["#10b981" if d >= 55 else ("#f59e0b" if d >= 48 else "#f87171") for d in _dacc]
+                _wr_col  = ["#10b981" if w >= 55 else ("#f59e0b" if w >= 48 else "#f87171") for w in _wrate]
+
+                st.markdown("#### Sharpe vs Max Drawdown")
+                _fig2 = _sp.make_subplots(rows=1, cols=2,
+                    subplot_titles=("Sharpe Ratio (annualised)", "Max Drawdown (%)"),
+                    horizontal_spacing=0.12)
+                _fig2.add_trace(_go2.Bar(
+                    x=_syms, y=_sh, marker_color=_sh_col, name="Sharpe",
+                    text=[f"{v:.2f}" for v in _sh], textposition="outside",
+                    textfont=dict(size=11),
+                ), row=1, col=1)
+                _fig2.add_trace(_go2.Bar(
+                    x=_syms, y=_mdd, marker_color=["#f87171"] * len(_mdd), name="Max DD",
+                    text=[f"{v:.1f}%" for v in _mdd], textposition="outside",
+                    textfont=dict(size=11),
+                ), row=1, col=2)
+                _fig2.update_layout(
+                    paper_bgcolor="#060912", plot_bgcolor="#060912",
+                    font_color="#e2e8f0", height=360,
+                    margin=dict(l=0, r=0, t=40, b=0),
+                    showlegend=False,
+                    yaxis=dict(gridcolor="#1e293b", zeroline=True, zerolinecolor="#475569"),
+                    yaxis2=dict(gridcolor="#1e293b"),
+                )
+                _fig2.update_annotations(font=dict(color="#94a3b8", size=12))
+                st.plotly_chart(_fig2, use_container_width=True, config={"displayModeBar": False})
+
+                st.markdown("#### Direction Accuracy vs Win Rate")
+                _fig3 = _sp.make_subplots(rows=1, cols=2,
+                    subplot_titles=("Direction Accuracy (%)", "Win Rate (%)"),
+                    horizontal_spacing=0.12)
+                _fig3.add_trace(_go2.Bar(
+                    x=_syms, y=_dacc, marker_color=_da_col, name="Dir Acc",
+                    text=[f"{v:.1f}%" for v in _dacc], textposition="outside",
+                    textfont=dict(size=11),
+                ), row=1, col=1)
+                _fig3.add_trace(_go2.Bar(
+                    x=_syms, y=_wrate, marker_color=_wr_col, name="Win Rate",
+                    text=[f"{v:.1f}%" for v in _wrate], textposition="outside",
+                    textfont=dict(size=11),
+                ), row=1, col=2)
+                _fig3.update_layout(
+                    paper_bgcolor="#060912", plot_bgcolor="#060912",
+                    font_color="#e2e8f0", height=340,
+                    margin=dict(l=0, r=0, t=40, b=0),
+                    showlegend=False,
+                    yaxis=dict(gridcolor="#1e293b", range=[0, 100]),
+                    yaxis2=dict(gridcolor="#1e293b", range=[0, 100]),
+                )
+                _fig3.add_hline(y=50, line_dash="dash", line_color="#475569", line_width=1, row=1, col=1)
+                _fig3.add_hline(y=50, line_dash="dash", line_color="#475569", line_width=1, row=1, col=2)
+                _fig3.update_annotations(font=dict(color="#94a3b8", size=12))
+                st.plotly_chart(_fig3, use_container_width=True, config={"displayModeBar": False})
+
+                # Overlaid equity curves
+                if any(r.get("equity_curve") for r in ok):
+                    st.markdown("#### Equity Curves (Kronos Strategy, base 1.0)")
+                    _PAL = ["#7c3aed","#38bdf8","#10b981","#f59e0b",
+                            "#f87171","#818cf8","#fb923c","#34d399","#e879f9","#fbbf24"]
+                    _fig4 = _go2.Figure()
+                    for _i, _r in enumerate(ok):
+                        if not _r.get("equity_curve"):
+                            continue
+                        _eq2 = pd.DataFrame(_r["equity_curve"])
+                        _eq2["date"] = pd.to_datetime(_eq2["date"])
+                        _fig4.add_trace(_go2.Scatter(
+                            x=_eq2["date"], y=_eq2["strategy"],
+                            name=_r["symbol"],
+                            line=dict(color=_PAL[_i % len(_PAL)], width=1.5),
+                        ))
+                    _fig4.add_hline(y=1.0, line_dash="dash", line_color="#475569", line_width=1)
+                    _fig4.update_layout(
+                        paper_bgcolor="#060912", plot_bgcolor="#060912",
+                        font_color="#e2e8f0", height=340,
+                        margin=dict(l=0, r=0, t=16, b=0),
+                        legend=dict(bgcolor="rgba(0,0,0,0)", orientation="h",
+                                    yanchor="bottom", y=1.02),
+                        xaxis=dict(gridcolor="#1e293b"),
+                        yaxis=dict(gridcolor="#1e293b", title="Equity"),
+                    )
+                    st.plotly_chart(_fig4, use_container_width=True,
+                                    config={"displayModeBar": False})
+
+            if fail:
+                with st.expander(f"{len(fail)} asset(s) failed"):
+                    for _f in fail:
+                        st.caption(f"{_f['symbol']}: {_f.get('error', 'unknown error')}")
+
+    elif run_mbt and not mbt_syms:
+        st.warning("Select at least one asset to backtest.")
+
 
 # ─── 8. DOWNLOAD ─────────────────────────────────────────────────────────────
 sec("07 — Export", "#334155")
