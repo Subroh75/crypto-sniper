@@ -6,8 +6,10 @@ pandas>=2.0.0
 numpy>=1.24.0
 
 # ── Kronos AI Forecast ──────────────────────────────────────────────────────
-# Plain torch from PyPI (no +cpu suffix) — Render is Linux CPU-only so pip
-# resolves the cpu wheel automatically. The +cpu local-version label only
-# exists on the PyTorch wheel index and breaks standard pip installs.
-torch==2.2.2
-kronos-ts>=0.1.0
+# Kronos model source is vendored in backend/model/ (from shiyu-coder/Kronos)
+# These are the runtime dependencies required by that source.
+torch>=2.0.0
+einops==0.8.1
+huggingface_hub>=0.20.0
+safetensors>=0.4.0
+tqdm>=4.60.0
