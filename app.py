@@ -547,7 +547,7 @@ def make_chart(df: pd.DataFrame, sc: dict, symbol: str) -> Optional[object]:
         increasing=dict(line=dict(color="#10b981"), fillcolor="#059669"),
         decreasing=dict(line=dict(color="#f87171"), fillcolor="#dc2626"),
     ))
-    for col, color, name in [("ema20","#f59e0b","EMA20"),("ema50","#818cf8","EMA50"),("ema200","#fb923c","EMA200"),("bb_upper","#334155","BB+"),("bb_lower","#334155","BB-")]:
+    for col, color, name in [("ema20","#10b981","EMA20"),("ema50","#818cf8","EMA50"),("ema200","#fb923c","EMA200"),("bb_upper","#334155","BB+"),("bb_lower","#334155","BB-")]:
         if col in show.columns:
             fig.add_trace(go.Scatter(
                 x=show["timestamp"], y=show[col], mode="lines",
