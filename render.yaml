@@ -4,7 +4,11 @@ services:
     runtime: python
     region: singapore
     plan: standard
-    buildCommand: pip install -r backend/requirements.txt
+    buildCommand: >
+      pip install --no-cache-dir
+      torch==2.2.2
+      --index-url https://download.pytorch.org/whl/cpu
+      && pip install --no-cache-dir -r backend/requirements.txt
     startCommand: bash start.sh
     healthCheckPath: /
     envVars:

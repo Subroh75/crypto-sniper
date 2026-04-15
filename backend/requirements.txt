@@ -6,9 +6,8 @@ pandas>=2.0.0
 numpy>=1.24.0
 
 # ── Kronos AI Forecast ──────────────────────────────────────────────────────
-# Kronos model source is vendored in backend/model/ (from shiyu-coder/Kronos)
-# These are the runtime dependencies required by that source.
-torch>=2.0.0
+# torch is installed separately in buildCommand using the CPU-only wheel index
+# (download.pytorch.org/whl/cpu) to avoid the 721MB GPU wheel from PyPI.
 einops==0.8.1
 huggingface_hub>=0.20.0
 safetensors>=0.4.0
