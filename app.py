@@ -807,7 +807,7 @@ sec("05 — Kronos AI Forecast", "#7c3aed")
 # When running on Streamlit Cloud (no local torch), fetch Kronos forecast
 # from the Render backend API instead of running locally.
 if not HAS_KRONOS:
-    _API_BASE_K = os.getenv("API_BASE", "https://crypto-sniper-api.onrender.com")
+    _API_BASE_K = os.getenv("API_BASE", "https://crypto-sniper.onrender.com")
 
     @st.cache_data(ttl=300, show_spinner=False)
     def _fetch_kronos_api(symbol):
@@ -905,7 +905,7 @@ else:
     st.warning("Kronos forecast unavailable for this symbol.")
 
 # ── Kronos backtest accuracy (silent, cached 1h per symbol) ──────────────────
-_API_BASE = os.getenv("API_BASE", "https://crypto-sniper-api.onrender.com")
+_API_BASE = os.getenv("API_BASE", "https://crypto-sniper.onrender.com")
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def _fetch_backtest_summary(symbol):
