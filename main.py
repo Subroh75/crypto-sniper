@@ -131,8 +131,10 @@ class BacktestResponse(BaseModel):
 _KRONOS_LOADED = False
 _KRONOS_PREDICTOR = None
 
+_KRONOS_ERROR: str = ""
+
 def _get_kronos_predictor():
-    global _KRONOS_LOADED, _KRONOS_PREDICTOR
+    global _KRONOS_LOADED, _KRONOS_PREDICTOR, _KRONOS_ERROR
     if _KRONOS_LOADED:
         return _KRONOS_PREDICTOR
     try:
@@ -140,8 +142,10 @@ def _get_kronos_predictor():
         tokenizer        = KronosTokenizer.from_pretrained("NeoQuasar/Kronos-Tokenizer-base")
         model            = Kronos.from_pretrained("NeoQuasar/Kronos-mini")
         _KRONOS_PREDICTOR = KronosPredictor(model, tokenizer, max_context=512)
-    except Exception:
+        _KRONOS_ERROR     = ""
+    except Exception as _e:
         _KRONOS_PREDICTOR = None
+        _KRONOS_ERROR     = str(_e)
     _KRONOS_LOADED = True
     return _KRONOS_PREDICTOR
 
@@ -341,6 +345,25 @@ def kronos_forecast(req: KronosRequest):
         available   = True,
     )
 
+
+
+@app.get("/kronos/debug", tags=["Kronos"])
+def kronos_debug():
+    """Return Kronos model load status and any error message."""
+    predictor = _get_kronos_predictor()
+    return {
+        "loaded":    _KRONOS_LOADED,
+        "available": predictor is not None,
+        "error":     _KRONOS_ERROR or None,
+        "torch_available": _check_torch(),
+    }
+
+def _check_torch():
+    try:
+        import torch
+        return str(torch.__version__)
+    except Exception as e:
+        return str(e)
 
 @app.get("/kronos/{symbol}", response_model=KronosResponse, tags=["Kronos"])
 def kronos_get(
