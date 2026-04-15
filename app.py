@@ -804,15 +804,73 @@ st.markdown(f"""
 # ─── 5. KRONOS AI FORECAST ──────────────────────────────────────────────────
 sec("05 — Kronos AI Forecast", "#7c3aed")
 
+# When running on Streamlit Cloud (no local torch), fetch Kronos forecast
+# from the Render backend API instead of running locally.
 if not HAS_KRONOS:
-    st.markdown(
-        '<div style="text-align:center;padding:1.5rem 0;color:#334155;'
-        'font-size:0.78rem;letter-spacing:0.08em;font-weight:600;">'
-        'KRONOS-MINI NOT INSTALLED &nbsp;·&nbsp; '
-        'uncomment <code>torch</code> and <code>kronos-ts</code> '
-        'in requirements.txt to enable AI forecasting</div>',
-        unsafe_allow_html=True,
-    )
+    _API_BASE_K = os.getenv("API_BASE", "https://crypto-sniper-api.onrender.com")
+
+    @st.cache_data(ttl=300, show_spinner=False)
+    def _fetch_kronos_api(symbol):
+        try:
+            import requests as _rk
+            _r = _rk.post(
+                f"{_API_BASE_K}/kronos",
+                json={"symbol": symbol, "interval": "1h", "pred_len": 24},
+                timeout=120,
+            )
+            _r.raise_for_status()
+            return _r.json()
+        except Exception:
+            return None
+
+    with st.spinner("Fetching Kronos AI forecast from backend…"):
+        _kapi = _fetch_kronos_api(base)
+
+    if _kapi and _kapi.get("available") and _kapi.get("direction"):
+        kdir_color = "#10b981" if _kapi["direction"] == "UP" else "#f87171"
+        bull_color = "#10b981" if _kapi.get("bull_pct", 0) >= 50 else "#f87171"
+        st.markdown(
+            f'''<div class="tq-grid">
+  <div class="tq-card">
+    <div class="tq-lbl">Direction</div>
+    <div class="tq-val" style="color:{kdir_color}">{_kapi["direction"]}</div>
+    <div class="tq-sub" style="color:{kdir_color}">next {_kapi.get("candles", 24)} candles</div>
+  </div>
+  <div class="tq-card">
+    <div class="tq-lbl">Predicted Change</div>
+    <div class="tq-val" style="color:{kdir_color}">{_kapi.get("pct_change", 0):+.2f}%</div>
+    <div class="tq-sub" style="color:#64748b">vs current close</div>
+  </div>
+  <div class="tq-card">
+    <div class="tq-lbl">Peak / Trough</div>
+    <div class="tq-val" style="font-size:0.9rem;color:#e2e8f0">{_kapi.get("peak", 0):.5g}</div>
+    <div class="tq-sub" style="color:#f87171">{_kapi.get("trough", 0):.5g}</div>
+  </div>
+  <div class="tq-card">
+    <div class="tq-lbl">Bull Candles</div>
+    <div class="tq-val" style="color:{bull_color}">{_kapi.get("bull_pct", 0):.0f}%</div>
+    <div class="tq-sub" style="color:#64748b">of forecast candles</div>
+  </div>
+</div>''',
+            unsafe_allow_html=True,
+        )
+        # Store for AI Lab debate context
+        kronos_summary = {
+            "direction":  _kapi["direction"],
+            "pct_change": _kapi.get("pct_change", 0),
+            "final_close":_kapi.get("final_close", sc["close"]),
+            "peak":       _kapi.get("peak", sc["close"]),
+            "trough":     _kapi.get("trough", sc["close"]),
+            "bull_pct":   _kapi.get("bull_pct", 50),
+            "candles":    _kapi.get("candles", 24),
+        }
+    else:
+        st.markdown(
+            '<div style="text-align:center;padding:1.5rem 0;color:#334155;' +
+            'font-size:0.78rem;letter-spacing:0.08em;font-weight:600;">' +
+            'Kronos backend warming up — retry in ~30s</div>',
+            unsafe_allow_html=True,
+        )
 elif kronos_summary is not None:
     kdir_color = "#10b981" if kronos_summary["direction"] == "UP" else "#f87171"
     kfig = make_kronos_chart(pred_df, sc["close"], base)
