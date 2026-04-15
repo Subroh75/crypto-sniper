@@ -5,11 +5,10 @@ services:
     region: singapore
     plan: standard
     buildCommand: >
-      pip install --no-cache-dir
-      torch==2.2.2
+      pip install --no-cache-dir torch==2.2.2
       --index-url https://download.pytorch.org/whl/cpu
-      && pip install --no-cache-dir -r backend/requirements.txt
-    startCommand: bash start.sh
+      && pip install --no-cache-dir -r requirements-api.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /
     envVars:
       - key: ALLOWED_ORIGINS
