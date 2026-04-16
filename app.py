@@ -935,38 +935,71 @@ if not HAS_KRONOS:
 
             kdir_color = "#10b981" if _kapi["direction"] == "UP" else "#f87171"
             bull_color = "#10b981" if _kapi.get("bull_pct", 0) >= 50 else "#f87171"
-            st.markdown(
-                f'''<div class="tq-grid">
+
+            _pc      = _kapi.get("pct_change", 0)
+            _bp      = _kapi.get("bull_pct", 0)
+            _peak    = _kapi.get("peak", current_close)
+            _trough  = _kapi.get("trough", current_close)
+            _fc      = _kapi.get("final_close", current_close)
+            _candles = _kapi.get("candles", 24)
+            _hrs     = _candles  # 1h interval assumed
+
+            # Direction label
+            _dir_label = "Rising ↑" if _kapi["direction"] == "UP" else "Falling ↓"
+            _dir_sub   = f"AI expects price to go {'up' if _kapi['direction'] == 'UP' else 'down'} over the next {_hrs} hours"
+
+            # Price move label
+            _move_label = f"{'▲' if _pc >= 0 else '▼'} {abs(_pc):.2f}%"
+            _move_sub   = f"{'Gaining' if _pc >= 0 else 'Losing'} {abs(_pc):.2f}% from where it is now"
+
+            # Price range
+            _range_pct  = (_peak - _trough) / current_close * 100 if current_close else 0
+            _range_sub  = f"Expected trading range: {_range_pct:.1f}% wide"
+
+            # Momentum label
+            _mom_label = "Mostly bullish" if _bp >= 62 else "Mostly bearish" if _bp <= 38 else "Mixed / choppy"
+            _mom_color = "#10b981" if _bp >= 62 else "#f87171" if _bp <= 38 else "#f59e0b"
+            _mom_sub   = f"{_bp:.0f}% of forecast hours close green — {'strong buying pressure' if _bp >= 62 else 'strong selling pressure' if _bp <= 38 else 'no clear direction'}"
+
+            # Final price
+            _fc_sub = f"Where AI thinks price lands after {_hrs} hours"
+
+            # R/R
+            _rr      = (_peak - current_close) / max(current_close - _trough, 0.0001)
+            _rr_color = "#10b981" if _rr >= 2 else "#f59e0b" if _rr >= 1 else "#f87171"
+            _rr_label = "Great setup" if _rr >= 2 else "Acceptable" if _rr >= 1 else "Avoid — bad odds"
+            _rr_sub   = f"For every $1 of downside risk, there is ${_rr:.1f} of upside potential"
+
+            st.markdown(f'''<div class="tq-grid">
   <div class="tq-card">
-    <div class="tq-lbl">Direction</div>
-    <div class="tq-val" style="color:{kdir_color}">{_kapi["direction"]}</div>
-    <div class="tq-sub" style="color:{kdir_color}">next {_kapi.get("candles", 24)} candles</div>
+    <div class="tq-lbl">AI Forecast</div>
+    <div class="tq-val" style="color:{kdir_color}">{_dir_label}</div>
+    <div class="tq-sub" style="color:#94a3b8">{_dir_sub}</div>
   </div>
   <div class="tq-card">
-    <div class="tq-lbl">Predicted Change</div>
-    <div class="tq-val" style="color:{kdir_color}">{_kapi.get("pct_change", 0):+.2f}%</div>
-    <div class="tq-sub" style="color:#64748b">vs current close</div>
+    <div class="tq-lbl">Expected Move</div>
+    <div class="tq-val" style="color:{kdir_color}">{_move_label}</div>
+    <div class="tq-sub" style="color:#94a3b8">{_move_sub}</div>
   </div>
   <div class="tq-card">
-    <div class="tq-lbl">Peak / Trough</div>
-    <div class="tq-val" style="font-size:0.9rem;color:#e2e8f0">{fmt_price(_kapi.get("peak", 0))}</div>
-    <div class="tq-sub" style="color:#f87171">{fmt_price(_kapi.get("trough", 0))}</div>
+    <div class="tq-lbl">Price Range</div>
+    <div class="tq-val" style="font-size:0.85rem;color:#e2e8f0">▲ {fmt_price(_peak)}</div>
+    <div class="tq-sub" style="color:#f87171">▼ {fmt_price(_trough)}&nbsp;&nbsp;<span style="color:#475569">({_range_pct:.1f}% range)</span></div>
   </div>
   <div class="tq-card">
-    <div class="tq-lbl">Bull Candles</div>
-    <div class="tq-val" style="color:{bull_color}">{_kapi.get("bull_pct", 0):.0f}%</div>
-    <div class="tq-sub" style="color:#64748b">of forecast candles</div>
+    <div class="tq-lbl">Momentum</div>
+    <div class="tq-val" style="color:{_mom_color}">{_mom_label}</div>
+    <div class="tq-sub" style="color:#94a3b8">{_mom_sub}</div>
   </div>
   <div class="tq-card">
-    <div class="tq-lbl">Final Close</div>
-    <div class="tq-val" style="font-size:0.9rem;color:#e2e8f0">{fmt_price(_kapi.get("final_close", current_close))}</div>
-    <div class="tq-sub" style="color:#64748b">predicted price</div>
+    <div class="tq-lbl">Target Price</div>
+    <div class="tq-val" style="font-size:0.9rem;color:#e2e8f0">{fmt_price(_fc)}</div>
+    <div class="tq-sub" style="color:#94a3b8">{_fc_sub}</div>
   </div>
   <div class="tq-card">
-    <div class="tq-lbl">Reward / Risk</div>
-    <div class="tq-val" style="color:{'#10b981' if (_kapi.get('peak',current_close)-current_close)/max(_kapi.get('peak',current_close)-_kapi.get('trough',current_close),0.0001)>=0.5 else '#f59e0b'}">
-      {((_kapi.get("peak",current_close)-current_close)/max(current_close-_kapi.get("trough",current_close),0.0001)):.1f}×</div>
-    <div class="tq-sub" style="color:#64748b">upside vs downside</div>
+    <div class="tq-lbl">Trade Quality</div>
+    <div class="tq-val" style="color:{_rr_color}">{_rr_label}</div>
+    <div class="tq-sub" style="color:#94a3b8">{_rr_sub}</div>
   </div>
 </div>''',
                 unsafe_allow_html=True,
@@ -1038,39 +1071,66 @@ elif kronos_summary is not None:
     kfig = make_kronos_chart(pred_df, sc["close"], base)
     if kfig:
         st.plotly_chart(kfig, use_container_width=True, config={"displayModeBar": False})
-    bull_color = "#10b981" if kronos_summary["bull_pct"] >= 50 else "#f87171"
+    # ── User-friendly local Torch path cards ──
+    _lpc   = kronos_summary["pct_change"]
+    _lbp   = kronos_summary["bull_pct"]
+    _lpeak = kronos_summary["peak"]
+    _ltro  = kronos_summary["trough"]
+    _lfc   = kronos_summary["final_close"]
+    _lcan  = kronos_summary["candles"]
+    _lclose = sc["close"]
+
+    _l_dir_label = "Rising ↑" if kronos_summary["direction"] == "UP" else "Falling ↓"
+    _l_dir_sub   = f"AI expects price to go {'up' if kronos_summary['direction'] == 'UP' else 'down'} over the next {_lcan} hours"
+
+    _l_move_label = f"{'▲' if _lpc >= 0 else '▼'} {abs(_lpc):.2f}%"
+    _l_move_sub   = f"{'Gaining' if _lpc >= 0 else 'Losing'} {abs(_lpc):.2f}% from where it is now"
+
+    _l_range_pct  = (_lpeak - _ltro) / _lclose * 100 if _lclose else 0
+    _l_range_sub  = f"Expected trading range: {_l_range_pct:.1f}% wide"
+
+    _l_mom_label = "Mostly bullish" if _lbp >= 62 else "Mostly bearish" if _lbp <= 38 else "Mixed / choppy"
+    _l_mom_color = "#10b981" if _lbp >= 62 else "#f87171" if _lbp <= 38 else "#f59e0b"
+    _l_mom_sub   = f"{_lbp:.0f}% of forecast hours close green — {'strong buying pressure' if _lbp >= 62 else 'strong selling pressure' if _lbp <= 38 else 'no clear direction'}"
+
+    _l_fc_sub = f"Where AI thinks price lands after {_lcan} hours"
+
+    _l_rr      = (_lpeak - _lclose) / max(_lclose - _ltro, 0.0001)
+    _l_rr_color = "#10b981" if _l_rr >= 2 else "#f59e0b" if _l_rr >= 1 else "#f87171"
+    _l_rr_label = "Great setup" if _l_rr >= 2 else "Acceptable" if _l_rr >= 1 else "Avoid — bad odds"
+    _l_rr_sub   = f"For every $1 of downside risk, there is ${_l_rr:.1f} of upside potential"
+
     st.markdown(f"""
 <div class="tq-grid">
   <div class="tq-card">
-    <div class="tq-lbl">Direction</div>
-    <div class="tq-val" style="color:{kdir_color}">{kronos_summary["direction"]}</div>
-    <div class="tq-sub" style="color:{kdir_color}">next {kronos_summary["candles"]} candles</div>
+    <div class="tq-lbl">AI Forecast</div>
+    <div class="tq-val" style="color:{kdir_color}">{_l_dir_label}</div>
+    <div class="tq-sub" style="color:#94a3b8">{_l_dir_sub}</div>
   </div>
   <div class="tq-card">
-    <div class="tq-lbl">Predicted Change</div>
-    <div class="tq-val" style="color:{kdir_color}">{kronos_summary["pct_change"]:+.2f}%</div>
-    <div class="tq-sub" style="color:#64748b">vs current close</div>
+    <div class="tq-lbl">Expected Move</div>
+    <div class="tq-val" style="color:{kdir_color}">{_l_move_label}</div>
+    <div class="tq-sub" style="color:#94a3b8">{_l_move_sub}</div>
   </div>
   <div class="tq-card">
-    <div class="tq-lbl">Peak / Trough</div>
-    <div class="tq-val" style="font-size:0.9rem;color:#e2e8f0">{fmt_price(kronos_summary["peak"])}</div>
-    <div class="tq-sub" style="color:#f87171">{fmt_price(kronos_summary["trough"])}</div>
+    <div class="tq-lbl">Price Range</div>
+    <div class="tq-val" style="font-size:0.85rem;color:#e2e8f0">▲ {fmt_price(_lpeak)}</div>
+    <div class="tq-sub" style="color:#f87171">▼ {fmt_price(_ltro)}&nbsp;&nbsp;<span style="color:#475569">({_l_range_pct:.1f}% range)</span></div>
   </div>
   <div class="tq-card">
-    <div class="tq-lbl">Bull Candles</div>
-    <div class="tq-val" style="color:{bull_color}">{kronos_summary["bull_pct"]:.0f}%</div>
-    <div class="tq-sub" style="color:#64748b">of forecast candles</div>
+    <div class="tq-lbl">Momentum</div>
+    <div class="tq-val" style="color:{_l_mom_color}">{_l_mom_label}</div>
+    <div class="tq-sub" style="color:#94a3b8">{_l_mom_sub}</div>
   </div>
   <div class="tq-card">
-    <div class="tq-lbl">Final Close</div>
-    <div class="tq-val" style="font-size:0.9rem;color:#e2e8f0">{fmt_price(kronos_summary["final_close"])}</div>
-    <div class="tq-sub" style="color:#64748b">predicted price</div>
+    <div class="tq-lbl">Target Price</div>
+    <div class="tq-val" style="font-size:0.9rem;color:#e2e8f0">{fmt_price(_lfc)}</div>
+    <div class="tq-sub" style="color:#94a3b8">{_l_fc_sub}</div>
   </div>
   <div class="tq-card">
-    <div class="tq-lbl">Reward / Risk</div>
-    <div class="tq-val" style="color:{'#10b981' if (kronos_summary['peak']-sc['close'])/max(sc['close']-kronos_summary['trough'],0.0001)>=1.0 else '#f59e0b'}">
-      {((kronos_summary['peak']-sc['close'])/max(sc['close']-kronos_summary['trough'],0.0001)):.1f}×</div>
-    <div class="tq-sub" style="color:#64748b">upside vs downside</div>
+    <div class="tq-lbl">Trade Quality</div>
+    <div class="tq-val" style="color:{_l_rr_color}">{_l_rr_label}</div>
+    <div class="tq-sub" style="color:#94a3b8">{_l_rr_sub}</div>
   </div>
 </div>
 """, unsafe_allow_html=True)
