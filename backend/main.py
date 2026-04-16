@@ -127,6 +127,13 @@ class BacktestRequest(BaseModel):
     step:     int = Field(24, ge=4, le=96, description="Candles between walk-forward steps")
 
 
+class MultiBacktestRequest(BaseModel):
+    symbols:  list[str] = Field(default_factory=list, description="List of tickers (empty = top 10)")
+    pred_len: int = Field(24, ge=4, le=96)
+    lookback: int = Field(200, ge=50, le=500)
+    step:     int = Field(24, ge=4, le=96)
+
+
 class BacktestResponse(BaseModel):
     symbol:             str
     total_windows:      int
