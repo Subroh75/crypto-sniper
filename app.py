@@ -894,21 +894,21 @@ if not HAS_KRONOS:
 
     @st.cache_data(ttl=300, show_spinner=False)
     def _fetch_kronos_api(symbol, interval):
-        try:
-            import requests as _rk
-            _r = _rk.post(
-                f"{_API_BASE_K}/kronos",
-                json={"symbol": symbol, "interval": interval, "pred_len": 24},
-                timeout=30,
-            )
-            _r.raise_for_status()
-            return _r.json()
-        except Exception:
-            return None
+        import requests as _rk
+        _r = _rk.post(
+            f"{_API_BASE_K}/kronos",
+            json={"symbol": symbol, "interval": interval, "pred_len": 24},
+            timeout=30,
+        )
+        _r.raise_for_status()
+        return _r.json()
 
     def _kronos_fragment(symbol, interval, current_close, sc_scores):
         with st.spinner("Fetching Kronos AI forecast…"):
-            _kapi = _fetch_kronos_api(symbol, interval)
+            try:
+                _kapi = _fetch_kronos_api(symbol, interval)
+            except Exception:
+                _kapi = None
 
         if _kapi and _kapi.get("available") and _kapi.get("direction"):
             # Reconstruct pred_df from forecast array so the chart renders
@@ -994,11 +994,14 @@ if not HAS_KRONOS:
             st.session_state["kronos_summary"] = _kapi_summary
         else:
             st.markdown(
-                '<div style="text-align:center;padding:1.5rem 0;color:#334155;'
-                'font-size:0.78rem;letter-spacing:0.08em;font-weight:600;">'
-                'Kronos backend warming up — retry in ~30s</div>',
+                '<div style="text-align:center;padding:1rem 0 0.5rem;color:#64748b;'
+                'font-size:0.78rem;letter-spacing:0.08em;">'
+                'Kronos is warming up on the backend.</div>',
                 unsafe_allow_html=True,
             )
+            if st.button("Retry Kronos forecast ↻", key="retry_kronos"):
+                st.cache_data.clear()
+                st.rerun()
 
     _kronos_fragment(base, interval, sc["close"], sc)
     # Read back for backtest pill and any remaining local references
