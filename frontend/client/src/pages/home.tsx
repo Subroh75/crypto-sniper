@@ -520,10 +520,28 @@ export default function Home() {
                       {((kronosData.predicted_change ?? 0) >= 0 ? "+" : "")}{kronosData.predicted_change?.toFixed(2)}%
                     </p>
                   </div>
-                  <div className="bg-surface-2 rounded-xl p-3 border border-border/50 text-center">
-                    <p className="text-xs text-text-muted mb-1">Horizon</p>
-                    <p className="text-base font-bold font-mono text-violet-400">
-                      {kronosData.candles ?? kronosData.forecast?.length ?? 24} candles
+                  <div className="bg-surface-2 rounded-xl p-3 border border-border/50 text-center relative overflow-hidden">
+                    {/* confidence fill bar behind the card */}
+                    <div
+                      className="absolute inset-0 rounded-xl transition-all duration-700"
+                      style={{
+                        width: `${kronosData.confidence ?? 0}%`,
+                        background:
+                          (kronosData.confidence ?? 0) >= 70 ? "rgba(16,185,129,0.07)" :
+                          (kronosData.confidence ?? 0) >= 40 ? "rgba(251,191,36,0.07)" :
+                                                               "rgba(248,113,113,0.07)",
+                      }}
+                    />
+                    <p className="relative text-xs text-text-muted mb-1">Confidence</p>
+                    <p className="relative text-base font-bold font-mono"
+                      style={{
+                        color:
+                          (kronosData.confidence ?? 0) >= 70 ? "#10b981" :
+                          (kronosData.confidence ?? 0) >= 40 ? "#fbbf24" :
+                                                               "#f87171",
+                      }}>
+                      {kronosData.confidence?.toFixed(1) ?? "—"}
+                      <span className="text-xs font-normal text-text-muted ml-0.5">/100</span>
                     </p>
                   </div>
                   {/* Row 2 */}

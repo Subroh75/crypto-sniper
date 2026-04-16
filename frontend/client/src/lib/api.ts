@@ -63,6 +63,7 @@ export interface KronosResponse {
   trough_price?: number;
   bull_pct?: number;        // % of predicted candles that are bullish
   candles?: number;         // number of forecast candles
+  confidence?: number;      // 0–100 composite: range tightness + directional consensus
   forecast?: KronosCandle[];
   error?: string;
 }

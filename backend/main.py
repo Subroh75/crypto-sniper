@@ -181,6 +181,26 @@ def _summarise_kronos(pred, current_close: float) -> dict:
     pct       = (final - current_close) / current_close * 100
     bull_pct  = float((pred["close"] > pred["open"]).mean() * 100)
     direction = "UP" if final > current_close else "DOWN"
+
+    # ── Confidence score (0–100) ──────────────────────────────────────────
+    # Two components equally weighted:
+    #
+    # 1. Range tightness (50 pts): how narrow the predicted high–low range
+    #    is relative to the current price. A tight range means the model
+    #    is converging on a price path rather than spanning wide uncertainty.
+    #    Normalised so a range of 0% → 50pts, ≥10% range → 0pts.
+    #
+    # 2. Directional consensus (50 pts): how far bull_pct deviates from
+    #    the 50/50 coin-flip baseline. 100% bull or 0% bull = max consensus
+    #    (50pts); 50% = no consensus (0pts).
+    #
+    # Result is clamped to [0, 100] and rounded to one decimal.
+
+    range_pct   = (peak - trough) / current_close * 100 if current_close else 10.0
+    tightness   = max(0.0, 50.0 * (1.0 - range_pct / 10.0))   # 0pts at >=10% spread
+    consensus   = 50.0 * abs(bull_pct - 50.0) / 50.0           # 50pts at 100% or 0% bull
+    confidence  = round(min(100.0, max(0.0, tightness + consensus)), 1)
+
     return {
         "final_close": round(final, 6),
         "pct_change":  round(pct, 2),
@@ -189,6 +209,7 @@ def _summarise_kronos(pred, current_close: float) -> dict:
         "bull_pct":    round(bull_pct, 1),
         "direction":   direction,
         "candles":     len(pred),
+        "confidence":  confidence,
     }
 
 
@@ -321,7 +342,7 @@ def kronos_forecast(req: KronosRequest):
         return KronosResponse(
             symbol=base, interval=req.interval,
             direction="N/A", pct_change=0.0, final_close=0.0,
-            peak=0.0, trough=0.0, bull_pct=0.0, candles=0,
+            peak=0.0, trough=0.0, bull_pct=0.0, candles=0, confidence=0.0,
             forecast=[], available=False,
         )
 
@@ -352,6 +373,7 @@ def kronos_forecast(req: KronosRequest):
         trough      = summary["trough"],
         bull_pct    = summary["bull_pct"],
         candles     = summary["candles"],
+        confidence  = summary["confidence"],
         forecast    = forecast_rows,
         available   = True,
     )
