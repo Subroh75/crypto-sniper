@@ -917,20 +917,22 @@ _API_BASE = os.getenv("API_BASE", "https://crypto-sniper.onrender.com")
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def _fetch_backtest_summary(symbol):
+    """Fire-and-forget backtest fetch. Short timeout so it never blocks the page.
+    Returns None on cold cache / slow response — pill is hidden until cache warms.
+    """
     try:
         import requests as _rq
         _resp = _rq.post(
             f"{_API_BASE}/backtest",
             json={"symbol": symbol, "pred_len": 24, "lookback": 200, "step": 24},
-            timeout=420,
+            timeout=15,  # fail fast on cold Render — don't block the page
         )
         _resp.raise_for_status()
         return _resp.json()
     except Exception:
         return None
 
-with st.spinner("Computing Kronos backtest accuracy…"):
-    _bt = _fetch_backtest_summary(base)
+_bt = _fetch_backtest_summary(base)  # cached 1h — non-blocking on warm cache
 
 if _bt and _bt.get("available") and not _bt.get("error"):
     _da   = _bt["direction_accuracy"]
