@@ -8,3 +8,5 @@ einops==0.8.1
 huggingface_hub>=0.20.0
 safetensors>=0.4.0
 tqdm>=4.60.0
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.2.2+cpu
