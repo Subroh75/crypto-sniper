@@ -503,8 +503,9 @@ export default function Home() {
               </div>
             ) : kronosData && kronosData.available ? (
               <>
-                {/* Direction cards */}
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 mb-4">
+                {/* Direction cards — 3×2 symmetrical grid */}
+                <div className="grid grid-cols-3 gap-2.5 mb-4">
+                  {/* Row 1 */}
                   <div className="bg-surface-2 rounded-xl p-3 border border-border/50 text-center">
                     <p className="text-xs text-text-muted mb-1">Direction</p>
                     <p className="text-base font-bold font-mono"
@@ -520,6 +521,13 @@ export default function Home() {
                     </p>
                   </div>
                   <div className="bg-surface-2 rounded-xl p-3 border border-border/50 text-center">
+                    <p className="text-xs text-text-muted mb-1">Horizon</p>
+                    <p className="text-base font-bold font-mono text-violet-400">
+                      {kronosData.candles ?? kronosData.forecast?.length ?? 24} candles
+                    </p>
+                  </div>
+                  {/* Row 2 */}
+                  <div className="bg-surface-2 rounded-xl p-3 border border-border/50 text-center">
                     <p className="text-xs text-text-muted mb-1">Peak</p>
                     <p className="text-base font-bold font-mono text-text">
                       ${formatPrice(kronosData.peak_price ?? 0)}
@@ -529,6 +537,13 @@ export default function Home() {
                     <p className="text-xs text-text-muted mb-1">Trough</p>
                     <p className="text-base font-bold font-mono text-text">
                       ${formatPrice(kronosData.trough_price ?? 0)}
+                    </p>
+                  </div>
+                  <div className="bg-surface-2 rounded-xl p-3 border border-border/50 text-center">
+                    <p className="text-xs text-text-muted mb-1">Bull Candles</p>
+                    <p className="text-base font-bold font-mono"
+                      style={{ color: (kronosData.bull_pct ?? 0) >= 50 ? "#10b981" : "#f87171" }}>
+                      {kronosData.bull_pct?.toFixed(0) ?? "—"}%
                     </p>
                   </div>
                 </div>

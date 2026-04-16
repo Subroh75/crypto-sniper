@@ -61,6 +61,8 @@ export interface KronosResponse {
   predicted_change?: number;
   peak_price?: number;
   trough_price?: number;
+  bull_pct?: number;        // % of predicted candles that are bullish
+  candles?: number;         // number of forecast candles
   forecast?: KronosCandle[];
   error?: string;
 }
