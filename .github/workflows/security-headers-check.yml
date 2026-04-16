@@ -1,0 +1,123 @@
+name: Security Headers Check
+
+# Runs after every push to main (once Render has redeployed)
+# and can be triggered manually.
+# Fails the build if HSTS or CSP headers are absent from the Render API.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  check-headers:
+    name: Verify Security Headers on Render API
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    env:
+      API_URL: https://crypto-sniper-api.onrender.com
+
+    steps:
+      - name: Wait for Render deploy to settle
+        if: github.event_name == 'push'
+        run: |
+          echo "Waiting 60s for Render autodeploy to complete..."
+          sleep 60
+
+      - name: Fetch response headers
+        id: fetch
+        run: |
+          echo "Fetching headers from $API_URL ..."
+          # -D - dumps headers to stdout; -o /dev/null discards the body
+          HEADERS=$(curl --silent --show-error --fail \
+            --max-time 60 \
+            -D - -o /dev/null \
+            "$API_URL")
+          echo "--- Raw headers ---"
+          echo "$HEADERS"
+          # Save for later steps (lowercase for reliable matching)
+          echo "$HEADERS" | tr '[:upper:]' '[:lower:]' > /tmp/headers.txt
+
+      - name: Check Strict-Transport-Security (HSTS)
+        run: |
+          echo "Checking for Strict-Transport-Security header..."
+          if grep -qi "strict-transport-security" /tmp/headers.txt; then
+            VALUE=$(grep -i "strict-transport-security" /tmp/headers.txt | head -1)
+            echo "✅ HSTS present: $VALUE"
+
+            # Enforce max-age is at least 1 year (31536000)
+            MAX_AGE=$(echo "$VALUE" | grep -oP 'max-age=\K[0-9]+' || echo "0")
+            if [ "$MAX_AGE" -lt 31536000 ]; then
+              echo "❌ HSTS max-age is $MAX_AGE — must be >= 31536000 (1 year)"
+              exit 1
+            fi
+            echo "✅ HSTS max-age=$MAX_AGE — OK"
+
+            # Warn (don't fail) if preload or includeSubDomains are missing
+            if ! echo "$VALUE" | grep -qi "includesubdomains"; then
+              echo "⚠️  HSTS missing includeSubDomains"
+            fi
+            if ! echo "$VALUE" | grep -qi "preload"; then
+              echo "⚠️  HSTS missing preload"
+            fi
+          else
+            echo "❌ Strict-Transport-Security header is MISSING"
+            exit 1
+          fi
+
+      - name: Check Content-Security-Policy (CSP)
+        run: |
+          echo "Checking for Content-Security-Policy header..."
+          if grep -qi "content-security-policy" /tmp/headers.txt; then
+            VALUE=$(grep -i "content-security-policy" /tmp/headers.txt | head -1)
+            echo "✅ CSP present: $VALUE"
+
+            # Must have at least default-src or connect-src
+            if ! echo "$VALUE" | grep -qi "default-src\|connect-src"; then
+              echo "❌ CSP is present but missing default-src or connect-src directive"
+              exit 1
+            fi
+            echo "✅ CSP has required directives — OK"
+
+            # Warn if frame-ancestors is missing (clickjacking protection)
+            if ! echo "$VALUE" | grep -qi "frame-ancestors"; then
+              echo "⚠️  CSP missing frame-ancestors directive"
+            fi
+          else
+            echo "❌ Content-Security-Policy header is MISSING"
+            exit 1
+          fi
+
+      - name: Check supporting hardening headers
+        run: |
+          FAIL=0
+
+          echo "Checking X-Content-Type-Options..."
+          if grep -qi "x-content-type-options.*nosniff" /tmp/headers.txt; then
+            echo "✅ X-Content-Type-Options: nosniff"
+          else
+            echo "⚠️  X-Content-Type-Options: nosniff missing (non-fatal)"
+          fi
+
+          echo "Checking X-Frame-Options..."
+          if grep -qi "x-frame-options" /tmp/headers.txt; then
+            echo "✅ X-Frame-Options present"
+          else
+            echo "⚠️  X-Frame-Options missing (non-fatal — covered by CSP frame-ancestors)"
+          fi
+
+          echo "Checking Referrer-Policy..."
+          if grep -qi "referrer-policy" /tmp/headers.txt; then
+            echo "✅ Referrer-Policy present"
+          else
+            echo "⚠️  Referrer-Policy missing (non-fatal)"
+          fi
+
+      - name: Summary
+        if: success()
+        run: |
+          echo ""
+          echo "🔒 Security header check passed for $API_URL"
+          echo "   HSTS   ✅"
+          echo "   CSP    ✅"
