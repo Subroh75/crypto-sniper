@@ -4,21 +4,35 @@ Called by main.py /analyze when HELIUS_API_KEY is set and chain == 'solana'.
 
 Endpoints used (all via Helius mainnet RPC):
   - getTokenLargestAccounts  : top-20 token accounts by balance
-  - getAccountInfo           : resolve token account → owner wallet
+  - getAccountInfo           : resolve token account -> owner wallet
   - getTokenSupply           : total supply + decimals
-  - getAsset (DAS)           : token name, symbol, holder count
+  - getAsset (DAS)           : token name, symbol
+  - getTokenAccounts         : paginated holder count (up to MAX_HOLDER_PAGES * 1000)
   - getSignaturesForAddress  : wallet tx count + first-seen date
+
+Holder count pagination:
+  Helius getTokenAccounts returns max 1000 accounts per page.
+  We paginate up to MAX_HOLDER_PAGES (env: HELIUS_MAX_HOLDER_PAGES, default 50).
+  If truncated at the cap, totalHolders reflects the capped count and
+  holderCountCapped=True is set so the frontend can render "50,000+".
+  Tokens like USDC (5M+ holders) or JUP (1M+ holders) will hit the cap.
 """
 from __future__ import annotations
 
 import os
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Optional, Tuple
 
 import httpx
 
 HELIUS_BASE = "https://mainnet.helius-rpc.com/"
-TIMEOUT = 20  # seconds
+TIMEOUT = 20  # seconds per RPC call
+
+# Max pages for holder-count pagination: each page = 1000 accounts.
+# Override via HELIUS_MAX_HOLDER_PAGES env var (e.g. set to 5000 for ~5M holders).
+# Default 50 -> covers up to 50,000 unique holders exactly;
+# beyond that returns the capped count with holderCountCapped=True.
+MAX_HOLDER_PAGES = int(os.getenv("HELIUS_MAX_HOLDER_PAGES", "50"))
 
 
 def _rpc(method: str, params: list, api_key: str) -> dict:
@@ -133,6 +147,67 @@ def wallet_age_months(sigs: list[dict]) -> int:
     return 0
 
 
+# ── Holder count (paginated) ───────────────────────────────────────────────
+
+def fetch_total_holder_count(mint: str, api_key: str) -> Tuple[int, bool]:
+    """
+    Paginates Helius getTokenAccounts to count unique owner wallets.
+    Returns (count, capped) where capped=True means the real number exceeds
+    MAX_HOLDER_PAGES * 1000 and the returned count is a lower-bound estimate.
+
+    One wallet can hold multiple token accounts (e.g. via different programs),
+    so we deduplicate on owner address for an accurate unique-holder count.
+
+    Stops when:
+      - getTokenAccounts returns an empty token_accounts list (all pages done)
+      - MAX_HOLDER_PAGES pages have been fetched (cap reached)
+    """
+    url = f"{HELIUS_BASE}?api-key={api_key}"
+    unique_owners: set = set()
+    page = 1
+    capped = False
+
+    while True:
+        payload = {
+            "jsonrpc": "2.0",
+            "id": "holder-count",
+            "method": "getTokenAccounts",
+            "params": {
+                "mint": mint,
+                "page": page,
+                "limit": 1000,
+                "displayOptions": {},
+            },
+        }
+        try:
+            r = httpx.post(url, json=payload, timeout=TIMEOUT)
+            r.raise_for_status()
+            data = r.json()
+        except Exception as exc:
+            print(f"[helius] getTokenAccounts page {page} error: {exc}")
+            break
+
+        result = data.get("result") or {}
+        accounts = result.get("token_accounts") or []
+
+        if not accounts:
+            # Empty page — we've exhausted all token accounts
+            break
+
+        for acct in accounts:
+            owner = acct.get("owner")
+            if owner:
+                unique_owners.add(owner)
+
+        if page >= MAX_HOLDER_PAGES:
+            capped = True
+            break
+
+        page += 1
+
+    return len(unique_owners), capped
+
+
 # ── Main pipeline ─────────────────────────────────────────────────────────────
 
 def live_solana(mint: str, api_key: str) -> dict:
@@ -165,6 +240,13 @@ def live_solana(mint: str, api_key: str) -> dict:
 
     # Use total_supply for percentages if available, else use top-20 sum
     denom = float(total_supply) if total_supply > 0 else total_top20
+
+    # 2b. Paginated total holder count (unique wallets across all token accounts)
+    try:
+        total_holders, holder_count_capped = fetch_total_holder_count(mint, api_key)
+    except Exception as exc:
+        print(f"[helius] holder count failed: {exc}")
+        total_holders, holder_count_capped = 0, False
 
     # 3. Enrich each holder
     holders: list[dict] = []
@@ -220,7 +302,7 @@ def live_solana(mint: str, api_key: str) -> dict:
         "tokenSymbol":           symbol,
         "contractAddress":       mint,
         "chain":                 "solana",
-        "totalHolders":          0,      # full holder count requires paginated getTokenAccounts
+        "totalHolders":          total_holders,
         "totalSupply":           total_supply,
         "top10Percentage":       round(top10_pct, 2),
         "top20Percentage":       round(top20_pct, 2),
@@ -230,6 +312,8 @@ def live_solana(mint: str, api_key: str) -> dict:
         "concentrationScore":    round(100 - top10_pct, 1),
         "analysisTimestamp":     datetime.now(timezone.utc).isoformat(),
         "dataSource":            "helius-live",
+        "holderCountCapped":      holder_count_capped,
+        "holderCountCap":         MAX_HOLDER_PAGES * 1000 if holder_count_capped else None,
     }
 
 
@@ -249,5 +333,7 @@ def _partial_result(mint: str, name: str, symbol: str, supply: int) -> dict:
         "concentrationScore":    0.0,
         "analysisTimestamp":     datetime.now(timezone.utc).isoformat(),
         "dataSource":            "helius-partial",
+        "holderCountCapped":      False,
+        "holderCountCap":         None,
         "error":                 "No holder accounts returned from Helius.",
     }
