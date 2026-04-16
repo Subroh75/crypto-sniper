@@ -13,6 +13,8 @@ import { analyse, kronos } from "@/lib/api";
 import type { AnalyseResponse, KronosResponse } from "@/lib/api";
 import { analyzeToken } from "@/lib/onchain-api";
 import type { Chain } from "@/lib/onchain-api";
+import { lookupTicker } from "@/lib/ticker-contracts";
+import type { ContractInfo } from "@/lib/ticker-contracts";
 import { RiskAlert } from "@/components/onchain/RiskAlert";
 import { KpiCards } from "@/components/onchain/KpiCards";
 import { HolderPieChart } from "@/components/onchain/HolderPieChart";
@@ -105,11 +107,29 @@ export default function Home() {
   const [mode, setMode] = useState<AnalysisMode>("technical");
   const [onchainAddress, setOnchainAddress] = useState("");
   const [onchainChain, setOnchainChain] = useState<Chain>("ethereum");
+  const [prefillInfo, setPrefillInfo] = useState<ContractInfo | null>(null);
+
+  const switchToFundamental = useCallback(() => {
+    // Auto-populate contract address from the current Technical symbol
+    const match = lookupTicker(symbol);
+    if (match && !onchainAddress) {
+      setOnchainAddress(match.address);
+      setOnchainChain(match.chain);
+      setPrefillInfo(match);
+    }
+    setMode("fundamental");
+  }, [symbol, onchainAddress]);
+
+  const switchToTechnical = useCallback(() => {
+    setMode("technical");
+  }, []);
+
   const onchainMutation = useMutation({
     mutationFn: ({ addr, ch }: { addr: string; ch: Chain }) => analyzeToken(addr, ch),
   });
   const handleOnchainAnalyze = useCallback(() => {
     if (!onchainAddress.trim()) return;
+    setPrefillInfo(null); // dismiss banner once user explicitly runs
     onchainMutation.mutate({ addr: onchainAddress.trim(), ch: onchainChain });
   }, [onchainAddress, onchainChain, onchainMutation]);
 
@@ -254,7 +274,7 @@ export default function Home() {
           {/* Mode toggle: Technical / Fundamental */}
           <div className="flex gap-1 p-1 bg-surface-2 border border-border rounded-xl shrink-0">
             <button
-              onClick={() => setMode("technical")}
+              onClick={switchToTechnical}
               data-testid="button-mode-technical"
               className={`flex items-center gap-1.5 h-9 px-3 rounded-lg text-xs font-semibold transition-all ${
                 mode === "technical"
@@ -267,7 +287,7 @@ export default function Home() {
               <span>Technical</span>
             </button>
             <button
-              onClick={() => setMode("fundamental")}
+              onClick={switchToFundamental}
               data-testid="button-mode-fundamental"
               className={`flex items-center gap-1.5 h-9 px-3 rounded-lg text-xs font-semibold transition-all ${
                 mode === "fundamental"
@@ -317,6 +337,26 @@ export default function Home() {
         {/* Fundamental (on-chain) panel — shown when mode === 'fundamental' */}
         {mode === "fundamental" && (
           <div className="mt-6 max-w-5xl mx-auto animate-fadeIn">
+            {/* Pre-fill banner */}
+            {prefillInfo && (
+              <div className="max-w-3xl mx-auto mb-3 flex items-center gap-2.5 px-4 py-2.5 rounded-xl border border-teal-400/20 bg-teal-400/5">
+                <Crosshair size={13} className="text-teal-400 shrink-0" />
+                <p className="text-xs text-text-muted flex-1">
+                  Pre-filled with{" "}
+                  <span className="font-semibold text-teal-400">{prefillInfo.label}</span>
+                  {" — canonical contract for "}
+                  <span className="font-mono font-semibold text-text">{symbol.toUpperCase()}</span>
+                  . Edit below to use a different address.
+                </p>
+                <button
+                  onClick={() => setPrefillInfo(null)}
+                  className="text-text-faint hover:text-text-muted transition-colors text-xs shrink-0"
+                >
+                  ×
+                </button>
+              </div>
+            )}
+
             {/* On-chain search bar */}
             <div className="max-w-3xl mx-auto mb-6">
               <div className="flex rounded-xl overflow-hidden border border-border bg-surface focus-within:border-teal-400/50 transition-all">
