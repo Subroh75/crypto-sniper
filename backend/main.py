@@ -16,8 +16,6 @@ from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response
-from starlette.middleware.base import BaseHTTPMiddleware
 from pydantic import BaseModel, Field
 
 from core import (
@@ -44,33 +42,6 @@ app = FastAPI(
 # Allow all origins during development; tighten in production via ALLOWED_ORIGINS env var
 ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "*").split(",")
 
-# ── Security headers middleware ────────────────────────────────────────────────
-# Only enforces HTTPS on known production origins; localhost is exempt.
-_PROD_ORIGINS = {o.strip() for o in ALLOWED_ORIGINS if o.strip().startswith("https://")}
-
-class SecurityHeadersMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request: Request, call_next):
-        response = await call_next(request)
-        origin = request.headers.get("origin", "")
-        # HSTS — tells browsers to always use HTTPS for this domain (1 year)
-        response.headers["Strict-Transport-Security"] = (
-            "max-age=31536000; includeSubDomains; preload"
-        )
-        # CSP — only allow requests from known production origins and self
-        allowed_origins_csp = " ".join(_PROD_ORIGINS) if _PROD_ORIGINS else "'self'"
-        response.headers["Content-Security-Policy"] = (
-            f"default-src 'self'; "
-            f"connect-src 'self' {allowed_origins_csp} https://crypto-sniper-api.onrender.com; "
-            f"frame-ancestors 'none'"
-        )
-        # Additional hardening headers
-        response.headers["X-Content-Type-Options"] = "nosniff"
-        response.headers["X-Frame-Options"] = "DENY"
-        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-        return response
-
-app.add_middleware(SecurityHeadersMiddleware)
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
@@ -78,6 +49,28 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ── Security headers ──────────────────────────────────────────────────────────
+# Injected on every response via @app.middleware — avoids BaseHTTPMiddleware
+# streaming conflicts present in FastAPI 0.115+.
+_PROD_ORIGINS = {o.strip() for o in ALLOWED_ORIGINS if o.strip().startswith("https://")}
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    response = await call_next(request)
+    # HSTS — browsers upgrade to HTTPS for 1 year
+    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains; preload"
+    # CSP — only known origins may connect; no iframes
+    csp_origins = " ".join(_PROD_ORIGINS) if _PROD_ORIGINS else "'self'"
+    response.headers["Content-Security-Policy"] = (
+        f"default-src 'self'; "
+        f"connect-src 'self' {csp_origins} https://crypto-sniper-api.onrender.com; "
+        f"frame-ancestors 'none'"
+    )
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    return response
 
 
 # ──────────────────────────────────────────────────────────────────────────────
