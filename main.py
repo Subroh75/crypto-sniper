@@ -224,47 +224,22 @@ def _fetch_and_score(symbol: str, interval: str):
 # ──────────────────────────────────────────────────────────────────────────────
 
 
-@app.on_event("startup")
-async def _warmup():
-    """Pre-load Kronos model on startup so first request isn't cold."""
-    import asyncio, concurrent.futures
-    loop = asyncio.get_event_loop()
-    with concurrent.futures.ThreadPoolExecutor() as pool:
-        await loop.run_in_executor(pool, _get_kronos_predictor)
-    if _KRONOS_PREDICTOR is not None:
-        print(f"[startup] Kronos loaded OK", flush=True)
-    else:
-        print(f"[startup] Kronos load FAILED: {_KRONOS_ERROR}", flush=True)
-
 @app.get("/", tags=["Health"])
 def health():
-    return {
-        "status": "ok",
-        "service": "Crypto Sniper API",
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-    }
-
-
-
-@app.get("/status", tags=["Health"])
-def status():
-    """Full service status including Kronos model load state."""
+    """Health + Kronos model status."""
     try:
-        import torch
-        torch_ver = torch.__version__
-    except Exception as e:
-        torch_ver = f"ERROR: {e}"
-
+        import torch as _t
+        torch_ver = _t.__version__
+    except Exception as _te:
+        torch_ver = f"unavailable: {_te}"
     predictor = _get_kronos_predictor()
     return {
-        "service":   "Crypto Sniper API",
-        "status":    "ok",
-        "torch":     torch_ver,
-        "kronos": {
-            "loaded":    _KRONOS_LOADED,
-            "available": predictor is not None,
-            "error":     _KRONOS_ERROR or None,
-        }
+        "status":           "ok",
+        "service":          "Crypto Sniper API",
+        "timestamp":        datetime.now(timezone.utc).isoformat(),
+        "torch":            torch_ver,
+        "kronos_available": predictor is not None,
+        "kronos_error":     _KRONOS_ERROR or None,
     }
 
 @app.post("/analyse", response_model=AnalyseResponse, tags=["Signal"])
