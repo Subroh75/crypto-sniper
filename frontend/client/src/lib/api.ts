@@ -58,9 +58,12 @@ export interface KronosResponse {
   interval: string;
   available: boolean;
   direction?: string;       // "UP" | "DOWN"
-  predicted_change?: number;
-  peak_price?: number;
-  trough_price?: number;
+  pct_change?: number;      // predicted % change (API field name)
+  predicted_change?: number;// alias kept for backwards compat — prefer pct_change
+  peak?: number;            // predicted peak price (API field name)
+  peak_price?: number;      // alias kept for backwards compat — prefer peak
+  trough?: number;          // predicted trough price (API field name)
+  trough_price?: number;    // alias kept for backwards compat — prefer trough
   bull_pct?: number;        // % of predicted candles that are bullish
   candles?: number;         // number of forecast candles
   confidence?: number;      // 0–100 composite: range tightness + directional consensus

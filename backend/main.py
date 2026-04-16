@@ -352,15 +352,16 @@ def kronos_forecast(req: KronosRequest):
 
     summary = _summarise_kronos(pred, sc["close"])
 
-    # Serialise forecast rows
+    # Serialise forecast rows — index is y_timestamp (DatetimeIndex)
     forecast_rows = []
-    for _, row in pred.iterrows():
+    for ts, row in pred.iterrows():
         forecast_rows.append({
-            "open":   round(float(row.get("open",  0)), 6),
-            "high":   round(float(row.get("high",  0)), 6),
-            "low":    round(float(row.get("low",   0)), 6),
-            "close":  round(float(row.get("close", 0)), 6),
-            "volume": round(float(row.get("volume", 0)), 2),
+            "timestamp": pd.Timestamp(ts).isoformat(),
+            "open":      round(float(row.get("open",   0)), 6),
+            "high":      round(float(row.get("high",   0)), 6),
+            "low":       round(float(row.get("low",    0)), 6),
+            "close":     round(float(row.get("close",  0)), 6),
+            "volume":    round(float(row.get("volume",  0)), 2),
         })
 
     return KronosResponse(

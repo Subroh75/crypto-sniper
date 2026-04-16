@@ -516,8 +516,8 @@ export default function Home() {
                   <div className="bg-surface-2 rounded-xl p-3 border border-border/50 text-center">
                     <p className="text-xs text-text-muted mb-1">Predicted Δ</p>
                     <p className="text-base font-bold font-mono"
-                      style={{ color: (kronosData.predicted_change ?? 0) >= 0 ? "#10b981" : "#f87171" }}>
-                      {((kronosData.predicted_change ?? 0) >= 0 ? "+" : "")}{kronosData.predicted_change?.toFixed(2)}%
+                      style={{ color: (kronosData.pct_change ?? 0) >= 0 ? "#10b981" : "#f87171" }}>
+                      {((kronosData.pct_change ?? 0) >= 0 ? "+" : "")}{kronosData.pct_change?.toFixed(2)}%
                     </p>
                   </div>
                   <div className="bg-surface-2 rounded-xl p-3 border border-border/50 text-center relative overflow-hidden">
@@ -548,13 +548,13 @@ export default function Home() {
                   <div className="bg-surface-2 rounded-xl p-3 border border-border/50 text-center">
                     <p className="text-xs text-text-muted mb-1">Peak</p>
                     <p className="text-base font-bold font-mono text-text">
-                      ${formatPrice(kronosData.peak_price ?? 0)}
+                      ${formatPrice(kronosData.peak ?? 0)}
                     </p>
                   </div>
                   <div className="bg-surface-2 rounded-xl p-3 border border-border/50 text-center">
                     <p className="text-xs text-text-muted mb-1">Trough</p>
                     <p className="text-base font-bold font-mono text-text">
-                      ${formatPrice(kronosData.trough_price ?? 0)}
+                      ${formatPrice(kronosData.trough ?? 0)}
                     </p>
                   </div>
                   <div className="bg-surface-2 rounded-xl p-3 border border-border/50 text-center">
