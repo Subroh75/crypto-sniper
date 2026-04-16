@@ -256,7 +256,7 @@ def health():
         "torch":            torch_ver,
         "kronos_available":    predictor is not None,
         "kronos_load_error":   _KRONOS_ERROR or None,
-        "kronos_infer_error":  _KRONOS_INFER_ERROR if "_KRONOS_INFER_ERROR" in dir() else None,
+        "kronos_infer_error":  _KRONOS_INFER_ERROR or None,
     }
 
 @app.post("/analyse", response_model=AnalyseResponse, tags=["Signal"])
