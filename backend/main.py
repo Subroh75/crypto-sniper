@@ -583,17 +583,25 @@ def analyze_onchain(req: OnChainRequest):
     """
     On-chain holder analysis for an ERC-20 (Ethereum) or SPL (Solana) token.
 
-    Currently returns demo data. To enable live data:
-    - Ethereum: set ETHERSCAN_API_KEY env var and replace _demo_onchain() with
-      live Etherscan calls (see cryptosniper-onchain/README.md).
-    - Solana:   set HELIUS_API_KEY env var and replace with Helius RPC calls.
+    - Ethereum: live data via Etherscan when ETHERSCAN_API_KEY env var is set.
+    - Solana:   falls back to demo data (Helius key not yet configured).
     """
     if req.chain not in ("ethereum", "solana"):
         raise HTTPException(status_code=400, detail="chain must be 'ethereum' or 'solana'")
     if not req.address.strip():
         raise HTTPException(status_code=400, detail="address is required")
 
-    # TODO: swap _demo_onchain() for live fetch once API keys are configured
-    # etherscan_key = os.getenv("ETHERSCAN_API_KEY")
-    # helius_key    = os.getenv("HELIUS_API_KEY")
-    return _demo_onchain(req.address.strip(), req.chain)
+    address = req.address.strip()
+
+    if req.chain == "ethereum":
+        etherscan_key = os.getenv("ETHERSCAN_API_KEY")
+        if etherscan_key:
+            try:
+                from _etherscan import live_ethereum
+                return live_ethereum(address, etherscan_key)
+            except Exception as exc:
+                # Log and fall through to demo so the UI never breaks
+                print(f"[onchain] Etherscan live fetch failed: {exc} — falling back to demo")
+
+    # Solana or Ethereum fallback (no key / fetch error)
+    return _demo_onchain(address, req.chain)
