@@ -13,7 +13,7 @@ import { analyse, kronos } from "@/lib/api";
 import type { AnalyseResponse, KronosResponse } from "@/lib/api";
 import { analyzeToken } from "@/lib/onchain-api";
 import type { Chain } from "@/lib/onchain-api";
-import { lookupTicker } from "@/lib/ticker-contracts";
+import { lookupTicker, lookupTickerAsync } from "@/lib/ticker-contracts";
 import type { ContractInfo } from "@/lib/ticker-contracts";
 import { RiskAlert } from "@/components/onchain/RiskAlert";
 import { KpiCards } from "@/components/onchain/KpiCards";
@@ -108,16 +108,36 @@ export default function Home() {
   const [onchainAddress, setOnchainAddress] = useState("");
   const [onchainChain, setOnchainChain] = useState<Chain>("ethereum");
   const [prefillInfo, setPrefillInfo] = useState<ContractInfo | null>(null);
+  const [prefillResolving, setPrefillResolving] = useState(false);
 
-  const switchToFundamental = useCallback(() => {
-    // Auto-populate contract address from the current Technical symbol
-    const match = lookupTicker(symbol);
-    if (match && !onchainAddress) {
-      setOnchainAddress(match.address);
-      setOnchainChain(match.chain);
-      setPrefillInfo(match);
-    }
+  const switchToFundamental = useCallback(async () => {
     setMode("fundamental");
+
+    // Don’t overwrite an address the user already typed
+    if (onchainAddress) return;
+
+    // 1. Check static map instantly — no delay
+    const staticMatch = lookupTicker(symbol);
+    if (staticMatch) {
+      setOnchainAddress(staticMatch.address);
+      setOnchainChain(staticMatch.chain);
+      setPrefillInfo(staticMatch);
+      return;
+    }
+
+    // 2. Nothing in static map — try CoinGecko live lookup
+    if (!symbol.trim()) return;
+    setPrefillResolving(true);
+    try {
+      const match = await lookupTickerAsync(symbol);
+      if (match) {
+        setOnchainAddress(match.address);
+        setOnchainChain(match.chain);
+        setPrefillInfo(match);
+      }
+    } finally {
+      setPrefillResolving(false);
+    }
   }, [symbol, onchainAddress]);
 
   const switchToTechnical = useCallback(() => {
@@ -337,8 +357,20 @@ export default function Home() {
         {/* Fundamental (on-chain) panel — shown when mode === 'fundamental' */}
         {mode === "fundamental" && (
           <div className="mt-6 max-w-5xl mx-auto animate-fadeIn">
+            {/* Resolving spinner — shown while CoinGecko fallback is in flight */}
+            {prefillResolving && (
+              <div className="max-w-3xl mx-auto mb-3 flex items-center gap-2.5 px-4 py-2.5 rounded-xl border border-border/50 bg-surface-2">
+                <Loader2 size={13} className="text-teal-400 animate-spin shrink-0" />
+                <p className="text-xs text-text-muted">
+                  Resolving contract address for{" "}
+                  <span className="font-mono font-semibold text-text">{symbol.toUpperCase()}</span>
+                  …
+                </p>
+              </div>
+            )}
+
             {/* Pre-fill banner */}
-            {prefillInfo && (
+            {prefillInfo && !prefillResolving && (
               <div className="max-w-3xl mx-auto mb-3 flex items-center gap-2.5 px-4 py-2.5 rounded-xl border border-teal-400/20 bg-teal-400/5">
                 <Crosshair size={13} className="text-teal-400 shrink-0" />
                 <p className="text-xs text-text-muted flex-1">

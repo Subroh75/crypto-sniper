@@ -124,3 +124,153 @@ export function lookupTicker(raw: string): ContractInfo | null {
 export function allContracts(): Array<{ symbol: string } & ContractInfo> {
   return Object.entries(TICKER_MAP).map(([symbol, info]) => ({ symbol, ...info }));
 }
+
+// ── Live CoinGecko fallback ──────────────────────────────────────────────────
+
+const COINGECKO_BASE = "https://api.coingecko.com/api/v3";
+
+/**
+ * Chain priority order for picking the best contract address from CoinGecko's
+ * `platforms` object. We prefer Ethereum (most holder data available via
+ * Etherscan), then BNB Chain, then Solana, then any other chain.
+ */
+const CHAIN_PRIORITY: Array<{ cgKey: string; chain: "ethereum" | "solana" }> = [
+  { cgKey: "ethereum",           chain: "ethereum" },
+  { cgKey: "binance-smart-chain",chain: "ethereum" }, // BSC not yet supported — skip for now
+  { cgKey: "solana",             chain: "solana" },
+  { cgKey: "arbitrum-one",       chain: "ethereum" },
+  { cgKey: "optimistic-ethereum",chain: "ethereum" },
+  { cgKey: "polygon-pos",        chain: "ethereum" },
+  { cgKey: "base",               chain: "ethereum" },
+];
+
+/** In-memory + sessionStorage cache to avoid repeat CoinGecko calls. */
+const _cache = new Map<string, ContractInfo | null>();
+
+function _cacheKey(sym: string) { return `cg_contract_${sym}`; }
+
+function _readCache(sym: string): ContractInfo | null | undefined {
+  if (_cache.has(sym)) return _cache.get(sym);
+  try {
+    const raw = sessionStorage.getItem(_cacheKey(sym));
+    if (raw !== null) {
+      const val = JSON.parse(raw) as ContractInfo | null;
+      _cache.set(sym, val);
+      return val;
+    }
+  } catch { /* sessionStorage unavailable (SSR / private mode) */ }
+  return undefined; // not cached
+}
+
+function _writeCache(sym: string, val: ContractInfo | null) {
+  _cache.set(sym, val);
+  try { sessionStorage.setItem(_cacheKey(sym), JSON.stringify(val)); } catch { /* ignore */ }
+}
+
+/**
+ * Resolves a ticker via CoinGecko's public API:
+ *  1. GET /search?query={sym}  → find the best-matching coin ID
+ *  2. GET /coins/{id}           → extract `platforms` contract addresses
+ *  3. Pick the best chain from CHAIN_PRIORITY
+ *
+ * Results are cached in sessionStorage so repeat lookups within the same
+ * browser session are instant and don't hit CoinGecko's rate limit.
+ *
+ * Returns null if the ticker is not found or has no on-chain contract.
+ */
+async function _resolveViaCoinGecko(sym: string): Promise<ContractInfo | null> {
+  // Step 1 — search for the coin
+  const searchRes = await fetch(
+    `${COINGECKO_BASE}/search?query=${encodeURIComponent(sym)}`,
+    { headers: { Accept: "application/json" } },
+  );
+  if (!searchRes.ok) throw new Error(`CoinGecko search ${searchRes.status}`);
+
+  const searchData = await searchRes.json() as {
+    coins: Array<{ id: string; symbol: string; name: string; market_cap_rank: number | null }>
+  };
+
+  // Pick the coin whose symbol matches exactly and has the highest market cap rank
+  const candidates = searchData.coins
+    .filter(c => c.symbol.toUpperCase() === sym)
+    .sort((a, b) => {
+      // Lower rank = higher market cap; null rank goes last
+      const ra = a.market_cap_rank ?? Infinity;
+      const rb = b.market_cap_rank ?? Infinity;
+      return ra - rb;
+    });
+
+  if (candidates.length === 0) return null;
+
+  const coinId = candidates[0].id;
+  const coinName = candidates[0].name;
+
+  // Step 2 — fetch platform / contract data
+  const coinRes = await fetch(
+    `${COINGECKO_BASE}/coins/${coinId}?localization=false&tickers=false&market_data=false&community_data=false&developer_data=false`,
+    { headers: { Accept: "application/json" } },
+  );
+  if (!coinRes.ok) throw new Error(`CoinGecko coin ${coinRes.status}`);
+
+  const coinData = await coinRes.json() as {
+    platforms: Record<string, string>;
+    symbol: string;
+  };
+
+  const platforms = coinData.platforms ?? {};
+
+  // Step 3 — pick the best chain
+  for (const { cgKey, chain } of CHAIN_PRIORITY) {
+    const addr = platforms[cgKey];
+    if (addr && addr.trim()) {
+      // Skip BNB Chain — BSC not supported by /analyze yet
+      if (cgKey === "binance-smart-chain") continue;
+      return {
+        address: chain === "ethereum" ? addr.toLowerCase() : addr,
+        chain,
+        label: `${coinName} (${sym}) — via CoinGecko`,
+      };
+    }
+  }
+
+  return null; // has no EVM or Solana contract
+}
+
+/**
+ * Async version of lookupTicker:
+ *  1. Checks the static map first (instant, no network).
+ *  2. Falls back to a live CoinGecko API lookup if not found.
+ *  3. Caches results in sessionStorage for the browser session.
+ *
+ * Use this in components where a slight async delay is acceptable.
+ * The sync `lookupTicker` is still available for cases where you need
+ * an immediate (possibly null) result.
+ */
+export async function lookupTickerAsync(raw: string): Promise<ContractInfo | null> {
+  const sym = raw
+    .toUpperCase()
+    .replace(/[/\-_](USDT|USDC|BTC|ETH|BNB|BUSD|USD|PERP|SWAP|FUTURES)$/, "")
+    .replace(/^1000/, "")
+    .trim();
+
+  if (!sym) return null;
+
+  // 1. Static map — instant
+  const staticResult = TICKER_MAP[sym];
+  if (staticResult) return staticResult;
+
+  // 2. Session cache — avoids repeat API calls
+  const cached = _readCache(sym);
+  if (cached !== undefined) return cached;
+
+  // 3. Live CoinGecko lookup
+  try {
+    const result = await _resolveViaCoinGecko(sym);
+    _writeCache(sym, result);
+    return result;
+  } catch (err) {
+    console.warn(`[ticker-contracts] CoinGecko lookup failed for ${sym}:`, err);
+    _writeCache(sym, null); // cache the miss so we don't retry on every keystroke
+    return null;
+  }
+}
