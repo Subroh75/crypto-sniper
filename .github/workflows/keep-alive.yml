@@ -1,53 +1,39 @@
 name: Keep-Alive Ping
 
-# NOTE: GitHub Actions scheduled cron is unreliable on private repos —
-# it can be skipped or delayed by 30+ minutes under load.
-# Primary pinger: set up cron-job.org (free) to hit /warmup every 5 minutes.
-# See: https://cron-job.org → New Job → URL: https://crypto-sniper-api.onrender.com/warmup
-#
-# This workflow acts as a secondary fallback — manual trigger + CI event hooks.
-
 on:
-  workflow_dispatch:        # manual trigger from GitHub Actions UI
+  schedule:
+    - cron: "*/9 * * * *"   # every 9 min — under Render's 15-min spin-down threshold
+  workflow_dispatch:          # manual trigger from GitHub Actions UI
   push:
-    branches: [main]        # ping on every deploy so service is warm post-deploy
+    branches: [main]          # also ping on every deploy
 
 jobs:
   ping:
     name: Ping & Warmup Render API
     runs-on: ubuntu-latest
-    timeout-minutes: 3
+    timeout-minutes: 4
 
     steps:
       - name: Wait for Render deploy to settle
         if: github.event_name == 'push'
-        run: sleep 30   # give Render ~30s to swap the container after autodeploy
+        run: sleep 45
 
-      - name: Ping /ping (liveness)
+      - name: Ping /ping (liveness check)
         id: ping
         run: |
           echo "Hitting /ping..."
-          RESPONSE=$(curl --silent --show-error --fail --max-time 60 \
-            "https://crypto-sniper-api.onrender.com/ping")
-          echo "response=$RESPONSE" >> $GITHUB_OUTPUT
-          echo "✅ $(date -u '+%Y-%m-%d %H:%M:%S UTC') — $RESPONSE"
-
-      - name: Warmup /warmup (Kronos inference)
-        run: |
-          echo "Hitting /warmup to prime Kronos..."
-          RESPONSE=$(curl --silent --show-error --fail --max-time 120 \
-            "https://crypto-sniper-api.onrender.com/warmup")
-          echo "🔥 $(date -u '+%Y-%m-%d %H:%M:%S UTC') — $RESPONSE"
-
-          WARM=$(echo "$RESPONSE" | python3 -c \
-            "import sys, json; d=json.load(sys.stdin); print(d.get('warm', False))")
-          LOADED=$(echo "$RESPONSE" | python3 -c \
-            "import sys, json; d=json.load(sys.stdin); print(d.get('kronos_loaded', False))")
-
-          if [ "$WARM" = "True" ]; then
-            echo "🧠 Kronos is warm and ready"
-          elif [ "$LOADED" = "True" ]; then
-            echo "💤 Kronos loaded but warmup inference failed — check /docs"
+          STATUS=$(curl --silent --output /dev/null --write-out "%{http_code}" \
+            --max-time 30 "https://crypto-sniper.onrender.com/ping")
+          echo "HTTP $STATUS"
+          if [ "$STATUS" = "200" ]; then
+            echo "✅ $(date -u '+%Y-%m-%d %H:%M:%S UTC') — API is up"
           else
-            echo "❌ Kronos not available on this deployment"
+            echo "⚠️  $(date -u '+%Y-%m-%d %H:%M:%S UTC') — API returned HTTP $STATUS (cold start expected)"
           fi
+
+      - name: Warmup /warmup (keep Kronos hot)
+        run: |
+          echo "Hitting /warmup..."
+          RESPONSE=$(curl --silent --max-time 60 \
+            "https://crypto-sniper.onrender.com/warmup" || echo "{}")
+          echo "$(date -u '+%Y-%m-%d %H:%M:%S UTC') — $RESPONSE"

@@ -18,6 +18,19 @@ import streamlit as st
 
 warnings.filterwarnings("ignore")
 
+# ── Background warmup ping: fires once per session so Render wakes immediately ─
+_API_BASE_WARMUP = os.getenv("API_BASE", "https://crypto-sniper.onrender.com")
+if "_render_pinged" not in st.session_state:
+    st.session_state["_render_pinged"] = True
+    import threading
+    def _ping_render():
+        try:
+            import requests as _rp
+            _rp.get(f"{_API_BASE_WARMUP}/ping", timeout=5)
+        except Exception:
+            pass
+    threading.Thread(target=_ping_render, daemon=True).start()
+
 # Add backend/ to path so we can import core.py
 _backend_dir = str(Path(__file__).resolve().parent / "backend")
 if _backend_dir not in sys.path:
