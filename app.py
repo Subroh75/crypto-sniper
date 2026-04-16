@@ -994,14 +994,15 @@ if not HAS_KRONOS:
             st.session_state["kronos_summary"] = _kapi_summary
         else:
             st.markdown(
-                '<div style="text-align:center;padding:1rem 0 0.5rem;color:#64748b;'
-                'font-size:0.78rem;letter-spacing:0.08em;">'
-                'Kronos is warming up on the backend.</div>',
+                '<div style="text-align:center;padding:1rem 0 0.5rem;color:#475569;'
+                'font-size:0.75rem;letter-spacing:0.06em;">'
+                'Kronos warming up… retrying automatically</div>',
                 unsafe_allow_html=True,
             )
-            if st.button("Retry Kronos forecast ↻", key="retry_kronos"):
-                st.cache_data.clear()
-                st.rerun()
+            import time as _time
+            _time.sleep(5)
+            st.cache_data.clear()
+            st.rerun()
 
     _kronos_fragment(base, interval, sc["close"], sc)
     # Read back for backtest pill and any remaining local references
