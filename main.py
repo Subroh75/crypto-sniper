@@ -12,7 +12,7 @@ from __future__ import annotations
 import os
 from datetime import datetime, timezone
 from functools import lru_cache
-from typing import Optional
+from typing import List, Optional
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -122,6 +122,16 @@ class BacktestResponse(BaseModel):
     trades:             list[dict]
     available:          bool
     error:              Optional[str] = None
+
+
+class MultiBacktestRequest(BaseModel):
+    symbols:  List[str] = Field(
+        default=["BTC", "ETH", "SOL", "BNB", "XRP", "DOGE", "ADA", "AVAX", "LINK", "DOT"],
+        description="List of base asset tickers to backtest in parallel",
+    )
+    pred_len: int = Field(24, ge=4, le=96)
+    lookback: int = Field(200, ge=50, le=500)
+    step:     int = Field(24, ge=4, le=96)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
