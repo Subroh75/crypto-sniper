@@ -1,0 +1,33 @@
+name: Keep-Alive Ping
+
+on:
+  schedule:
+    # Every 9 minutes — safely under Render's 15-minute spin-down threshold.
+    # UTC times; GitHub Actions scheduler has ~1min jitter so 9min gives margin.
+    - cron: "*/9 * * * *"
+  workflow_dispatch: # allow manual trigger from GitHub Actions UI
+
+jobs:
+  ping:
+    name: Ping Render API
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+
+    steps:
+      - name: Ping /ping endpoint
+        id: ping
+        run: |
+          RESPONSE=$(curl --silent --show-error --fail --max-time 15 \
+            "https://crypto-sniper-api.onrender.com/ping")
+          echo "response=$RESPONSE" >> $GITHUB_OUTPUT
+          echo "✅ $(date -u '+%Y-%m-%d %H:%M:%S UTC') — $RESPONSE"
+
+      - name: Check Kronos model state
+        run: |
+          LOADED=$(echo '${{ steps.ping.outputs.response }}' | python3 -c \
+            "import sys, json; d=json.load(sys.stdin); print(d.get('kronos_loaded', 'unknown'))")
+          if [ "$LOADED" = "True" ]; then
+            echo "🧠 Kronos model is loaded in memory"
+          else
+            echo "💤 Kronos model not yet loaded (will load on first /kronos call)"
+          fi

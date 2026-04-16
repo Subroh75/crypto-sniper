@@ -228,6 +228,21 @@ def health():
     }
 
 
+@app.get("/ping", tags=["Health"])
+def ping():
+    """
+    Lightweight keep-alive endpoint.
+    Returns a minimal payload — used by the GitHub Actions scheduled ping
+    to prevent Render cold-starts. Also reports Kronos model load state
+    so monitoring can detect if the model has been evicted from memory.
+    """
+    return {
+        "ok": True,
+        "kronos_loaded": _KRONOS_LOADED,
+        "ts": datetime.now(timezone.utc).isoformat(),
+    }
+
+
 @app.post("/analyse", response_model=AnalyseResponse, tags=["Signal"])
 def analyse(req: AnalyseRequest):
     """
