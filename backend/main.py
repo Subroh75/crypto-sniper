@@ -264,6 +264,48 @@ def ping():
     }
 
 
+@app.get("/warmup", tags=["Health"])
+def warmup():
+    """
+    Runs a minimal Kronos inference on synthetic data so the model is
+    JIT-compiled and hot before the first real /kronos request.
+    Called by the keep-alive pinger after /ping confirms the container is up.
+    Safe to call repeatedly — if the model is already warm it runs a tiny
+    4-candle inference to keep weights paged in, then returns immediately.
+    """
+    import numpy as np
+    import pandas as pd
+
+    predictor = _get_kronos_predictor()
+    if predictor is None:
+        return {"ok": False, "kronos_loaded": False,
+                "msg": "Kronos not available on this deployment."}
+
+    try:
+        n = 60
+        price = 100.0 + np.cumsum(np.random.randn(n) * 0.5)
+        df_warm = pd.DataFrame({
+            "open":   price,
+            "high":   price * 1.001,
+            "low":    price * 0.999,
+            "close":  price,
+            "volume": np.ones(n) * 1000.0,
+        })
+        df_warm["timestamp"] = pd.date_range("2024-01-01", periods=n, freq="1h")
+        _run_kronos(df_warm, pred_len=4)   # shortest allowed forecast (pred_len min=4)
+        warm = True
+    except Exception as exc:
+        warm = False
+        print(f"[warmup] inference failed: {exc}")
+
+    return {
+        "ok": True,
+        "kronos_loaded": _KRONOS_LOADED,
+        "warm": warm,
+        "ts": datetime.now(timezone.utc).isoformat(),
+    }
+
+
 @app.post("/analyse", response_model=AnalyseResponse, tags=["Signal"])
 def analyse(req: AnalyseRequest):
     """
