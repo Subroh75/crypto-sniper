@@ -6,9 +6,18 @@ import {
   TrendingUp, TrendingDown, Minus, Zap, BarChart2, Activity,
   Clock, Brain, Download, Search, ChevronDown, RefreshCw,
   AlertTriangle, CheckCircle2, Shield, Target, Loader2,
+  LineChart, Crosshair,
 } from "lucide-react";
+import { useMutation } from "@tanstack/react-query";
 import { analyse, kronos } from "@/lib/api";
 import type { AnalyseResponse, KronosResponse } from "@/lib/api";
+import { analyzeToken } from "@/lib/onchain-api";
+import type { Chain } from "@/lib/onchain-api";
+import { RiskAlert } from "@/components/onchain/RiskAlert";
+import { KpiCards } from "@/components/onchain/KpiCards";
+import { HolderPieChart } from "@/components/onchain/HolderPieChart";
+import { WalletAgeChart } from "@/components/onchain/WalletAgeChart";
+import { HoldersTable } from "@/components/onchain/HoldersTable";
 import { Logo } from "@/components/Logo";
 import { Link } from "wouter";
 
@@ -79,6 +88,8 @@ function MetaCard({ label, value, mono = true }: { label: string; value: string 
 
 // ─── Main Component ──────────────────────────────────────────────────────────
 
+type AnalysisMode = "technical" | "fundamental";
+
 export default function Home() {
   const [symbol, setSymbol] = useState("");
   const [interval, setInterval] = useState("1h");
@@ -89,6 +100,18 @@ export default function Home() {
   const [kronosLoading, setKronosLoading] = useState(false);
   const [pdfLoading, setPdfLoading] = useState(false);
   const reportRef = useRef<HTMLDivElement>(null);
+
+  // ─── Fundamental (on-chain) mode ─────────────────────────────────────────
+  const [mode, setMode] = useState<AnalysisMode>("technical");
+  const [onchainAddress, setOnchainAddress] = useState("");
+  const [onchainChain, setOnchainChain] = useState<Chain>("ethereum");
+  const onchainMutation = useMutation({
+    mutationFn: ({ addr, ch }: { addr: string; ch: Chain }) => analyzeToken(addr, ch),
+  });
+  const handleOnchainAnalyze = useCallback(() => {
+    if (!onchainAddress.trim()) return;
+    onchainMutation.mutate({ addr: onchainAddress.trim(), ch: onchainChain });
+  }, [onchainAddress, onchainChain, onchainMutation]);
 
   const handleAnalyse = useCallback(async () => {
     const sym = symbol.trim().toUpperCase().replace("/USDT", "").replace("-USDT", "");
@@ -228,20 +251,52 @@ export default function Home() {
             <ChevronDown size={13} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-text-faint pointer-events-none" />
           </div>
 
-          {/* Analyse button */}
-          <button
-            onClick={handleAnalyse}
-            disabled={loading || !symbol.trim()}
-            data-testid="button-analyse"
-            className="h-11 px-5 rounded-xl text-sm font-semibold text-white bg-purple-DEFAULT hover:bg-purple-hover disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center gap-2"
-            style={{ background: loading ? undefined : "linear-gradient(135deg, #7c3aed, #818cf8)" }}
-          >
-            {loading ? (
-              <><Loader2 size={14} className="animate-spin" /><span>Analysing…</span></>
-            ) : (
-              <><Zap size={14} /><span>Analyse</span></>
-            )}
-          </button>
+          {/* Mode toggle: Technical / Fundamental */}
+          <div className="flex gap-1 p-1 bg-surface-2 border border-border rounded-xl shrink-0">
+            <button
+              onClick={() => setMode("technical")}
+              data-testid="button-mode-technical"
+              className={`flex items-center gap-1.5 h-9 px-3 rounded-lg text-xs font-semibold transition-all ${
+                mode === "technical"
+                  ? "text-white shadow-sm"
+                  : "text-text-faint hover:text-text-muted"
+              }`}
+              style={mode === "technical" ? { background: "linear-gradient(135deg, #7c3aed, #818cf8)" } : {}}
+            >
+              <LineChart size={13} />
+              <span>Technical</span>
+            </button>
+            <button
+              onClick={() => setMode("fundamental")}
+              data-testid="button-mode-fundamental"
+              className={`flex items-center gap-1.5 h-9 px-3 rounded-lg text-xs font-semibold transition-all ${
+                mode === "fundamental"
+                  ? "text-white shadow-sm"
+                  : "text-text-faint hover:text-text-muted"
+              }`}
+              style={mode === "fundamental" ? { background: "linear-gradient(135deg, #0891b2, #38bdf8)" } : {}}
+            >
+              <Crosshair size={13} />
+              <span>Fundamental</span>
+            </button>
+          </div>
+
+          {/* Analyse button — only shown in technical mode */}
+          {mode === "technical" && (
+            <button
+              onClick={handleAnalyse}
+              disabled={loading || !symbol.trim()}
+              data-testid="button-analyse"
+              className="h-11 px-5 rounded-xl text-sm font-semibold text-white disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center gap-2"
+              style={{ background: loading ? undefined : "linear-gradient(135deg, #7c3aed, #818cf8)" }}
+            >
+              {loading ? (
+                <><Loader2 size={14} className="animate-spin" /><span>Analysing…</span></>
+              ) : (
+                <><Zap size={14} /><span>Analyse</span></>
+              )}
+            </button>
+          )}
         </div>
 
         {/* Error */}
@@ -253,15 +308,122 @@ export default function Home() {
         )}
 
         {/* Empty hint */}
-        {!data && !loading && !error && (
+        {!data && !loading && !error && mode === "technical" && (
           <p className="text-center text-xs mt-4" style={{ color: '#64748b' }}>
             Press <kbd className="px-1.5 py-0.5 bg-surface-2 border border-border rounded text-xs font-mono" style={{ color: '#94a3b8' }}>Enter</kbd> or click Analyse to run
           </p>
         )}
+
+        {/* Fundamental (on-chain) panel — shown when mode === 'fundamental' */}
+        {mode === "fundamental" && (
+          <div className="mt-6 max-w-5xl mx-auto animate-fadeIn">
+            {/* On-chain search bar */}
+            <div className="max-w-3xl mx-auto mb-6">
+              <div className="flex rounded-xl overflow-hidden border border-border bg-surface focus-within:border-teal-400/50 transition-all">
+                {/* Chain toggle */}
+                <div className="flex border-r border-border shrink-0">
+                  <button
+                    onClick={() => setOnchainChain("ethereum")}
+                    className={`flex items-center gap-1.5 px-3 py-3 text-xs font-semibold transition-colors ${
+                      onchainChain === "ethereum" ? "text-violet-400 bg-violet-400/10" : "text-text-faint hover:text-text-muted"
+                    }`}>
+                    <span className="text-base">&#x2B21;</span>
+                    <span className="hidden sm:inline">ETH</span>
+                  </button>
+                  <button
+                    onClick={() => setOnchainChain("solana")}
+                    className={`flex items-center gap-1.5 px-3 py-3 text-xs font-semibold transition-colors ${
+                      onchainChain === "solana" ? "text-teal-400 bg-teal-400/10" : "text-text-faint hover:text-text-muted"
+                    }`}>
+                    <span className="text-base">&#x25CE;</span>
+                    <span className="hidden sm:inline">SOL</span>
+                  </button>
+                </div>
+                <input
+                  type="text"
+                  value={onchainAddress}
+                  onChange={e => setOnchainAddress(e.target.value)}
+                  onKeyDown={e => e.key === "Enter" && handleOnchainAnalyze()}
+                  placeholder={onchainChain === "ethereum"
+                    ? "0x… Ethereum token contract address"
+                    : "Solana SPL token mint address"}
+                  className="flex-1 bg-transparent px-4 py-3 text-sm text-text placeholder:text-text-faint font-mono outline-none"
+                  autoComplete="off"
+                  spellCheck={false}
+                />
+                <button
+                  onClick={handleOnchainAnalyze}
+                  disabled={!onchainAddress.trim() || onchainMutation.isPending}
+                  className="flex items-center gap-2 px-5 py-3 text-sm font-semibold text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
+                  style={{ background: "linear-gradient(135deg, #0891b2, #38bdf8)" }}
+                >
+                  {onchainMutation.isPending
+                    ? <><Loader2 size={14} className="animate-spin" /><span className="hidden sm:inline">Scanning…</span></>
+                    : <><Crosshair size={14} /><span className="hidden sm:inline">Analyze</span></>
+                  }
+                </button>
+              </div>
+              {onchainMutation.isError && (
+                <div className="mt-3 flex items-center gap-2 bg-red-500/10 border border-red-500/30 rounded-lg px-4 py-3">
+                  <AlertTriangle size={14} className="text-red-400 shrink-0" />
+                  <p className="text-xs text-red-400">
+                    {onchainMutation.error instanceof Error ? onchainMutation.error.message : "Analysis failed. Check the address and try again."}
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* On-chain results */}
+            {onchainMutation.isPending && (
+              <div className="space-y-4 animate-pulse">
+                <div className="h-16 bg-surface-2 rounded-xl" />
+                <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-2.5">
+                  {[...Array(6)].map((_, i) => <div key={i} className="h-24 bg-surface-2 rounded-xl" />)}
+                </div>
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                  <div className="h-72 bg-surface-2 rounded-xl" />
+                  <div className="h-72 bg-surface-2 rounded-xl" />
+                </div>
+                <div className="h-96 bg-surface-2 rounded-xl" />
+              </div>
+            )}
+
+            {onchainMutation.data && !onchainMutation.isPending && (() => {
+              const result = onchainMutation.data;
+              return (
+                <div className="space-y-4 animate-fadeIn">
+                  <RiskAlert result={result} />
+                  <KpiCards result={result} />
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                    <HolderPieChart result={result} />
+                    <WalletAgeChart result={result} />
+                  </div>
+                  <HoldersTable result={result} />
+                </div>
+              );
+            })()}
+
+            {!onchainMutation.data && !onchainMutation.isPending && !onchainMutation.isError && (
+              <div className="flex flex-col items-center justify-center py-20 text-center">
+                <div className="w-14 h-14 mb-5 opacity-40">
+                  <svg viewBox="0 0 64 64" fill="none" className="w-full h-full">
+                    <polygon points="32,4 56,18 56,46 32,60 8,46 8,18" stroke="#38bdf8" strokeWidth="1.5" fill="none" />
+                    <circle cx="32" cy="32" r="10" stroke="#38bdf8" strokeWidth="1.5" fill="none" />
+                    <circle cx="32" cy="32" r="2.5" fill="#38bdf8" />
+                  </svg>
+                </div>
+                <p className="text-sm font-semibold text-text-muted mb-1">Enter a token contract address</p>
+                <p className="text-xs text-text-faint max-w-xs">
+                  Paste an Ethereum (0x…) or Solana mint address to fetch live holder concentration, wallet ages, and on-chain risk signals.
+                </p>
+              </div>
+            )}
+          </div>
+        )}
       </section>
 
-      {/* ─── Results ─────────────────────────────────────────────────── */}
-      {data && (
+      {/* ─── Technical Results ──────────────────────────────────────── */}
+      {data && mode === "technical" && (
         <div ref={reportRef} className="max-w-5xl mx-auto px-4 pb-16 space-y-4 animate-fadeIn">
 
           {/* ── 01 Signal Output ───────────────────────────────────────── */}
