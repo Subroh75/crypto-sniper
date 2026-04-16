@@ -10,6 +10,7 @@ import {
 import { analyse, kronos } from "@/lib/api";
 import type { AnalyseResponse, KronosResponse } from "@/lib/api";
 import { Logo } from "@/components/Logo";
+import { Link } from "wouter";
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 const INTERVALS = [
@@ -159,9 +160,26 @@ export default function Home() {
               crypto<span className="gradient-text">.guru</span>
             </span>
           </div>
-          <div className="flex items-center gap-1.5">
-            <span className="w-1.5 h-1.5 rounded-full bg-green-DEFAULT animate-pulse" />
-            <span className="text-xs font-mono" style={{ color: '#94a3b8' }}>API LIVE</span>
+          <div className="flex items-center gap-3">
+            <Link
+              href="/onchain"
+              className="flex items-center gap-1.5 text-xs font-mono transition-colors"
+              style={{ color: '#38bdf8' }}
+            >
+              <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <circle cx="8" cy="8" r="4.5"/>
+                <line x1="8" y1="1" x2="8" y2="3.5"/>
+                <line x1="8" y1="12.5" x2="8" y2="15"/>
+                <line x1="1" y1="8" x2="3.5" y2="8"/>
+                <line x1="12.5" y1="8" x2="15" y2="8"/>
+              </svg>
+              <span className="hidden sm:inline">On-Chain</span>
+            </Link>
+            <span className="w-px h-3 bg-border" />
+            <div className="flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-green-DEFAULT animate-pulse" />
+              <span className="text-xs font-mono" style={{ color: '#94a3b8' }}>API LIVE</span>
+            </div>
           </div>
         </div>
       </header>

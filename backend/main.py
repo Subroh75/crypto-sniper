@@ -465,3 +465,120 @@ def backtest_get(
     """GET convenience wrapper for backtest (useful for testing)."""
     return backtest(BacktestRequest(symbol=symbol, pred_len=pred_len,
                                    lookback=lookback, step=step))
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# ON-CHAIN ANALYSIS
+# ──────────────────────────────────────────────────────────────────────────────
+
+import random
+from datetime import timedelta
+
+class OnChainRequest(BaseModel):
+    address: str = Field(..., example="0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48")
+    chain:   str = Field("ethereum", example="ethereum", description="'ethereum' or 'solana'")
+
+
+def _demo_onchain(address: str, chain: str) -> dict:
+    """
+    Demo data generator — returns realistic holder data.
+    Replace with live Etherscan / Helius calls (see README in cryptosniper-onchain repo).
+    """
+    known = {
+        "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": ("USD Coin",      "USDC",  46_000_000_000, 2_100_000),
+        "0x6b175474e89094c44da98b954eedeac495271d0f": ("Dai Stablecoin", "DAI",    5_400_000_000,   510_000),
+        "0x1f9840a85d5af5bf1d1762f925bdaddc4201f984": ("Uniswap",        "UNI",    1_000_000_000,   380_000),
+    }
+    name, symbol, supply, total_holders = known.get(
+        address.lower(),
+        ("DemoToken", "DEMO", 1_000_000_000, random.randint(5_000, 50_000))
+    )
+
+    labels = [
+        "Binance Hot Wallet", "Coinbase Custody", "Kraken Exchange", "OKX Exchange",
+        "Bybit Treasury", None, None, "Smart Contract",
+        None, "DEX LP Pool", None, "Uniswap V3 Pool",
+        None, None, None, None, None, None, None, None,
+    ]
+    is_contract = [True, True, False, False, False, False, False, True,
+                   False, True, False, True, False, False, False, False,
+                   False, False, False, False]
+    raw_pcts    = [12.4, 8.7, 6.2, 5.1, 4.8, 4.2, 3.9, 3.5,
+                   3.1, 2.8, 2.4, 2.1, 1.9, 1.7, 1.5, 1.3,
+                   1.1, 0.9, 0.8, 0.7]
+
+    chars = "abcdef0123456789"
+    holders = []
+    for i, pct in enumerate(raw_pcts):
+        wallet_age = random.randint(1, 48)
+        first_buy_days = random.randint(30, 730)
+        last_active_days = random.randint(0, first_buy_days)
+        first_buy = (datetime.now(timezone.utc) - timedelta(days=first_buy_days)).date().isoformat()
+        last_active = (datetime.now(timezone.utc) - timedelta(days=last_active_days)).date().isoformat()
+        prefix = "0x" if chain == "ethereum" else ""
+        addr = prefix + "".join(random.choices(chars, k=40))
+        holders.append({
+            "rank":             i + 1,
+            "address":          addr,
+            "balance":          int((pct / 100) * supply),
+            "percentage":       pct,
+            "firstBuyDate":     first_buy,
+            "lastActivityDate": last_active,
+            "transactions":     random.randint(5, 200),
+            "walletAgeMonths":  wallet_age,
+            "isContract":       is_contract[i],
+            "label":            labels[i],
+        })
+
+    top10_pct = sum(h["percentage"] for h in holders[:10])
+    top20_pct = sum(h["percentage"] for h in holders)
+
+    if top10_pct >= 70:   risk = "CRITICAL"
+    elif top10_pct >= 50: risk = "HIGH"
+    elif top10_pct >= 40: risk = "MEDIUM"
+    else:                 risk = "LOW"
+
+    age_buckets = [
+        {"label": "< 3mo",  "count": sum(1 for h in holders if h["walletAgeMonths"] < 3)},
+        {"label": "3–6mo",  "count": sum(1 for h in holders if 3 <= h["walletAgeMonths"] < 6)},
+        {"label": "6–12mo", "count": sum(1 for h in holders if 6 <= h["walletAgeMonths"] < 12)},
+        {"label": "1–2yr",  "count": sum(1 for h in holders if 12 <= h["walletAgeMonths"] < 24)},
+        {"label": "> 2yr",  "count": sum(1 for h in holders if h["walletAgeMonths"] >= 24)},
+    ]
+
+    return {
+        "tokenName":             name,
+        "tokenSymbol":           symbol,
+        "contractAddress":       address,
+        "chain":                 chain,
+        "totalHolders":          total_holders,
+        "totalSupply":           supply,
+        "top10Percentage":       round(top10_pct, 2),
+        "top20Percentage":       round(top20_pct, 2),
+        "riskLevel":             risk,
+        "holders":               holders,
+        "walletAgeDistribution": age_buckets,
+        "concentrationScore":    round(100 - top10_pct, 1),
+        "analysisTimestamp":     datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@app.post("/analyze", tags=["On-Chain"])
+def analyze_onchain(req: OnChainRequest):
+    """
+    On-chain holder analysis for an ERC-20 (Ethereum) or SPL (Solana) token.
+
+    Currently returns demo data. To enable live data:
+    - Ethereum: set ETHERSCAN_API_KEY env var and replace _demo_onchain() with
+      live Etherscan calls (see cryptosniper-onchain/README.md).
+    - Solana:   set HELIUS_API_KEY env var and replace with Helius RPC calls.
+    """
+    if req.chain not in ("ethereum", "solana"):
+        raise HTTPException(status_code=400, detail="chain must be 'ethereum' or 'solana'")
+    if not req.address.strip():
+        raise HTTPException(status_code=400, detail="address is required")
+
+    # TODO: swap _demo_onchain() for live fetch once API keys are configured
+    # etherscan_key = os.getenv("ETHERSCAN_API_KEY")
+    # helius_key    = os.getenv("HELIUS_API_KEY")
+    return _demo_onchain(req.address.strip(), req.chain)
