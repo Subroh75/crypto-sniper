@@ -810,12 +810,12 @@ if not HAS_KRONOS:
     _API_BASE_K = os.getenv("API_BASE", "https://crypto-sniper.onrender.com")
 
     @st.cache_data(ttl=300, show_spinner=False)
-    def _fetch_kronos_api(symbol):
+    def _fetch_kronos_api(symbol, interval):
         try:
             import requests as _rk
             _r = _rk.post(
                 f"{_API_BASE_K}/kronos",
-                json={"symbol": symbol, "interval": "1h", "pred_len": 24},
+                json={"symbol": symbol, "interval": interval, "pred_len": 24},
                 timeout=120,
             )
             _r.raise_for_status()
@@ -824,9 +824,17 @@ if not HAS_KRONOS:
             return None
 
     with st.spinner("Fetching Kronos AI forecast from backend…"):
-        _kapi = _fetch_kronos_api(base)
+        _kapi = _fetch_kronos_api(base, interval)
 
     if _kapi and _kapi.get("available") and _kapi.get("direction"):
+        # Reconstruct pred_df from forecast array so the chart renders
+        _forecast_rows = _kapi.get("forecast", [])
+        if _forecast_rows and HAS_PLOTLY:
+            pred_df = pd.DataFrame(_forecast_rows)
+            kfig = make_kronos_chart(pred_df, sc["close"], base)
+            if kfig:
+                st.plotly_chart(kfig, use_container_width=True, config={"displayModeBar": False})
+
         kdir_color = "#10b981" if _kapi["direction"] == "UP" else "#f87171"
         bull_color = "#10b981" if _kapi.get("bull_pct", 0) >= 50 else "#f87171"
         st.markdown(
@@ -854,7 +862,7 @@ if not HAS_KRONOS:
 </div>''',
             unsafe_allow_html=True,
         )
-        # Store for AI Lab debate context
+        # Store for AI Lab debate context and PDF export
         kronos_summary = {
             "direction":  _kapi["direction"],
             "pct_change": _kapi.get("pct_change", 0),
