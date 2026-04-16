@@ -160,8 +160,11 @@ def _get_kronos_predictor():
     return _KRONOS_PREDICTOR
 
 
+_KRONOS_INFER_ERROR: str = ""
+
 def _run_kronos(df, pred_len: int = 24):
     """Run Kronos-mini on df. Returns forecast DataFrame or None."""
+    global _KRONOS_INFER_ERROR
     import pandas as pd
     predictor = _get_kronos_predictor()
     if predictor is None:
@@ -177,11 +180,14 @@ def _run_kronos(df, pred_len: int = 24):
             periods=pred_len, freq=delta,
         ))
         cols = [c for c in ["open", "high", "low", "close", "volume"] if c in ctx.columns]
-        return predictor.predict(
+        result = predictor.predict(
             df=ctx[cols], x_timestamp=x_ts, y_timestamp=y_ts,
             pred_len=pred_len, T=1.0, top_p=0.9, sample_count=1,
         )
-    except Exception:
+        _KRONOS_INFER_ERROR = ""
+        return result
+    except Exception as _ie:
+        _KRONOS_INFER_ERROR = str(_ie)
         return None
 
 
@@ -248,8 +254,9 @@ def health():
         "service":          "Crypto Sniper API",
         "timestamp":        datetime.now(timezone.utc).isoformat(),
         "torch":            torch_ver,
-        "kronos_available": predictor is not None,
-        "kronos_error":     _KRONOS_ERROR or None,
+        "kronos_available":    predictor is not None,
+        "kronos_load_error":   _KRONOS_ERROR or None,
+        "kronos_infer_error":  _KRONOS_INFER_ERROR if "_KRONOS_INFER_ERROR" in dir() else None,
     }
 
 @app.post("/analyse", response_model=AnalyseResponse, tags=["Signal"])
@@ -336,7 +343,7 @@ def kronos_forecast(req: KronosRequest):
 
     pred = _run_kronos(df, pred_len=req.pred_len)
     if pred is None or pred.empty:
-        raise HTTPException(status_code=503, detail="Kronos forecast failed.")
+        raise HTTPException(status_code=503, detail=f"Kronos forecast failed: {_KRONOS_INFER_ERROR or 'pred returned None'}")
 
     summary = _summarise_kronos(pred, sc["close"])
 
