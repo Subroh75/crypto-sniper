@@ -886,16 +886,15 @@ if not HAS_KRONOS:
             _r = _rk.post(
                 f"{_API_BASE_K}/kronos",
                 json={"symbol": symbol, "interval": interval, "pred_len": 24},
-                timeout=120,
+                timeout=30,
             )
             _r.raise_for_status()
             return _r.json()
         except Exception:
             return None
 
-    @st.fragment
     def _kronos_fragment(symbol, interval, current_close, sc_scores):
-        with st.spinner("Fetching Kronos AI forecast from backend…"):
+        with st.spinner("Fetching Kronos AI forecast…"):
             _kapi = _fetch_kronos_api(symbol, interval)
 
         if _kapi and _kapi.get("available") and _kapi.get("direction"):
@@ -1040,7 +1039,7 @@ def _fetch_backtest_summary(symbol):
         _resp = _rq.post(
             f"{_API_BASE}/backtest",
             json={"symbol": symbol, "pred_len": 24, "lookback": 200, "step": 24},
-            timeout=15,  # fail fast on cold Render — don't block the page
+            timeout=8,   # fail fast on cold Render — don't block the page
         )
         _resp.raise_for_status()
         return _resp.json()
