@@ -1,5 +1,5 @@
 // On-chain analysis API — calls the same Render backend as the rest of crypto.guru
-const API_BASE = import.meta.env.VITE_API_BASE ?? "https://crypto-sniper-api.onrender.com";
+const API_BASE = import.meta.env.VITE_API_BASE ?? "https://crypto-sniper.onrender.com";
 
 export type Chain = "ethereum" | "solana";
 

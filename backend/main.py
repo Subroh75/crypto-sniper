@@ -64,7 +64,7 @@ async def security_headers(request: Request, call_next):
     csp_origins = " ".join(_PROD_ORIGINS) if _PROD_ORIGINS else "'self'"
     response.headers["Content-Security-Policy"] = (
         f"default-src 'self'; "
-        f"connect-src 'self' {csp_origins} https://crypto-sniper-api.onrender.com; "
+        f"connect-src 'self' {csp_origins} https://crypto-sniper.onrender.com; "
         f"frame-ancestors 'none'"
     )
     response.headers["X-Content-Type-Options"] = "nosniff"

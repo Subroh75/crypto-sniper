@@ -144,27 +144,20 @@ const CHAIN_PRIORITY: Array<{ cgKey: string; chain: "ethereum" | "solana" }> = [
   { cgKey: "base",               chain: "ethereum" },
 ];
 
-/** In-memory + sessionStorage cache to avoid repeat CoinGecko calls. */
+/**
+ * In-memory cache to avoid repeat CoinGecko calls within a page session.
+ * Lives as long as the module is loaded (i.e. the browser tab).
+ * This is sufficient — CoinGecko results don't change mid-session and
+ * the cache prevents hammering the rate limit on repeated tab switches.
+ */
 const _cache = new Map<string, ContractInfo | null>();
 
-function _cacheKey(sym: string) { return `cg_contract_${sym}`; }
-
 function _readCache(sym: string): ContractInfo | null | undefined {
-  if (_cache.has(sym)) return _cache.get(sym);
-  try {
-    const raw = sessionStorage.getItem(_cacheKey(sym));
-    if (raw !== null) {
-      const val = JSON.parse(raw) as ContractInfo | null;
-      _cache.set(sym, val);
-      return val;
-    }
-  } catch { /* sessionStorage unavailable (SSR / private mode) */ }
-  return undefined; // not cached
+  return _cache.has(sym) ? _cache.get(sym) : undefined;
 }
 
 function _writeCache(sym: string, val: ContractInfo | null) {
   _cache.set(sym, val);
-  try { sessionStorage.setItem(_cacheKey(sym), JSON.stringify(val)); } catch { /* ignore */ }
 }
 
 /**

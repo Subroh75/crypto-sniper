@@ -1,5 +1,5 @@
 // API configuration — calls live Render backend
-const API_BASE = import.meta.env.VITE_API_BASE ?? "https://crypto-sniper-api.onrender.com";
+const API_BASE = import.meta.env.VITE_API_BASE ?? "https://crypto-sniper.onrender.com";
 
 export interface AnalyseRequest {
   symbol: string;

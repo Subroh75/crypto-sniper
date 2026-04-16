@@ -60,7 +60,7 @@ async def security_headers(request: Request, call_next):
     csp_origins = " ".join(_PROD_ORIGINS) if _PROD_ORIGINS else "'self'"
     response.headers["Content-Security-Policy"] = (
         f"default-src 'self'; "
-        f"connect-src 'self' {csp_origins} https://crypto-sniper-api.onrender.com; "
+        f"connect-src 'self' {csp_origins} https://crypto-sniper.onrender.com; "
         f"frame-ancestors 'none'"
     )
     response.headers["X-Content-Type-Options"] = "nosniff"
@@ -276,6 +276,36 @@ def health():
         "kronos_load_error":   _KRONOS_ERROR or None,
         "kronos_infer_error":  _KRONOS_INFER_ERROR or None,
     }
+
+@app.get("/ping", tags=["Health"])
+def ping():
+    """Lightweight keep-alive — used by cron pinger to prevent Render cold-starts."""
+    return {"ok": True, "kronos_loaded": _KRONOS_LOADED, "ts": datetime.now(timezone.utc).isoformat()}
+
+
+@app.get("/warmup", tags=["Health"])
+def warmup():
+    """Runs a minimal Kronos inference to keep model hot. Safe to call repeatedly."""
+    import numpy as np
+    import pandas as pd
+    predictor = _get_kronos_predictor()
+    if predictor is None:
+        return {"ok": False, "kronos_loaded": False, "msg": "Kronos not available."}
+    try:
+        n = 60
+        price = 100.0 + np.cumsum(np.random.randn(n) * 0.5)
+        df_warm = pd.DataFrame({
+            "open": price, "high": price * 1.001, "low": price * 0.999,
+            "close": price, "volume": np.ones(n) * 1000.0,
+        })
+        df_warm["timestamp"] = pd.date_range("2024-01-01", periods=n, freq="1h")
+        _run_kronos(df_warm, pred_len=4)
+        warm = True
+    except Exception as exc:
+        warm = False
+        print(f"[warmup] inference failed: {exc}")
+    return {"ok": True, "kronos_loaded": _KRONOS_LOADED, "warm": warm, "ts": datetime.now(timezone.utc).isoformat()}
+
 
 @app.post("/analyse", response_model=AnalyseResponse, tags=["Signal"])
 def analyse(req: AnalyseRequest):
