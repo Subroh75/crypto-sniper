@@ -29,6 +29,7 @@ from core import (           # noqa: E402
     compute_indicators,
     compute_scores,
     generate_agent_debate,
+    generate_kronos_analysis,
 )
 
 try:
@@ -258,6 +259,47 @@ div[data-testid="stRadio"] label:has(input:checked) p {
 .verdict-sell     { background:#450a0a; color:#f87171; }
 .verdict-hold     { background:#0d0d2e; color:#818cf8; }
 .verdict-watchlist{ background:#1a0533; color:#c084fc; }
+
+/* ── Kronos bull / bear analysis cards ── */
+.kb-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin:1.2rem 0 0.4rem; }
+.kb-card {
+  border-radius:16px; padding:1.2rem 1.4rem;
+  border:1px solid transparent;
+}
+.kb-bull { background:#041a0d; border-color:#065f46; }
+.kb-bear { background:#1a0404; border-color:#7f1d1d; }
+.kb-header {
+  display:flex; align-items:center; justify-content:space-between;
+  margin-bottom:0.75rem;
+}
+.kb-title {
+  font-size:0.62rem; font-weight:800; letter-spacing:0.18em;
+  text-transform:uppercase;
+}
+.kb-bull .kb-title { color:#10b981; }
+.kb-bear .kb-title { color:#f87171; }
+.kb-badge {
+  font-size:0.68rem; font-weight:700; padding:2px 9px;
+  border-radius:999px; letter-spacing:0.08em;
+}
+.kb-badge-long    { background:#052e16; color:#10b981; }
+.kb-badge-short   { background:#450a0a; color:#f87171; }
+.kb-badge-watch   { background:#1a1a0a; color:#f59e0b; }
+.kb-badge-pass    { background:#0f172a; color:#64748b; }
+.kb-conviction {
+  font-size:0.6rem; font-weight:700; letter-spacing:0.12em;
+  text-transform:uppercase; margin-bottom:0.6rem;
+}
+.kb-bull .kb-conviction { color:#065f46; }
+.kb-bear .kb-conviction { color:#7f1d1d; }
+.kb-points { list-style:none; padding:0; margin:0; }
+.kb-points li {
+  font-size:0.76rem; color:#94a3b8; line-height:1.55;
+  padding:0.28rem 0; border-bottom:1px solid rgba(255,255,255,0.04);
+}
+.kb-points li:last-child { border-bottom:none; }
+.kb-bull .kb-points li::before { content:"↑ "; color:#10b981; font-weight:700; }
+.kb-bear .kb-points li::before { content:"↓ "; color:#f87171; font-weight:700; }
 
 /* ── Download button ── */
 .stDownloadButton > button {
@@ -804,9 +846,15 @@ st.markdown(f"""
 # ─── 5. KRONOS AI FORECAST ──────────────────────────────────────────────────
 sec("05 — Kronos AI Forecast", "#7c3aed")
 
-# When running on Streamlit Cloud (no local torch), fetch Kronos forecast
-# from the Render backend API instead of running locally.
+# Seed session_state so PDF export below can read kronos_summary even before
+# the fragment re-runs with a result.
+if "kronos_summary" not in st.session_state:
+    st.session_state["kronos_summary"] = None
+
 if not HAS_KRONOS:
+    # ── Streamlit Cloud path: fetch from Render API inside a fragment ──
+    # The fragment re-runs independently so sections 01-04 and 06-07
+    # render instantly while Kronos loads in the background.
     _API_BASE_K = os.getenv("API_BASE", "https://crypto-sniper.onrender.com")
 
     @st.cache_data(ttl=300, show_spinner=False)
@@ -823,22 +871,25 @@ if not HAS_KRONOS:
         except Exception:
             return None
 
-    with st.spinner("Fetching Kronos AI forecast from backend…"):
-        _kapi = _fetch_kronos_api(base, interval)
+    @st.fragment
+    def _kronos_fragment(symbol, interval, current_close, sc_scores):
+        with st.spinner("Fetching Kronos AI forecast from backend…"):
+            _kapi = _fetch_kronos_api(symbol, interval)
 
-    if _kapi and _kapi.get("available") and _kapi.get("direction"):
-        # Reconstruct pred_df from forecast array so the chart renders
-        _forecast_rows = _kapi.get("forecast", [])
-        if _forecast_rows and HAS_PLOTLY:
-            pred_df = pd.DataFrame(_forecast_rows)
-            kfig = make_kronos_chart(pred_df, sc["close"], base)
-            if kfig:
-                st.plotly_chart(kfig, use_container_width=True, config={"displayModeBar": False})
+        if _kapi and _kapi.get("available") and _kapi.get("direction"):
+            # Reconstruct pred_df from forecast array so the chart renders
+            _forecast_rows = _kapi.get("forecast", [])
+            if _forecast_rows and HAS_PLOTLY:
+                _pred_df = pd.DataFrame(_forecast_rows)
+                _kfig = make_kronos_chart(_pred_df, current_close, symbol)
+                if _kfig:
+                    st.plotly_chart(_kfig, use_container_width=True,
+                                    config={"displayModeBar": False})
 
-        kdir_color = "#10b981" if _kapi["direction"] == "UP" else "#f87171"
-        bull_color = "#10b981" if _kapi.get("bull_pct", 0) >= 50 else "#f87171"
-        st.markdown(
-            f'''<div class="tq-grid">
+            kdir_color = "#10b981" if _kapi["direction"] == "UP" else "#f87171"
+            bull_color = "#10b981" if _kapi.get("bull_pct", 0) >= 50 else "#f87171"
+            st.markdown(
+                f'''<div class="tq-grid">
   <div class="tq-card">
     <div class="tq-lbl">Direction</div>
     <div class="tq-val" style="color:{kdir_color}">{_kapi["direction"]}</div>
@@ -860,26 +911,67 @@ if not HAS_KRONOS:
     <div class="tq-sub" style="color:#64748b">of forecast candles</div>
   </div>
 </div>''',
-            unsafe_allow_html=True,
-        )
-        # Store for AI Lab debate context and PDF export
-        kronos_summary = {
-            "direction":  _kapi["direction"],
-            "pct_change": _kapi.get("pct_change", 0),
-            "final_close":_kapi.get("final_close", sc["close"]),
-            "peak":       _kapi.get("peak", sc["close"]),
-            "trough":     _kapi.get("trough", sc["close"]),
-            "bull_pct":   _kapi.get("bull_pct", 50),
-            "candles":    _kapi.get("candles", 24),
-        }
-    else:
-        st.markdown(
-            '<div style="text-align:center;padding:1.5rem 0;color:#334155;' +
-            'font-size:0.78rem;letter-spacing:0.08em;font-weight:600;">' +
-            'Kronos backend warming up — retry in ~30s</div>',
-            unsafe_allow_html=True,
-        )
+                unsafe_allow_html=True,
+            )
+            # ── Kronos bull / bear analysis cards ──
+            _kapi_summary = {
+                "direction":   _kapi["direction"],
+                "pct_change":  _kapi.get("pct_change", 0),
+                "final_close": _kapi.get("final_close", current_close),
+                "peak":        _kapi.get("peak", current_close),
+                "trough":      _kapi.get("trough", current_close),
+                "bull_pct":    _kapi.get("bull_pct", 50),
+                "candles":     _kapi.get("candles", 24),
+            }
+            _ka = generate_kronos_analysis(symbol, sc_scores, interval, _kapi_summary)
+
+            def _kb_badge_cls(v):
+                return {"LONG": "kb-badge-long", "SHORT": "kb-badge-short",
+                        "WATCH": "kb-badge-watch"}.get(v, "kb-badge-pass")
+
+            def _kb_li(points):
+                return "".join(f"<li>{p}</li>" for p in points)
+
+            _b = _ka["bull"]
+            _bear = _ka["bear"]
+            st.markdown(
+                f'''<div class="kb-grid">
+  <div class="kb-card kb-bull">
+    <div class="kb-header">
+      <span class="kb-title">🐂 Bull Case</span>
+      <span class="kb-badge {_kb_badge_cls(_b["verdict"])}">{_b["verdict"]}</span>
+    </div>
+    <div class="kb-conviction">Conviction &mdash; {_b["conviction"]}</div>
+    <ul class="kb-points">{_kb_li(_b["points"])}</ul>
+  </div>
+  <div class="kb-card kb-bear">
+    <div class="kb-header">
+      <span class="kb-title">🐻 Bear Case</span>
+      <span class="kb-badge {_kb_badge_cls(_bear["verdict"])}">{_bear["verdict"]}</span>
+    </div>
+    <div class="kb-conviction">Conviction &mdash; {_bear["conviction"]}</div>
+    <ul class="kb-points">{_kb_li(_bear["points"])}</ul>
+  </div>
+</div>''',
+                unsafe_allow_html=True,
+            )
+
+            # Write to session_state so PDF export (outside fragment) can read it
+            st.session_state["kronos_summary"] = _kapi_summary
+        else:
+            st.markdown(
+                '<div style="text-align:center;padding:1.5rem 0;color:#334155;'
+                'font-size:0.78rem;letter-spacing:0.08em;font-weight:600;">'
+                'Kronos backend warming up — retry in ~30s</div>',
+                unsafe_allow_html=True,
+            )
+
+    _kronos_fragment(base, interval, sc["close"], sc)
+    # Read back for backtest pill and any remaining local references
+    kronos_summary = st.session_state.get("kronos_summary")
+
 elif kronos_summary is not None:
+    # ── Local torch path (never runs on Streamlit Cloud) ──
     kdir_color = "#10b981" if kronos_summary["direction"] == "UP" else "#f87171"
     kfig = make_kronos_chart(pred_df, sc["close"], base)
     if kfig:
@@ -909,6 +1001,7 @@ elif kronos_summary is not None:
   </div>
 </div>
 """, unsafe_allow_html=True)
+    st.session_state["kronos_summary"] = kronos_summary
 else:
     st.warning("Kronos forecast unavailable for this symbol.")
 

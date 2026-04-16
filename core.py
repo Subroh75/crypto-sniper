@@ -337,6 +337,239 @@ def generate_agent_debate(
 
 
 # ──────────────────────────────────────────────────────────────────────────────
+# KRONOS BULL / BEAR ANALYSIS
+# ──────────────────────────────────────────────────────────────────────────────
+
+def generate_kronos_analysis(
+    symbol: str,
+    sc: dict,
+    interval: str,
+    kronos_summary: dict,
+) -> dict:
+    """
+    Generate dedicated bull and bear interpretations of a Kronos forecast.
+    Distinct from the 4-agent V/P/R/T debate — these cards are grounded
+    purely in what the Kronos model is saying, cross-referenced against
+    key technicals to assess conviction.
+    Returns {"bull": {"points": [...], "verdict": str, "conviction": str},
+             "bear": {"points": [...], "verdict": str, "conviction": str}}
+    """
+    direction   = kronos_summary.get("direction", "N/A")
+    pct_change  = kronos_summary.get("pct_change", 0.0)
+    final_close = kronos_summary.get("final_close", sc["close"])
+    peak        = kronos_summary.get("peak", sc["close"])
+    trough      = kronos_summary.get("trough", sc["close"])
+    bull_pct    = kronos_summary.get("bull_pct", 50.0)
+    candles     = kronos_summary.get("candles", 24)
+
+    score      = sc["score"]
+    rsi        = sc["rsi14"]
+    adx        = sc["adx14"]
+    rv         = sc["rv"]
+    close      = sc["close"]
+    ema20      = sc["ema20"]
+    ema50      = sc["ema50"]
+    ema200     = sc["ema200"]
+    atr14      = sc["atr14"]
+    atr_move   = sc["atr_move"]
+    trend_up   = ema20 > ema50
+    above_200  = close > ema200
+    atr_pct    = atr14 / close * 100 if close > 0 else 0
+    range_to_peak   = (peak - close) / close * 100 if close > 0 else 0
+    range_to_trough = (close - trough) / close * 100 if close > 0 else 0
+    reward_risk = range_to_peak / range_to_trough if range_to_trough > 0 else 0
+
+    # ── Bull case ─────────────────────────────────────────────────────────────
+    bull_points: list[str] = []
+
+    if direction == "UP":
+        bull_points.append(
+            f"Kronos forecasts a {pct_change:+.2f}% move to {final_close:.6g} "
+            f"over the next {candles} candles — the model has a clear upside bias."
+        )
+    else:
+        bull_points.append(
+            f"Kronos forecasts {pct_change:+.2f}% to {final_close:.6g} over {candles} candles. "
+            f"Even in the bear scenario, the trough at {trough:.6g} defines a natural support floor "
+            f"that bulls can use as a hard stop."
+        )
+
+    if bull_pct >= 62:
+        bull_points.append(
+            f"{bull_pct:.0f}% of the {candles} forecast candles close bullish — "
+            f"strong intra-forecast momentum backs the upside thesis."
+        )
+    elif bull_pct >= 50:
+        bull_points.append(
+            f"{bull_pct:.0f}% bull candles — a slim majority points higher, "
+            f"so position sizing should reflect moderate rather than high conviction."
+        )
+    else:
+        bull_points.append(
+            f"Only {bull_pct:.0f}% of forecast candles are bullish — even if price "
+            f"closes higher, the path there is choppy. Scale entries gradually."
+        )
+
+    if range_to_peak > 0:
+        bull_points.append(
+            f"Kronos peak at {peak:.6g} implies {range_to_peak:.2f}% upside from current close. "
+            f"{'Reward-to-risk is attractive at {:.1f}x.'.format(reward_risk) if reward_risk >= 1.5 else 'Reward-to-risk is thin — keep stops tight.'}"
+        )
+
+    if trend_up and direction == "UP":
+        bull_points.append(
+            f"EMA20 > EMA50 technical trend aligns with the Kronos UP call — "
+            f"model and technicals are in agreement, raising signal quality."
+        )
+    elif trend_up and direction == "DOWN":
+        bull_points.append(
+            f"EMA20 > EMA50 trend is constructive despite the Kronos DOWN call. "
+            f"Bulls can watch for a bounce off {trough:.6g} as a trend-continuation entry."
+        )
+
+    if above_200:
+        bull_points.append(
+            f"Price sits above EMA200 — macro structure supports holding longs "
+            f"through the {candles}-candle forecast window."
+        )
+
+    if rv >= 2 and direction == "UP":
+        bull_points.append(
+            f"Volume running at {rv:.1f}x average — institutional participation "
+            f"adds credibility to the Kronos upside forecast."
+        )
+
+    if adx >= 25 and trend_up:
+        bull_points.append(
+            f"ADX {adx:.0f} confirms a strong trending environment — "
+            f"trend-following strategies favour riding the Kronos UP projection."
+        )
+
+    # Conviction label
+    bull_conviction_score = (
+        (2 if direction == "UP" else 0) +
+        (2 if bull_pct >= 60 else (1 if bull_pct >= 50 else 0)) +
+        (1 if trend_up else 0) +
+        (1 if above_200 else 0) +
+        (1 if rv >= 2 else 0) +
+        (1 if adx >= 20 else 0)
+    )
+    if bull_conviction_score >= 6:
+        bull_conviction = "HIGH"
+        bull_verdict    = "LONG"
+    elif bull_conviction_score >= 3:
+        bull_conviction = "MODERATE"
+        bull_verdict    = "WATCH"
+    else:
+        bull_conviction = "LOW"
+        bull_verdict    = "PASS"
+
+    # ── Bear case ─────────────────────────────────────────────────────────────
+    bear_points: list[str] = []
+
+    if direction == "DOWN":
+        bear_points.append(
+            f"Kronos forecasts {pct_change:.2f}% to {final_close:.6g} over {candles} candles — "
+            f"the model has a clear downside bias; short setups are model-supported."
+        )
+    else:
+        bear_points.append(
+            f"Kronos calls UP but only {bull_pct:.0f}% of candles close bullish, "
+            f"and the trough dips to {trough:.6g} ({range_to_trough:.2f}% below current close) — "
+            f"the forecast path is volatile enough to shake out leveraged longs."
+        )
+
+    if bull_pct < 40:
+        bear_points.append(
+            f"With {100 - bull_pct:.0f}% of forecast candles bearish, "
+            f"the Kronos model expects sellers to dominate the majority of the window."
+        )
+    elif bull_pct < 50:
+        bear_points.append(
+            f"{100 - bull_pct:.0f}% bear candles — sellers have a slight edge "
+            f"within the forecast; bears can target the trough at {trough:.6g}."
+        )
+    else:
+        bear_points.append(
+            f"Even with a bull-candle majority, the intra-forecast trough "
+            f"at {trough:.6g} ({range_to_trough:.2f}% drawdown) is a real risk "
+            f"that leveraged longs must manage."
+        )
+
+    if range_to_trough > 0:
+        bear_points.append(
+            f"Kronos trough at {trough:.6g} sits {range_to_trough:.2f}% below current close — "
+            f"{'a meaningful drawdown risk for unhedged longs.' if range_to_trough > atr_pct else 'within normal ATR range, but still a defined downside target.'}"
+        )
+
+    if not trend_up and direction == "DOWN":
+        bear_points.append(
+            f"EMA20 below EMA50 technical breakdown aligns with the Kronos DOWN call — "
+            f"trend and model are both pointing lower; bears have a strong setup."
+        )
+    elif not trend_up and direction == "UP":
+        bear_points.append(
+            f"Bearish EMA cross (EMA20 < EMA50) contradicts the Kronos UP call — "
+            f"signal conflict warns against aggressive long exposure."
+        )
+
+    if not above_200:
+        bear_points.append(
+            f"Price remains below EMA200 — macro downtrend intact. "
+            f"Rallies into the {candles}-candle window are suspect and worth fading."
+        )
+
+    if rsi >= 68:
+        bear_points.append(
+            f"RSI {rsi:.0f} is approaching overbought — a Kronos UP forecast "
+            f"into stretched RSI often resolves with a sharp reversal post-peak."
+        )
+    elif rsi <= 32 and direction == "DOWN":
+        bear_points.append(
+            f"RSI {rsi:.0f} is near oversold — the Kronos DOWN target may "
+            f"accelerate into the trough before any meaningful bounce emerges."
+        )
+
+    if atr_move < 1.0 and direction == "DOWN":
+        bear_points.append(
+            f"Weak ATR move ({atr_move:.1f}x) means the current candle lacks momentum — "
+            f"bears can expect drift rather than a clean breakdown to {trough:.6g}."
+        )
+
+    # Conviction label
+    bear_conviction_score = (
+        (2 if direction == "DOWN" else 0) +
+        (2 if bull_pct < 45 else (1 if bull_pct < 50 else 0)) +
+        (1 if not trend_up else 0) +
+        (1 if not above_200 else 0) +
+        (1 if rsi >= 68 else 0) +
+        (1 if range_to_trough > atr_pct else 0)
+    )
+    if bear_conviction_score >= 6:
+        bear_conviction = "HIGH"
+        bear_verdict    = "SHORT"
+    elif bear_conviction_score >= 3:
+        bear_conviction = "MODERATE"
+        bear_verdict    = "WATCH"
+    else:
+        bear_conviction = "LOW"
+        bear_verdict    = "PASS"
+
+    return {
+        "bull": {
+            "points":     bull_points[:4],
+            "verdict":    bull_verdict,
+            "conviction": bull_conviction,
+        },
+        "bear": {
+            "points":     bear_points[:4],
+            "verdict":    bear_verdict,
+            "conviction": bear_conviction,
+        },
+    }
+
+
+# ──────────────────────────────────────────────────────────────────────────────
 # SIGNAL LABEL
 # ──────────────────────────────────────────────────────────────────────────────
 
