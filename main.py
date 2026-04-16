@@ -223,6 +223,19 @@ def _fetch_and_score(symbol: str, interval: str):
 # ROUTES
 # ──────────────────────────────────────────────────────────────────────────────
 
+
+@app.on_event("startup")
+async def _warmup():
+    """Pre-load Kronos model on startup so first request isn't cold."""
+    import asyncio, concurrent.futures
+    loop = asyncio.get_event_loop()
+    with concurrent.futures.ThreadPoolExecutor() as pool:
+        await loop.run_in_executor(pool, _get_kronos_predictor)
+    if _KRONOS_PREDICTOR is not None:
+        print(f"[startup] Kronos loaded OK", flush=True)
+    else:
+        print(f"[startup] Kronos load FAILED: {_KRONOS_ERROR}", flush=True)
+
 @app.get("/", tags=["Health"])
 def health():
     return {
@@ -231,6 +244,28 @@ def health():
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
+
+
+@app.get("/status", tags=["Health"])
+def status():
+    """Full service status including Kronos model load state."""
+    try:
+        import torch
+        torch_ver = torch.__version__
+    except Exception as e:
+        torch_ver = f"ERROR: {e}"
+
+    predictor = _get_kronos_predictor()
+    return {
+        "service":   "Crypto Sniper API",
+        "status":    "ok",
+        "torch":     torch_ver,
+        "kronos": {
+            "loaded":    _KRONOS_LOADED,
+            "available": predictor is not None,
+            "error":     _KRONOS_ERROR or None,
+        }
+    }
 
 @app.post("/analyse", response_model=AnalyseResponse, tags=["Signal"])
 def analyse(req: AnalyseRequest):
@@ -346,24 +381,6 @@ def kronos_forecast(req: KronosRequest):
     )
 
 
-
-@app.get("/kronos/debug", tags=["Kronos"])
-def kronos_debug():
-    """Return Kronos model load status and any error message."""
-    predictor = _get_kronos_predictor()
-    return {
-        "loaded":    _KRONOS_LOADED,
-        "available": predictor is not None,
-        "error":     _KRONOS_ERROR or None,
-        "torch_available": _check_torch(),
-    }
-
-def _check_torch():
-    try:
-        import torch
-        return str(torch.__version__)
-    except Exception as e:
-        return str(e)
 
 @app.get("/kronos/{symbol}", response_model=KronosResponse, tags=["Kronos"])
 def kronos_get(
