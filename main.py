@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from functools import lru_cache
 from typing import List, Optional
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -39,7 +39,7 @@ app = FastAPI(
     redoc_url="/redoc",
 )
 
-# Allow all origins during development; tighten to crypto.guru in production
+# Allow all origins during development; tighten in production via ALLOWED_ORIGINS env var
 ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "*").split(",")
 
 app.add_middleware(
@@ -49,6 +49,24 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ── Security headers ──────────────────────────────────────────────────────────
+_PROD_ORIGINS = {o.strip() for o in ALLOWED_ORIGINS if o.strip().startswith("https://")}
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains; preload"
+    csp_origins = " ".join(_PROD_ORIGINS) if _PROD_ORIGINS else "'self'"
+    response.headers["Content-Security-Policy"] = (
+        f"default-src 'self'; "
+        f"connect-src 'self' {csp_origins} https://crypto-sniper-api.onrender.com; "
+        f"frame-ancestors 'none'"
+    )
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    return response
 
 
 # ──────────────────────────────────────────────────────────────────────────────
