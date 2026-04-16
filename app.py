@@ -573,11 +573,11 @@ def build_pdf(symbol: str, interval: str, sc: dict, debate: dict, now: str, kron
     # Market structure
     section("MARKET STRUCTURE")
     row("Close",          fmt_price(sc['close']))
-    row("EMA 20",         f"{fmt_price(sc['ema20'])  ({'above' if sc['close'] > sc['ema20'] else 'below'})")
-    row("EMA 50",         f"{fmt_price(sc['ema50'])  ({'above' if sc['close'] > sc['ema50'] else 'below'})")
-    row("EMA 200",        f"{fmt_price(sc['ema200'])  ({'above' if sc['close'] > sc['ema200'] else 'below'})")
-    row("VWAP",           f"{fmt_price(sc['vwap'])  ({'above' if sc['close'] > sc['vwap'] else 'below'})")
-    row("BB Upper/Lower", f"{fmt_price(sc['bb_upper'])  /  {fmt_price(sc['bb_lower'])}")
+    row("EMA 20",         fmt_price(sc['ema20']) + "  (" + ('above' if sc['close'] > sc['ema20'] else 'below') + ")")
+    row("EMA 50",         fmt_price(sc['ema50']) + "  (" + ('above' if sc['close'] > sc['ema50'] else 'below') + ")")
+    row("EMA 200",        fmt_price(sc['ema200']) + "  (" + ('above' if sc['close'] > sc['ema200'] else 'below') + ")")
+    row("VWAP",           fmt_price(sc['vwap']) + "  (" + ('above' if sc['close'] > sc['vwap'] else 'below') + ")")
+    row("BB Upper/Lower", fmt_price(sc['bb_upper']) + "  /  " + fmt_price(sc['bb_lower']))
     pdf.ln(2)
 
     # Timing
@@ -957,6 +957,17 @@ if not HAS_KRONOS:
     <div class="tq-val" style="color:{bull_color}">{_kapi.get("bull_pct", 0):.0f}%</div>
     <div class="tq-sub" style="color:#64748b">of forecast candles</div>
   </div>
+  <div class="tq-card">
+    <div class="tq-lbl">Final Close</div>
+    <div class="tq-val" style="font-size:0.9rem;color:#e2e8f0">{fmt_price(_kapi.get("final_close", current_close))}</div>
+    <div class="tq-sub" style="color:#64748b">predicted price</div>
+  </div>
+  <div class="tq-card">
+    <div class="tq-lbl">Reward / Risk</div>
+    <div class="tq-val" style="color:{'#10b981' if (_kapi.get('peak',current_close)-current_close)/max(_kapi.get('peak',current_close)-_kapi.get('trough',current_close),0.0001)>=0.5 else '#f59e0b'}">
+      {((_kapi.get("peak",current_close)-current_close)/max(current_close-_kapi.get("trough",current_close),0.0001)):.1f}×</div>
+    <div class="tq-sub" style="color:#64748b">upside vs downside</div>
+  </div>
 </div>''',
                 unsafe_allow_html=True,
             )
@@ -1049,6 +1060,17 @@ elif kronos_summary is not None:
     <div class="tq-lbl">Bull Candles</div>
     <div class="tq-val" style="color:{bull_color}">{kronos_summary["bull_pct"]:.0f}%</div>
     <div class="tq-sub" style="color:#64748b">of forecast candles</div>
+  </div>
+  <div class="tq-card">
+    <div class="tq-lbl">Final Close</div>
+    <div class="tq-val" style="font-size:0.9rem;color:#e2e8f0">{fmt_price(kronos_summary["final_close"])}</div>
+    <div class="tq-sub" style="color:#64748b">predicted price</div>
+  </div>
+  <div class="tq-card">
+    <div class="tq-lbl">Reward / Risk</div>
+    <div class="tq-val" style="color:{'#10b981' if (kronos_summary['peak']-sc['close'])/max(sc['close']-kronos_summary['trough'],0.0001)>=1.0 else '#f59e0b'}">
+      {((kronos_summary['peak']-sc['close'])/max(sc['close']-kronos_summary['trough'],0.0001)):.1f}×</div>
+    <div class="tq-sub" style="color:#64748b">upside vs downside</div>
   </div>
 </div>
 """, unsafe_allow_html=True)
