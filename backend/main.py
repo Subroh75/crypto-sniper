@@ -584,7 +584,8 @@ def analyze_onchain(req: OnChainRequest):
     On-chain holder analysis for an ERC-20 (Ethereum) or SPL (Solana) token.
 
     - Ethereum: live data via Etherscan when ETHERSCAN_API_KEY env var is set.
-    - Solana:   falls back to demo data (Helius key not yet configured).
+    - Solana:   live data via Helius when HELIUS_API_KEY env var is set.
+    Both fall back to demo data if keys are absent or if the live fetch errors.
     """
     if req.chain not in ("ethereum", "solana"):
         raise HTTPException(status_code=400, detail="chain must be 'ethereum' or 'solana'")
@@ -600,8 +601,16 @@ def analyze_onchain(req: OnChainRequest):
                 from _etherscan import live_ethereum
                 return live_ethereum(address, etherscan_key)
             except Exception as exc:
-                # Log and fall through to demo so the UI never breaks
                 print(f"[onchain] Etherscan live fetch failed: {exc} — falling back to demo")
 
-    # Solana or Ethereum fallback (no key / fetch error)
+    elif req.chain == "solana":
+        helius_key = os.getenv("HELIUS_API_KEY")
+        if helius_key:
+            try:
+                from _helius import live_solana
+                return live_solana(address, helius_key)
+            except Exception as exc:
+                print(f"[onchain] Helius live fetch failed: {exc} — falling back to demo")
+
+    # Fallback: demo data (no key set, or live fetch errored)
     return _demo_onchain(address, req.chain)
