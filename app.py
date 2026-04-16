@@ -406,6 +406,19 @@ def summarise_kronos(pred, current_close):
     }
 
 
+def fmt_price(v: float) -> str:
+    """Smart price formatter: right number of decimals regardless of magnitude."""
+    if v == 0:
+        return "0"
+    if v >= 1000:
+        return f"{v:,.2f}"
+    if v >= 1:
+        return f"{v:.4f}"
+    if v >= 0.01:
+        return f"{v:.5f}"
+    return f"{v:.6f}"
+
+
 def make_kronos_chart(pred_df, current_close, symbol):
     """Build a Plotly forecast chart from Kronos predictions."""
     if pred_df is None or not HAS_PLOTLY:
@@ -559,12 +572,12 @@ def build_pdf(symbol: str, interval: str, sc: dict, debate: dict, now: str, kron
 
     # Market structure
     section("MARKET STRUCTURE")
-    row("Close",          f"{sc['close']:.6g}")
-    row("EMA 20",         f"{sc['ema20']:.6g}  ({'above' if sc['close'] > sc['ema20'] else 'below'})")
-    row("EMA 50",         f"{sc['ema50']:.6g}  ({'above' if sc['close'] > sc['ema50'] else 'below'})")
-    row("EMA 200",        f"{sc['ema200']:.6g}  ({'above' if sc['close'] > sc['ema200'] else 'below'})")
-    row("VWAP",           f"{sc['vwap']:.6g}  ({'above' if sc['close'] > sc['vwap'] else 'below'})")
-    row("BB Upper/Lower", f"{sc['bb_upper']:.6g}  /  {sc['bb_lower']:.6g}")
+    row("Close",          fmt_price(sc['close']))
+    row("EMA 20",         f"{fmt_price(sc['ema20'])  ({'above' if sc['close'] > sc['ema20'] else 'below'})")
+    row("EMA 50",         f"{fmt_price(sc['ema50'])  ({'above' if sc['close'] > sc['ema50'] else 'below'})")
+    row("EMA 200",        f"{fmt_price(sc['ema200'])  ({'above' if sc['close'] > sc['ema200'] else 'below'})")
+    row("VWAP",           f"{fmt_price(sc['vwap'])  ({'above' if sc['close'] > sc['vwap'] else 'below'})")
+    row("BB Upper/Lower", f"{fmt_price(sc['bb_upper'])  /  {fmt_price(sc['bb_lower'])}")
     pdf.ln(2)
 
     # Timing
@@ -589,9 +602,9 @@ def build_pdf(symbol: str, interval: str, sc: dict, debate: dict, now: str, kron
         direction_label = "UP" if kronos_summary.get("direction") == "UP" else "DOWN"
         row("Direction",        direction_label)
         row("Predicted Change",  f"{kronos_summary.get('pct_change', 0):+.2f}%")
-        row("Predicted Close",   f"{kronos_summary.get('final_close', 0):.6g}")
-        row("Forecast Peak",     f"{kronos_summary.get('peak', 0):.6g}")
-        row("Forecast Trough",   f"{kronos_summary.get('trough', 0):.6g}")
+        row("Predicted Close",   fmt_price(kronos_summary.get('final_close', 0)))
+        row("Forecast Peak",     fmt_price(kronos_summary.get('peak', 0)))
+        row("Forecast Trough",   fmt_price(kronos_summary.get('trough', 0)))
         row("Bull Candle %",     f"{kronos_summary.get('bull_pct', 0):.1f}%")
         row("Candles Forecast",  str(kronos_summary.get('candles', 0)))
         pdf.ln(2)
@@ -775,7 +788,7 @@ st.markdown(f"""
   <div class="{lcls}">{label}</div>
   <div class="sig-score" style="color:{scls}">{score} / 13</div>
   <div class="sig-meta">
-    CLOSE {sc['close']:.6g}
+    CLOSE {fmt_price(sc['close'])}
     &nbsp;&nbsp;·&nbsp;&nbsp;
     <span style="color:{pct_color}">{pct_sign}{sc['pct']:.2f}%</span>
     &nbsp;&nbsp;·&nbsp;&nbsp;
@@ -810,17 +823,17 @@ above = lambda val: (f"<span style='color:#10b981'>▲ above</span>" if sc['clos
 st.markdown(f"""
 <table class="mkt-table">
   <tr><td class="mkt-lbl">Close</td>
-      <td class="mkt-val">{sc['close']:.6g}</td></tr>
+      <td class="mkt-val">{fmt_price(sc['close'])}</td></tr>
   <tr><td class="mkt-lbl">EMA 20</td>
-      <td class="mkt-val">{sc['ema20']:.6g}&nbsp;&nbsp;{above(sc['ema20'])}</td></tr>
+      <td class="mkt-val">{fmt_price(sc['ema20'])}&nbsp;&nbsp;{above(sc['ema20'])}</td></tr>
   <tr><td class="mkt-lbl">EMA 50</td>
-      <td class="mkt-val">{sc['ema50']:.6g}&nbsp;&nbsp;{above(sc['ema50'])}</td></tr>
+      <td class="mkt-val">{fmt_price(sc['ema50'])}&nbsp;&nbsp;{above(sc['ema50'])}</td></tr>
   <tr><td class="mkt-lbl">EMA 200</td>
-      <td class="mkt-val">{sc['ema200']:.6g}&nbsp;&nbsp;{above(sc['ema200'])}</td></tr>
+      <td class="mkt-val">{fmt_price(sc['ema200'])}&nbsp;&nbsp;{above(sc['ema200'])}</td></tr>
   <tr><td class="mkt-lbl">VWAP</td>
-      <td class="mkt-val">{sc['vwap']:.6g}&nbsp;&nbsp;{above(sc['vwap'])}</td></tr>
+      <td class="mkt-val">{fmt_price(sc['vwap'])}&nbsp;&nbsp;{above(sc['vwap'])}</td></tr>
   <tr><td class="mkt-lbl">Bollinger Bands</td>
-      <td class="mkt-val">{sc['bb_upper']:.6g} / {sc['bb_lower']:.6g}</td></tr>
+      <td class="mkt-val">{fmt_price(sc['bb_upper'])} / {fmt_price(sc['bb_lower'])}</td></tr>
   <tr><td class="mkt-lbl">24h Change</td>
       <td class="mkt-val" style="color:{'#10b981' if sc['pct']>=0 else '#f87171'}">
         {'+' if sc['pct']>=0 else ''}{sc['pct']:.2f}%</td></tr>
@@ -936,8 +949,8 @@ if not HAS_KRONOS:
   </div>
   <div class="tq-card">
     <div class="tq-lbl">Peak / Trough</div>
-    <div class="tq-val" style="font-size:0.9rem;color:#e2e8f0">{_kapi.get("peak", 0):.5g}</div>
-    <div class="tq-sub" style="color:#f87171">{_kapi.get("trough", 0):.5g}</div>
+    <div class="tq-val" style="font-size:0.9rem;color:#e2e8f0">{fmt_price(_kapi.get("peak", 0))}</div>
+    <div class="tq-sub" style="color:#f87171">{fmt_price(_kapi.get("trough", 0))}</div>
   </div>
   <div class="tq-card">
     <div class="tq-lbl">Bull Candles</div>
@@ -1029,8 +1042,8 @@ elif kronos_summary is not None:
   </div>
   <div class="tq-card">
     <div class="tq-lbl">Peak / Trough</div>
-    <div class="tq-val" style="font-size:0.9rem;color:#e2e8f0">{kronos_summary["peak"]:.5g}</div>
-    <div class="tq-sub" style="color:#f87171">{kronos_summary["trough"]:.5g}</div>
+    <div class="tq-val" style="font-size:0.9rem;color:#e2e8f0">{fmt_price(kronos_summary["peak"])}</div>
+    <div class="tq-sub" style="color:#f87171">{fmt_price(kronos_summary["trough"])}</div>
   </div>
   <div class="tq-card">
     <div class="tq-lbl">Bull Candles</div>
