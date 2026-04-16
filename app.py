@@ -475,10 +475,32 @@ def build_pdf(symbol: str, interval: str, sc: dict, debate: dict, now: str, kron
     pdf.add_page()
     pdf.set_auto_page_break(auto=True, margin=15)
 
-    # Title
-    pdf.set_font("Helvetica", "B", 22)
-    pdf.set_text_color(15, 23, 42)
-    pdf.cell(0, 12, _p("CRYPTO SNIPER - SIGNAL REPORT"), ln=True, align="C")
+    # ── Logo header ──────────────────────────────────────────────────
+    _logo_path = str(Path(__file__).resolve().parent / "crypto_sniper_logo.png")
+    if os.path.exists(_logo_path):
+        # Logo image: 90mm wide, centred, preserving aspect ratio (600:180 = 10:3)
+        _logo_w_mm = 110
+        _logo_h_mm = round(_logo_w_mm * 180 / 600, 1)
+        _logo_x    = (210 - _logo_w_mm) / 2  # A4 width = 210mm
+        pdf.image(_logo_path, x=_logo_x, y=pdf.get_y(), w=_logo_w_mm, h=_logo_h_mm)
+        pdf.ln(_logo_h_mm + 3)
+    else:
+        # Fallback plain text title if logo file not found
+        pdf.set_font("Helvetica", "B", 22)
+        pdf.set_text_color(15, 23, 42)
+        pdf.cell(0, 12, _p("CRYPTO SNIPER"), ln=True, align="C")
+        pdf.set_font("Helvetica", "", 9)
+        pdf.set_text_color(100, 116, 139)
+        pdf.cell(0, 5, _p("SEE THE SIGNAL. TAKE THE EDGE."), ln=True, align="C")
+        pdf.ln(4)
+
+    # Thin rule under logo
+    pdf.set_draw_color(226, 232, 240)
+    pdf.set_line_width(0.4)
+    pdf.line(15, pdf.get_y(), 195, pdf.get_y())
+    pdf.ln(4)
+
+    # Symbol / interval / timestamp subheader
     pdf.set_font("Helvetica", "", 9)
     pdf.set_text_color(100, 116, 139)
     pdf.cell(0, 6, _p(f"{symbol}/USDT  |  {interval}  |  {now}"), ln=True, align="C")
