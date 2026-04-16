@@ -9,7 +9,7 @@ services:
     healthCheckPath: /
     envVars:
       - key: ALLOWED_ORIGINS
-        value: https://crypto.guru,http://localhost:5173
+        value: https://crypto-sniper.app,https://www.crypto-sniper.app,http://localhost:5173
       - key: PYTHON_VERSION
         value: "3.11.9"
       - key: ETHERSCAN_API_KEY

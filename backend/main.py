@@ -39,7 +39,7 @@ app = FastAPI(
     redoc_url="/redoc",
 )
 
-# Allow all origins during development; tighten to crypto.guru in production
+# Allow all origins during development; tighten in production via ALLOWED_ORIGINS env var
 ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "*").split(",")
 
 app.add_middleware(
