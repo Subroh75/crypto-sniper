@@ -1050,30 +1050,53 @@ if not HAS_KRONOS:
             # Write to session_state so PDF export (outside fragment) can read it
             st.session_state["kronos_summary"] = _kapi_summary
         else:
-            # ── Kronos warming up: poll in-place, never rerun (rerun resets page) ──
-            _warm_slot = st.empty()
+            # ── Kronos warming up: poll in-place with live progress bar ──
             import time as _time
-            for _attempt in range(6):          # up to ~30 s (6 × 5 s)
-                _warm_slot.markdown(
-                    f'<div style="text-align:center;padding:1.5rem 0;color:#475569;'
-                    f'font-size:0.8rem;letter-spacing:0.06em;">'
-                    f'⏳ Kronos is warming up — checking again in a moment '
-                    f'({_attempt + 1}/6)…</div>',
+            _ATTEMPTS   = 6          # 6 × 5 s = 30 s max
+            _TICK_S     = 5          # seconds per attempt
+            _warm_msg   = st.empty()
+            _warm_bar   = st.progress(0, text="")
+
+            for _attempt in range(_ATTEMPTS):
+                _pct = int((_attempt / _ATTEMPTS) * 100)
+                _warm_bar.progress(
+                    _pct,
+                    text=f"Kronos AI is loading — attempt {_attempt + 1} of {_ATTEMPTS}",
+                )
+                _warm_msg.markdown(
+                    f'<div style="text-align:center;padding:0.75rem 0 0.25rem;'
+                    f'color:#94a3b8;font-size:0.8rem;letter-spacing:0.05em;">'
+                    f'⏳ Warming up the AI model… this only happens once after '
+                    f'a period of inactivity. Hang tight!</div>',
                     unsafe_allow_html=True,
                 )
-                _time.sleep(5)
+                # Animate progress smoothly within the 5-second wait
+                _start = _time.time()
+                while _time.time() - _start < _TICK_S:
+                    _elapsed  = _time.time() - _start
+                    _sub_pct  = int(_pct + (_elapsed / _TICK_S) * (100 / _ATTEMPTS))
+                    _warm_bar.progress(
+                        min(_sub_pct, 95),
+                        text=f"Kronos AI is loading — attempt {_attempt + 1} of {_ATTEMPTS}",
+                    )
+                    _time.sleep(0.25)
+
                 st.cache_data.clear()
                 _kapi2 = fetch_kronos_api(base, interval)
                 if _kapi2 is not None:
-                    _warm_slot.empty()
-                    st.rerun()          # safe now: Kronos is ready, results will render
+                    _warm_bar.progress(100, text="Kronos ready — loading forecast…")
+                    _time.sleep(0.4)
+                    _warm_bar.empty()
+                    _warm_msg.empty()
+                    st.rerun()   # safe now: Kronos is ready, full render follows
                     break
             else:
-                _warm_slot.markdown(
+                _warm_bar.empty()
+                _warm_msg.markdown(
                     '<div style="text-align:center;padding:1.5rem 0;color:#f87171;'
                     'font-size:0.8rem;letter-spacing:0.06em;">'
-                    '⚠️ Kronos is taking longer than usual — try analysing again in '
-                    '30 seconds.</div>',
+                    '⚠️ Kronos is taking longer than usual — please click Analyse '
+                    'again in 30 seconds.</div>',
                     unsafe_allow_html=True,
                 )
 
