@@ -1050,16 +1050,32 @@ if not HAS_KRONOS:
             # Write to session_state so PDF export (outside fragment) can read it
             st.session_state["kronos_summary"] = _kapi_summary
         else:
-            st.markdown(
-                '<div style="text-align:center;padding:1rem 0 0.5rem;color:#475569;'
-                'font-size:0.75rem;letter-spacing:0.06em;">'
-                'Kronos warming up… retrying automatically</div>',
-                unsafe_allow_html=True,
-            )
+            # ── Kronos warming up: poll in-place, never rerun (rerun resets page) ──
+            _warm_slot = st.empty()
             import time as _time
-            _time.sleep(5)
-            st.cache_data.clear()
-            st.rerun()
+            for _attempt in range(6):          # up to ~30 s (6 × 5 s)
+                _warm_slot.markdown(
+                    f'<div style="text-align:center;padding:1.5rem 0;color:#475569;'
+                    f'font-size:0.8rem;letter-spacing:0.06em;">'
+                    f'⏳ Kronos is warming up — checking again in a moment '
+                    f'({_attempt + 1}/6)…</div>',
+                    unsafe_allow_html=True,
+                )
+                _time.sleep(5)
+                st.cache_data.clear()
+                _kapi2 = fetch_kronos_api(base, interval)
+                if _kapi2 is not None:
+                    _warm_slot.empty()
+                    st.rerun()          # safe now: Kronos is ready, results will render
+                    break
+            else:
+                _warm_slot.markdown(
+                    '<div style="text-align:center;padding:1.5rem 0;color:#f87171;'
+                    'font-size:0.8rem;letter-spacing:0.06em;">'
+                    '⚠️ Kronos is taking longer than usual — try analysing again in '
+                    '30 seconds.</div>',
+                    unsafe_allow_html=True,
+                )
 
     _kronos_fragment(base, interval, sc["close"], sc)
     # Read back for backtest pill and any remaining local references
