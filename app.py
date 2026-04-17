@@ -1082,7 +1082,7 @@ if not HAS_KRONOS:
                     _time.sleep(0.25)
 
                 st.cache_data.clear()
-                _kapi2 = fetch_kronos_api(base, interval)
+                _kapi2 = _fetch_kronos_api(base, interval)
                 if _kapi2 is not None:
                     _warm_bar.progress(100, text="Kronos ready — loading forecast…")
                     _time.sleep(0.4)
