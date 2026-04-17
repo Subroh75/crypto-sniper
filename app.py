@@ -1092,13 +1092,16 @@ if not HAS_KRONOS:
                     break
             else:
                 _warm_bar.empty()
-                _warm_msg.markdown(
-                    '<div style="text-align:center;padding:1.5rem 0;color:#f87171;'
-                    'font-size:0.8rem;letter-spacing:0.06em;">'
-                    '⚠️ Kronos is taking longer than usual — please click Analyse '
-                    'again in 30 seconds.</div>',
-                    unsafe_allow_html=True,
+                _warm_msg.empty()
+                st.warning(
+                    "⚠️ Kronos is taking longer than usual to wake up. "
+                    "The server is still loading — click **Try Again** below and it "
+                    "should be ready.",
+                    icon=None,
                 )
+                if st.button("🔄 Try Again", key="kronos_retry_btn", type="primary"):
+                    st.cache_data.clear()
+                    st.rerun()
 
     _kronos_fragment(base, interval, sc["close"], sc)
     # Read back for backtest pill and any remaining local references
