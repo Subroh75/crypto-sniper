@@ -1,7 +1,7 @@
-"""
-core.py — Backwards compatibility stub.
-All logic moved to signals.py in V2.
-"""
+import re
 from signals import calculate_signals, get_key_levels, SignalResult  # noqa
 
-__all__ = ["calculate_signals", "get_key_levels", "SignalResult"]
+def clean_symbol(symbol: str) -> str:
+    if not symbol: return "BTC"
+    s = re.sub(r"[^A-Za-z0-9]", "", symbol.strip()).upper()
+    return s if s else "BTC"
