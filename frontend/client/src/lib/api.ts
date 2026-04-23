@@ -1,4 +1,4 @@
-// ─── API Client for Crypto Sniper V2 ────────────────────────────────────────
+// âââ API Client for Crypto Sniper V2 ââââââââââââââââââââââââââââââââââââââââ
 // All calls go to the Render backend via environment variable
 
 import type {
@@ -10,9 +10,9 @@ import type {
 
 const BASE_URL =
   (import.meta as Record<string, unknown> & { env?: Record<string, string> })
-    .env?.VITE_API_BASE ?? "https://crypto-sniper-api.onrender.com";
+    .env?.VITE_API_BASE ?? "https://crypto-sniper.onrender.com";
 
-// ── Core fetch wrapper ────────────────────────────────────────────────────────
+// ââ Core fetch wrapper ââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 async function apiFetch<T>(
   path: string,
   options: RequestInit = {},
@@ -38,19 +38,19 @@ async function apiFetch<T>(
   throw new Error("Max retries exceeded");
 }
 
-// ── POST helper ───────────────────────────────────────────────────────────────
+// ââ POST helper âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 function post<T>(path: string, body: unknown, retries = 1): Promise<T> {
   return apiFetch<T>(path, { method: "POST", body: JSON.stringify(body) }, retries);
 }
 
-// ── GET helper ────────────────────────────────────────────────────────────────
+// ââ GET helper ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 function get<T>(path: string, retries = 1): Promise<T> {
   return apiFetch<T>(path, { method: "GET" }, retries);
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
+// âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 // ENDPOINTS
-// ═══════════════════════════════════════════════════════════════════════════════
+// âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 /** Full V/P/R/T/S analysis for a coin + interval */
 export function analyse(req: AnalyseRequest): Promise<AnalyseResponse> {
@@ -116,9 +116,9 @@ export function healthCheck(): Promise<HealthStatus> {
   return get<HealthStatus>("/health", 0);
 }
 
-// ── Utility: format numbers ───────────────────────────────────────────────────
+// ââ Utility: format numbers âââââââââââââââââââââââââââââââââââââââââââââââââââ
 export function fmt(n: number | null | undefined, decimals = 2): string {
-  if (n == null || isNaN(n)) return "—";
+  if (n == null || isNaN(n)) return "â";
   return n.toLocaleString("en-US", {
     minimumFractionDigits: decimals,
     maximumFractionDigits: decimals,
@@ -126,20 +126,20 @@ export function fmt(n: number | null | undefined, decimals = 2): string {
 }
 
 export function fmtPrice(n: number | null | undefined): string {
-  if (n == null || isNaN(n) || n === 0) return "—";
+  if (n == null || isNaN(n) || n === 0) return "â";
   if (n < 0.001) return `$${n.toFixed(8)}`;
   if (n < 1)     return `$${n.toFixed(4)}`;
   return `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 export function fmtPct(n: number | null | undefined, showPlus = true): string {
-  if (n == null || isNaN(n)) return "—";
+  if (n == null || isNaN(n)) return "â";
   const sign = showPlus && n > 0 ? "+" : "";
   return `${sign}${n.toFixed(2)}%`;
 }
 
 export function fmtBigNum(n: number | null | undefined): string {
-  if (n == null || isNaN(n)) return "—";
+  if (n == null || isNaN(n)) return "â";
   if (n >= 1e12) return `$${(n / 1e12).toFixed(2)}T`;
   if (n >= 1e9)  return `$${(n / 1e9).toFixed(2)}B`;
   if (n >= 1e6)  return `$${(n / 1e6).toFixed(2)}M`;
