@@ -1,4 +1,4 @@
-//  home.tsx  Crypto Sniper V2 Main Page 
+// âââ home.tsx â Crypto Sniper V2 Main Page ââââââââââââââââââââââââââââââââââ
 // Two-column terminal layout matching the V2 UX mockup exactly.
 // Left: 10 analysis sections. Right: sidebar (Trade Setup, Conviction,
 // Key Levels, Watchlist, Subscribe, Export).
@@ -20,10 +20,10 @@ import {
   useAnalyse, useKronos, useWatchlist, usePdfExport,
 } from "@/hooks/useApi";
 import { fmtPrice, fmtPct } from "@/lib/api";
-import type⚡ AnalyseResponse, KronosResponse } from "@/types/api";
+import type { AnalyseResponse, KronosResponse } from "@/types/api";
 import { LineChart, Line, ResponsiveContainer } from "recharts";
 
-//  Constants 
+// ââ Constants âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 const INTERVALS = ["1m","5m","15m","30m","1H","4H","1D"] as const;
 const QUICK_COINS = ["BTC","ETH","SOL","BNB","DOGE","KAVA"] as const;
 const WATCHLIST_SYMS = ["BTC","ETH","SOL","BNB","DOGE","KAVA"] as const;
@@ -40,7 +40,7 @@ const VERDICT_BG: Record<string, string> = {
   "NO SIGNAL":  "bg-surface-2 border-border/50",
 };
 
-//  Shared card primitives 
+// ââ Shared card primitives ââââââââââââââââââââââââââââââââââââââââââââââââââââ
 function Card({ children, className = "", id }: {
   children: React.ReactNode; className?: string; id?: string;
 }) {
@@ -79,7 +79,7 @@ function CardHeader({ num, icon, title, badge, src, right }: {
   );
 }
 
-//  VPRT+S score bar 
+// ââ VPRT+S score bar ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 function ScoreBar({ score, max, color }: { score: number; max: number; color: string }) {
   return (
     <div className="w-full h-[3px] bg-surface-2 rounded-full overflow-hidden mt-1">
@@ -91,7 +91,7 @@ function ScoreBar({ score, max, color }: { score: number; max: number; color: st
   );
 }
 
-//  Agent verdict badge 
+// ââ Agent verdict badge âââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 function VerdictBadge({ verdict }: { verdict: string }) {
   const style: Record<string, string> = {
     "BUY":       "bg-teal/10 text-teal border-teal/20",
@@ -109,9 +109,9 @@ function VerdictBadge({ verdict }: { verdict: string }) {
   );
 }
 
-// 
+// ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 // MAIN PAGE
-// 
+// ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 export default function Home() {
   const reportId = "cs-report-root";
 
@@ -126,7 +126,7 @@ export default function Home() {
 
   const inputRef = useRef<HTMLInputElement>(null);
 
-  //  Run full analysis 
+  // ââ Run full analysis âââââââââââââââââââââââââââââââââââââââââââââââââââââââ
   const runAnalysis = useCallback(async (sym?: string, iv?: string) => {
     const s = (sym ?? (input.trim().toUpperCase() || symbol));
     const i = iv ?? interval;
@@ -168,7 +168,7 @@ export default function Home() {
   return (
     <div className="min-h-screen bg-bg text-text" id={reportId}>
 
-      {/*  HEADER  */}
+      {/* ââ HEADER ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ */}
       <header className="sticky top-0 z-50 border-b border-border/60 backdrop-blur-xl bg-bg/90">
         <div className="flex items-center gap-4 px-4 h-[50px]">
           <Logo />
@@ -185,15 +185,16 @@ export default function Home() {
               className="text-[11px] font-mono font-bold text-white px-3 py-1.5 rounded transition-all"
               style={{ background: "#7c3aed" }}
             >
-              Subscribe →</button>
+              Subscribe â
+            </button>
           </div>
         </div>
       </header>
 
-      {/*  MARKET BAR  */}
+      {/* ââ MARKET BAR ââââââââââââââââââââââââââââââââââââââââââââââââââââââââ */}
       <MarketBar />
 
-      {/*  HERO SEARCH  */}
+      {/* ââ HERO SEARCH âââââââââââââââââââââââââââââââââââââââââââââââââââââââ */}
       <div className="text-center px-4 py-8">
         <h1 className="text-4xl sm:text-5xl font-black tracking-tight mb-2"
             style={{ background: "linear-gradient(140deg,#fff 20%,#7c3aed 80%)", WebkitBackgroundClip:"text", WebkitTextFillColor:"transparent" }}>
@@ -227,7 +228,7 @@ export default function Home() {
             value={input}
             onChange={e => setInput(e.target.value.toUpperCase())}
             onKeyDown={e => e.key === "Enter" && runAnalysis()}
-            placeholder="BTC  ETH  SOL  KAVA
+            placeholder="BTC Â· ETH Â· SOL Â· KAVAâ¦"
             className="flex-1 h-[46px] rounded-lg border border-border/60 bg-surface px-4 text-[15px] font-sans font-medium text-text placeholder:text-text-muted/50 outline-none focus:border-purple transition-all"
           />
           <button
@@ -236,13 +237,14 @@ export default function Home() {
             className="h-[46px] px-5 rounded-lg font-sans font-bold text-[13px] text-white flex items-center gap-2 transition-all disabled:opacity-60"
             style={{ background: "#7c3aed" }}
           >
-            {loading ? " : " {loading ? "Analysing : "Analyse"}
+            {loading ? "â³" : "â¡"} {loading ? "Analysingâ¦" : "Analyse"}
           </button>
         </div>
 
         {/* Quick coins */}
         <div className="flex justify-center gap-2 flex-wrap">
-          <span className="text-[10px] font-mono text-text-muted/60 py-1 px-1">Try 👇QUICK_COINS.map(sym => (
+          <span className="text-[10px] font-mono text-text-muted/60 py-1 px-1">Try â</span>
+          {QUICK_COINS.map(sym => (
             <button
               key={sym}
               onClick={() => runAnalysis(sym)}
@@ -254,7 +256,7 @@ export default function Home() {
         </div>
       </div>
 
-      {/*  MAIN TWO-COL LAYOUT  */}
+      {/* ââ MAIN TWO-COL LAYOUT âââââââââââââââââââââââââââââââââââââââââââââââ */}
       <div className="max-w-[1380px] mx-auto px-4 pb-20">
         {!sig && !loading && (
           <div className="text-center py-16 text-text-muted text-[13px] font-mono">
@@ -269,23 +271,23 @@ export default function Home() {
                 <div key={i} className="w-2 h-2 rounded-full bg-purple animate-bounce" style={{ animationDelay: `${i*0.15}s` }} />
               ))}
             </div>
-            Analysing {symbol}
+            Analysing {symbol}â¦
           </div>
         )}
 
         {sig && !loading && (
           <div className="grid gap-3" style={{ gridTemplateColumns: "1fr 320px" }}>
 
-            {/*  LEFT COLUMN  */}
+            {/* ââ LEFT COLUMN âââââââââââââââââââââââââââââââââââââââââââââââ */}
             <div>
 
               {/* 01: Signal Output */}
               <Card>
-                <CardHeader num="01" icon=" title="SIGNAL OUTPUT" src="CoinGecko  Twelve Data" />
+                <CardHeader num="01" icon="â¡" title="SIGNAL OUTPUT" src="CoinGecko Â· Twelve Data" />
                 <div className="p-4">
                   <div className="bg-surface-2 rounded-xl border border-border/50 p-5 text-center">
                     <div className="text-[10px] font-mono text-text-muted/70 mb-2 tracking-wide">
-                      {symbol}/USDT  {interval}  {new Date(sig.timestamp * 1000).toUTCString().slice(0,-4)} UTC
+                      {symbol}/USDT Â· {interval} Â· {new Date(sig.timestamp * 1000).toUTCString().slice(0,-4)} UTC
                     </div>
                     <div className={`inline-block text-[10px] font-mono font-bold px-3 py-1 rounded border mb-3 ${VERDICT_BG[sig.signal.label] ?? VERDICT_BG["NO SIGNAL"]}`}>
                       {sig.signal.label}
@@ -294,15 +296,15 @@ export default function Home() {
                       {sig.signal.label}
                     </div>
                     <div className="text-[12px] font-mono text-text-muted mb-3">
-                      {sig.signal.total} / {sig.signal.max}  {sig.signal.label !== "STRONG BUY" ? "below threshold (<5)" : "strong setup!"}
+                      {sig.signal.total} / {sig.signal.max} â {sig.signal.label !== "STRONG BUY" ? "below threshold (<5)" : "strong setup!"}
                     </div>
                     <div className="flex justify-center gap-4 text-[11px] font-mono text-text-muted flex-wrap">
                       <span>CLOSE <span className="text-text font-bold">{fmtPrice(sig.quote.price)}</span></span>
                       <span>24H <span className={sig.quote.change_24h >= 0 ? "text-teal font-bold" : "text-red font-bold"}>{fmtPct(sig.quote.change_24h)}</span></span>
-                      <span>VOL <span className="text-text font-bold">{sig.timing.rel_volume.toFixed(1)}
+                      <span>VOL <span className="text-text font-bold">{sig.timing.rel_volume.toFixed(1)}Ã</span></span>
                       <span>ADX <span className="text-text font-bold">{sig.timing.adx.toFixed(0)}</span></span>
                       <span>RSI <span className={sig.timing.rsi >= 70 ? "text-red font-bold" : sig.timing.rsi <= 30 ? "text-teal font-bold" : "text-text font-bold"}>{sig.timing.rsi.toFixed(0)}</span></span>
-                      <span>S <span className="text-orange font-bold"> * 4}%</span></span>
+                      <span>S <span className="text-orange font-bold">â{sig.components.S.score * 4}%</span></span>
                     </div>
                   </div>
                 </div>
@@ -310,7 +312,7 @@ export default function Home() {
 
               {/* 02: Signal Components */}
               <Card>
-                <CardHeader num="02" title="SIGNAL COMPONENTS V/P/R/T/S" src="CoinGecko  LunarCrush" />
+                <CardHeader num="02" title="SIGNAL COMPONENTS V/P/R/T/S" src="CoinGecko Â· LunarCrush" />
                 <div className="p-4">
                   <div className="grid grid-cols-5 gap-2">
                     {(["V","P","R","T","S"] as const).map(key => {
@@ -348,7 +350,7 @@ export default function Home() {
               {/* 03 + 04: Market Structure + Timing Quality */}
               <div className="grid grid-cols-2 gap-3 mb-3">
                 <Card className="mb-0">
-                  <CardHeader num="03" icon=" title="MARKET STRUCTURE" />
+                  <CardHeader num="03" icon="ã" title="MARKET STRUCTURE" />
                   <div className="p-4 space-y-2">
                     {[
                       ["Close",      sig.quote.price,        sig.quote.price > sig.structure.ema20 ? "up" : "dn"],
@@ -363,7 +365,7 @@ export default function Home() {
                         <span className={`text-[12px] font-mono font-bold ${
                           dir === "up" ? "text-teal" : dir === "warn" ? "text-red" : "text-text"
                         }`}>
-                          {dir === "up" ? " " : dir === "warn" ? "  " : " "}{fmtPrice(price as number)}
+                          {dir === "up" ? "â² " : dir === "warn" ? "â  " : "â¼ "}{fmtPrice(price as number)}
                         </span>
                       </div>
                     ))}
@@ -371,14 +373,14 @@ export default function Home() {
                 </Card>
 
                 <Card className="mb-0">
-                  <CardHeader num="04" icon=" title="TIMING QUALITY" />
+                  <CardHeader num="04" icon="â±" title="TIMING QUALITY" />
                   <div className="p-4">
                     <div className="grid grid-cols-2 gap-2">
                       {[
                         { label: "RSI 14",  value: sig.timing.rsi.toFixed(1),    sub: sig.timing.rsi >= 70 ? "OVERBOUGHT" : sig.timing.rsi <= 30 ? "OVERSOLD" : "NEUTRAL",  color: sig.timing.rsi >= 70 ? "text-red" : sig.timing.rsi <= 30 ? "text-teal" : "text-text" },
                         { label: "ADX 14",  value: sig.timing.adx.toFixed(1),    sub: sig.timing.adx >= 25 ? "TRENDING" : "RANGING",   color: sig.timing.adx >= 25 ? "text-teal" : "text-text" },
                         { label: "ATR 14",  value: sig.timing.atr.toFixed(0),    sub: `${((sig.timing.atr / sig.quote.price) * 100).toFixed(2)}% of price`, color: "text-text" },
-                        { label: "Rel Vol", value: `${sig.timing.rel_volume.toFixed(2)} sub: sig.timing.rel_volume >= 2 ? "HIGH" : "NORMAL", color: sig.timing.rel_volume >= 2 ? "text-teal" : "text-text" },
+                        { label: "Rel Vol", value: `${sig.timing.rel_volume.toFixed(2)}Ã`, sub: sig.timing.rel_volume >= 2 ? "HIGH" : "NORMAL", color: sig.timing.rel_volume >= 2 ? "text-teal" : "text-text" },
                       ].map(({ label, value, sub, color }) => (
                         <div key={label} className="bg-surface-2 rounded-lg border border-border/40 p-3">
                           <div className="text-[9px] font-mono text-text-muted/70 uppercase tracking-wide mb-1">{label}</div>
@@ -393,14 +395,14 @@ export default function Home() {
 
               {/* 05: On-Chain Signals */}
               <Card>
-                <CardHeader num="05" title="ON-CHAIN SIGNALS" badge="NEW" src="Etherscan  Covalent  Mempool" />
+                <CardHeader num="05" title="ON-CHAIN SIGNALS" badge="NEW" src="Etherscan Â· Covalent Â· Mempool" />
                 <div className="p-4">
                   <div className="grid grid-cols-4 gap-2">
                     {[
-                      { label: "Whale Transfers 24H", value: "$2.4B",    sub: " vs avg", color: "text-teal" },
-                      { label: "Exchange Netflow",     value: "-12,400",  sub: "Outflow  bullish", color: "text-teal" },
+                      { label: "Whale Transfers 24H", value: "$2.4B",    sub: "â34% vs avg", color: "text-teal" },
+                      { label: "Exchange Netflow",     value: "-12,400",  sub: "Outflow â bullish", color: "text-teal" },
                       { label: "Mempool Fees",         value: "45 sat/vB",sub: "High activity", color: "text-teal" },
-                      { label: "Active Addresses",     value: "982K",     sub: " Stable", color: "text-text" },
+                      { label: "Active Addresses",     value: "982K",     sub: "â Stable", color: "text-text" },
                     ].map(({ label, value, sub, color }) => (
                       <div key={label} className="bg-surface-2 rounded-lg border border-border/40 p-3">
                         <div className="text-[9px] font-mono text-text-muted/70 uppercase tracking-wide mb-1.5">{label}</div>
@@ -414,14 +416,14 @@ export default function Home() {
 
               {/* 06: Kronos AI Forecast */}
               <Card>
-                <CardHeader num="06" title="KRONOS AI FORECAST" src="Perplexity  Claude" />
+                <CardHeader num="06" title="KRONOS AI FORECAST" src="Perplexity Â· Claude" />
                 <div className="p-4">
                   {kronosHk.loading && (
                     <div className="flex items-center gap-3 py-8 justify-center text-text-muted text-[11px] font-mono">
                       <div className="flex gap-1">
                         {[0,1,2].map(i=><div key={i} className="w-1.5 h-1.5 rounded-full bg-purple animate-bounce" style={{animationDelay:`${i*0.15}s`}}/>)}
                       </div>
-                      Kronos forecasting {symbol}
+                      Kronos forecasting {symbol}â¦
                     </div>
                   )}
                   {kron && !kronosHk.loading && (
@@ -429,7 +431,7 @@ export default function Home() {
                       <div className="grid grid-cols-3 gap-2 mb-3">
                         {[
                           { label: "AI Forecast",    value: kron.forecast.direction,        color: kron.forecast.direction === "Falling" ? "text-red" : kron.forecast.direction === "Rising" ? "text-teal" : "text-text" },
-                          { label: "Expected Move",  value: `${kron.forecast.expected_move_pct >= 0 ? " : " ${Math.abs(kron.forecast.expected_move_pct).toFixed(2)}%`, color: kron.forecast.expected_move_pct >= 0 ? "text-teal" : "text-red" },
+                          { label: "Expected Move",  value: `${kron.forecast.expected_move_pct >= 0 ? "â²" : "â¼"} ${Math.abs(kron.forecast.expected_move_pct).toFixed(2)}%`, color: kron.forecast.expected_move_pct >= 0 ? "text-teal" : "text-red" },
                           { label: "Trade Quality",  value: kron.forecast.trade_quality,    color: kron.forecast.trade_quality.includes("Avoid") ? "text-red" : "text-teal" },
                           { label: "Target Price",   value: fmtPrice(kron.forecast.target_price), color: "text-text" },
                           { label: "Bull Case",      value: kron.forecast.bull_case,        color: kron.forecast.bull_case === "TAKE" ? "text-teal" : "text-text-muted" },
@@ -444,7 +446,7 @@ export default function Home() {
                       {/* Forecast mini chart */}
                       <div className="bg-surface-2 rounded-lg border border-border/40 p-3" style={{ height: 130 }}>
                         <div className="text-[9px] font-mono text-text-muted/70 uppercase tracking-wide mb-2">
-                          PREDICTED OHLCV  NEXT 24 CANDLES
+                          PREDICTED OHLCV â NEXT 24 CANDLES
                         </div>
                         <ResponsiveContainer width="100%" height={90}>
                           <LineChart data={kron.forecast.predicted_ohlcv}>
@@ -456,7 +458,7 @@ export default function Home() {
                   )}
                   {!kron && !kronosHk.loading && (
                     <div className="text-center py-6 text-[11px] font-mono text-text-muted/60">
-                      Waiting for signal analysis
+                      Waiting for signal analysisâ¦
                     </div>
                   )}
                 </div>
@@ -464,7 +466,7 @@ export default function Home() {
 
               {/* 07: Agent Debate */}
               <Card>
-                <CardHeader num="07" icon=" " title="AI LAB  AGENT DEBATE" src="Claude Haiku  Perplexity context" />
+                <CardHeader num="07" icon="ð§ " title="AI LAB â AGENT DEBATE" src="Claude Haiku Â· Perplexity context" />
                 <div className="p-4">
                   {kron?.agents ? (
                     <div className="grid grid-cols-2 gap-2">
@@ -495,7 +497,7 @@ export default function Home() {
                     </div>
                   ) : (
                     <div className="text-center py-6 text-[11px] font-mono text-text-muted/60">
-                      Waiting for signal analysis
+                      Waiting for signal analysisâ¦
                     </div>
                   )}
                 </div>
@@ -510,9 +512,9 @@ export default function Home() {
               <DeepResearchSection symbol={symbol} analyseData={sig} />
 
             </div>
-            {/*  end LEFT column  */}
+            {/* ââ end LEFT column ââ */}
 
-            {/*  RIGHT SIDEBAR  */}
+            {/* ââ RIGHT SIDEBAR âââââââââââââââââââââââââââââââââââââââââââââ */}
             <div>
               <TradeSetupCard setup={sig.trade_setup} close={sig.quote.price} />
               <ConvictionMeter conviction={sig.conviction} />
@@ -532,7 +534,7 @@ export default function Home() {
                 exporting={exporting}
               />
             </div>
-            {/*  end RIGHT sidebar  */}
+            {/* ââ end RIGHT sidebar ââ */}
 
           </div>
         )}
