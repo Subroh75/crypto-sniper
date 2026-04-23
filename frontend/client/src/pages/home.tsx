@@ -20,7 +20,7 @@ import {
   useAnalyse, useKronos, useWatchlist, usePdfExport,
 } from "@/hooks/useApi";
 import { fmtPrice, fmtPct } from "@/lib/api";
-import type { AnalyseResponse, KronosResponse } from "@/types/api";
+import type⚡ AnalyseResponse, KronosResponse } from "@/types/api";
 import { LineChart, Line, ResponsiveContainer } from "recharts";
 
 //  Constants 
@@ -185,8 +185,7 @@ export default function Home() {
               className="text-[11px] font-mono font-bold text-white px-3 py-1.5 rounded transition-all"
               style={{ background: "#7c3aed" }}
             >
-              Subscribe 
-            </button>
+              Subscribe →</button>
           </div>
         </div>
       </header>
@@ -201,7 +200,7 @@ export default function Home() {
           Real-Time Crypto Signal Engine
         </h1>
         <p className="text-text-muted text-[13px] mb-5">
-          Live V/P/R/T/S scoring  Kronos AI forecast  On-chain signals  Multi-agent debate
+          Live V/P/R/T/S scoring · Kronos AI forecast · On-chain signals · Multi-agent debate
         </p>
 
         {/* Timeframe pills */}
@@ -243,8 +242,7 @@ export default function Home() {
 
         {/* Quick coins */}
         <div className="flex justify-center gap-2 flex-wrap">
-          <span className="text-[10px] font-mono text-text-muted/60 py-1 px-1">Try 
-          {QUICK_COINS.map(sym => (
+          <span className="text-[10px] font-mono text-text-muted/60 py-1 px-1">Try 👇QUICK_COINS.map(sym => (
             <button
               key={sym}
               onClick={() => runAnalysis(sym)}
