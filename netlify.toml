@@ -1,7 +1,7 @@
 [build]
-  base    = "frontend/client"
-  command = "npm run build"
-  publish = "frontend/client/dist"
+  base    = "frontend"
+  command = "npm install && npx tsx script/build.ts"
+  publish = "frontend/dist/public"
 
 [[redirects]]
   from = "/*"
