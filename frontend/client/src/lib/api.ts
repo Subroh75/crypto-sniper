@@ -1,98 +1,156 @@
-// API configuration — calls live Render backend
-const API_BASE = import.meta.env.VITE_API_BASE ?? "https://crypto-sniper.onrender.com";
+// ─── API Client for Crypto Sniper V2 ────────────────────────────────────────
+// All calls go to the Render backend via environment variable
 
-export interface AnalyseRequest {
-  symbol: string;
-  interval: string;
-}
+import type {
+  AnalyseRequest, AnalyseResponse,
+  KronosResponse, DeepResearchResponse,
+  MarketOverview, TrendingCoin, NewsArticle,
+  MacroData, WatchlistScore, HealthStatus,
+} from "@/types/api";
 
-export interface ScoreComponent {
-  volume_score: number;
-  price_score: number;
-  range_score: number;
-  trend_score: number;
-}
+const BASE_URL =
+  (import.meta as Record<string, unknown> & { env?: Record<string, string> })
+    .env?.VITE_API_BASE ?? "https://crypto-sniper-api.onrender.com";
 
-export interface MarketStructure {
-  current_price: number;
-  prev_close: number;
-  atr: number;
-  ema20: number;
-  ema50: number;
-  adx: number;
-  relative_volume: number;
-  range_position: number;
-  atr_move: number;
-}
-
-export interface DebateAgent {
-  role: string;
-  view: string;
-  argument: string;
-}
-
-export interface AnalyseResponse {
-  symbol: string;
-  interval: string;
-  timestamp: string;
-  signal: string;        // "STRONG BUY" | "MODERATE" | "NO SIGNAL"
-  total_score: number;
-  max_score: number;
-  score_components: ScoreComponent;
-  market_structure: MarketStructure;
-  debate: DebateAgent[];
-  error?: string;
-}
-
-export interface KronosCandle {
-  timestamp: string;
-  open: number;
-  high: number;
-  low: number;
-  close: number;
-  volume: number;
-}
-
-export interface KronosResponse {
-  symbol: string;
-  interval: string;
-  available: boolean;
-  direction?: string;       // "UP" | "DOWN"
-  pct_change?: number;      // predicted % change (API field name)
-  predicted_change?: number;// alias kept for backwards compat — prefer pct_change
-  peak?: number;            // predicted peak price (API field name)
-  peak_price?: number;      // alias kept for backwards compat — prefer peak
-  trough?: number;          // predicted trough price (API field name)
-  trough_price?: number;    // alias kept for backwards compat — prefer trough
-  bull_pct?: number;        // % of predicted candles that are bullish
-  candles?: number;         // number of forecast candles
-  confidence?: number;      // 0–100 composite: range tightness + directional consensus
-  forecast?: KronosCandle[];
-  error?: string;
-}
-
-export async function analyse(req: AnalyseRequest): Promise<AnalyseResponse> {
-  const res = await fetch(`${API_BASE}/analyse`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(req),
-  });
-  if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`API error ${res.status}: ${err}`);
+// ── Core fetch wrapper ────────────────────────────────────────────────────────
+async function apiFetch<T>(
+  path: string,
+  options: RequestInit = {},
+  retries = 1,
+): Promise<T> {
+  const url = `${BASE_URL}${path}`;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const res = await fetch(url, {
+        headers: { "Content-Type": "application/json" },
+        ...options,
+      });
+      if (!res.ok) {
+        const text = await res.text().catch(() => res.statusText);
+        throw new Error(`API ${res.status}: ${text}`);
+      }
+      return res.json() as Promise<T>;
+    } catch (err) {
+      if (attempt === retries) throw err;
+      await new Promise((r) => setTimeout(r, 800 * (attempt + 1)));
+    }
   }
-  return res.json();
+  throw new Error("Max retries exceeded");
 }
 
-export async function kronos(req: AnalyseRequest): Promise<KronosResponse> {
-  const res = await fetch(`${API_BASE}/kronos`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(req),
+// ── POST helper ───────────────────────────────────────────────────────────────
+function post<T>(path: string, body: unknown, retries = 1): Promise<T> {
+  return apiFetch<T>(path, { method: "POST", body: JSON.stringify(body) }, retries);
+}
+
+// ── GET helper ────────────────────────────────────────────────────────────────
+function get<T>(path: string, retries = 1): Promise<T> {
+  return apiFetch<T>(path, { method: "GET" }, retries);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ENDPOINTS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/** Full V/P/R/T/S analysis for a coin + interval */
+export function analyse(req: AnalyseRequest): Promise<AnalyseResponse> {
+  return post<AnalyseResponse>("/analyse", req, 1);
+}
+
+/** Kronos AI forecast + 4-agent debate */
+export function kronos(
+  symbol: string,
+  interval: string,
+  signalData?: Record<string, unknown>,
+): Promise<KronosResponse> {
+  return post<KronosResponse>("/kronos", { symbol, interval, signal_data: signalData }, 1);
+}
+
+/** Perplexity deep research */
+export function deepResearch(
+  symbol: string,
+  depth: "quick" | "deep" | "max" = "deep",
+  context: Record<string, unknown> = {},
+): Promise<DeepResearchResponse> {
+  return post<DeepResearchResponse>("/deep-research", { symbol, depth, context }, 0);
+}
+
+/** Market overview bar (total cap, BTC dom, mempool fees) */
+export function getMarketOverview(): Promise<MarketOverview> {
+  return get<MarketOverview>("/market", 2);
+}
+
+/** Top 10 trending coins */
+export function getTrending(): Promise<{ coins: TrendingCoin[]; timestamp: number }> {
+  return get("/trending", 2);
+}
+
+/** Top 5 gainers + losers */
+export function getGainers(): Promise<{
+  gainers: TrendingCoin[];
+  losers: TrendingCoin[];
+  timestamp: number;
+}> {
+  return get("/gainers", 2);
+}
+
+/** Live news for a symbol */
+export function getNews(symbol: string): Promise<{ symbol: string; articles: NewsArticle[] }> {
+  return get(`/news/${encodeURIComponent(symbol)}`, 2);
+}
+
+/** Macro context: Fed rate, CPI, Gold, DXY */
+export function getMacro(): Promise<MacroData> {
+  return get<MacroData>("/macro", 2);
+}
+
+/** Batch signal scores for watchlist */
+export function getWatchlistScores(
+  symbols: string[],
+): Promise<{ scores: WatchlistScore[] }> {
+  return post("/watchlist", { symbols }, 1);
+}
+
+/** Health check */
+export function healthCheck(): Promise<HealthStatus> {
+  return get<HealthStatus>("/health", 0);
+}
+
+// ── Utility: format numbers ───────────────────────────────────────────────────
+export function fmt(n: number | null | undefined, decimals = 2): string {
+  if (n == null || isNaN(n)) return "—";
+  return n.toLocaleString("en-US", {
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals,
   });
-  if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`API error ${res.status}: ${err}`);
-  }
-  return res.json();
+}
+
+export function fmtPrice(n: number | null | undefined): string {
+  if (n == null || isNaN(n) || n === 0) return "—";
+  if (n < 0.001) return `$${n.toFixed(8)}`;
+  if (n < 1)     return `$${n.toFixed(4)}`;
+  return `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+export function fmtPct(n: number | null | undefined, showPlus = true): string {
+  if (n == null || isNaN(n)) return "—";
+  const sign = showPlus && n > 0 ? "+" : "";
+  return `${sign}${n.toFixed(2)}%`;
+}
+
+export function fmtBigNum(n: number | null | undefined): string {
+  if (n == null || isNaN(n)) return "—";
+  if (n >= 1e12) return `$${(n / 1e12).toFixed(2)}T`;
+  if (n >= 1e9)  return `$${(n / 1e9).toFixed(2)}B`;
+  if (n >= 1e6)  return `$${(n / 1e6).toFixed(2)}M`;
+  return `$${n.toLocaleString()}`;
+}
+
+export function timeAgo(ts: string | number): string {
+  const date = typeof ts === "number" ? new Date(ts * 1000) : new Date(ts);
+  const diff = (Date.now() - date.getTime()) / 1000;
+  if (diff < 60)   return `${Math.floor(diff)}s ago`;
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+  return `${Math.floor(diff / 86400)}d ago`;
 }
