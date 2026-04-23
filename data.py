@@ -1,0 +1,480 @@
+"""
+data.py — Unified data layer for Crypto Sniper
+Replaces yfinance with production-grade free APIs.
+
+APIs used (all free-tier capable):
+  - CoinGecko  : OHLCV, trending, gainers, market data
+  - Twelve Data: Pre-computed RSI, MACD, EMA, ADX, ATR, BB
+  - CoinCap    : Live price quotes (REST fallback; WS handled client-side)
+  - Mempool    : BTC on-chain fees
+  - Etherscan  : ETH on-chain whale flows
+  - MarketAux  : News feed with sentiment tags
+  - Econdb     : Macro data (Fed rate, CPI, DXY)
+"""
+
+import os, time, logging, requests
+from functools import lru_cache
+from typing import Optional
+
+logger = logging.getLogger(__name__)
+
+# ── API Keys (set in Render environment variables) ──────────────────────────
+CG_KEY     = os.getenv("COINGECKO_API_KEY", "")          # demo or pro
+TD_KEY     = os.getenv("TWELVEDATA_API_KEY", "")         # free tier
+MAUX_KEY   = os.getenv("MARKETAUX_API_KEY", "")          # free tier
+ETHSCAN_KEY= os.getenv("ETHERSCAN_API_KEY", "")          # free tier
+
+# ── Base URLs ────────────────────────────────────────────────────────────────
+CG_BASE  = "https://pro-api.coingecko.com/api/v3" if CG_KEY else "https://api.coingecko.com/api/v3"
+TD_BASE  = "https://api.twelvedata.com"
+CAP_BASE = "https://api.coincap.io/v2"
+MPOOL    = "https://mempool.space/api/v1"
+ETHSCAN  = "https://api.etherscan.io/api"
+MAUX     = "https://api.marketaux.com/v1"
+ECONDB   = "https://www.econdb.com/api/series"
+
+# ── Symbol maps ─────────────────────────────────────────────────────────────
+CG_ID = {
+    "BTC":"bitcoin","ETH":"ethereum","SOL":"solana","BNB":"binancecoin",
+    "DOGE":"dogecoin","KAVA":"kava","PEPE":"pepe","WIF":"dogwifhat",
+    "HYPE":"hyperliquid","RENDER":"render-token","MATIC":"matic-network",
+    "ADA":"cardano","AVAX":"avalanche-2","LINK":"chainlink","DOT":"polkadot",
+    "UNI":"uniswap","ATOM":"cosmos","LTC":"litecoin","XRP":"ripple",
+}
+CAP_ID = {
+    "BTC":"bitcoin","ETH":"ethereum","SOL":"solana","BNB":"binance-coin",
+    "DOGE":"dogecoin","KAVA":"kava","MATIC":"matic-network","ADA":"cardano",
+    "AVAX":"avalanche","LINK":"chainlink","LTC":"litecoin","XRP":"xrp",
+}
+TD_PAIR = lambda s: f"{s}/USD"
+
+def _cg_headers():
+    h = {"accept": "application/json"}
+    if CG_KEY:
+        h["x-cg-pro-api-key"] = CG_KEY
+    return h
+
+def _get(url: str, params: dict = None, timeout: int = 8) -> Optional[dict]:
+    """Safe GET with timeout + error logging."""
+    try:
+        r = requests.get(url, params=params, timeout=timeout)
+        r.raise_for_status()
+        return r.json()
+    except requests.exceptions.Timeout:
+        logger.warning(f"Timeout: {url}")
+    except requests.exceptions.HTTPError as e:
+        logger.warning(f"HTTP {e.response.status_code}: {url}")
+    except Exception as e:
+        logger.warning(f"Error {url}: {e}")
+    return None
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# 1. OHLCV  (CoinGecko)
+# ════════════════════════════════════════════════════════════════════════════
+DAYS_MAP = {"1m":1,"5m":1,"15m":1,"30m":1,"1H":1,"4H":7,"1D":30}
+
+def get_ohlcv(symbol: str, interval: str = "1H") -> list[list]:
+    """
+    Returns [[timestamp, open, high, low, close], ...] newest last.
+    CoinGecko free: hourly for days<=90, daily otherwise.
+    """
+    coin_id = CG_ID.get(symbol.upper(), symbol.lower())
+    days    = DAYS_MAP.get(interval, 1)
+    url     = f"{CG_BASE}/coins/{coin_id}/ohlc"
+    data    = _get(url, {"vs_currency":"usd","days":days,"precision":8}, headers=_cg_headers())
+    if not data or not isinstance(data, list):
+        return []
+    return data  # [[ts, o, h, l, c], ...]
+
+def _cg_headers_requests(url, params):
+    """requests.get wrapper that injects CG headers."""
+    try:
+        r = requests.get(url, params=params, headers=_cg_headers(), timeout=8)
+        r.raise_for_status()
+        return r.json()
+    except Exception as e:
+        logger.warning(f"CG error {url}: {e}")
+        return None
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# 2. LIVE QUOTE  (CoinGecko simple/price)
+# ════════════════════════════════════════════════════════════════════════════
+def get_quote(symbol: str) -> dict:
+    """
+    Returns {price, change_24h, volume_24h, market_cap, high_24h, low_24h}
+    """
+    coin_id = CG_ID.get(symbol.upper(), symbol.lower())
+    url     = f"{CG_BASE}/coins/{coin_id}"
+    data    = _cg_headers_requests(url, {
+        "localization": "false", "tickers": "false",
+        "community_data": "false", "developer_data": "false"
+    })
+    if not data:
+        return _coincap_quote(symbol)
+    md = data.get("market_data", {})
+    return {
+        "symbol":     symbol.upper(),
+        "price":      md.get("current_price",{}).get("usd", 0),
+        "change_24h": md.get("price_change_percentage_24h", 0),
+        "volume_24h": md.get("total_volume",{}).get("usd", 0),
+        "market_cap": md.get("market_cap",{}).get("usd", 0),
+        "high_24h":   md.get("high_24h",{}).get("usd", 0),
+        "low_24h":    md.get("low_24h",{}).get("usd", 0),
+    }
+
+def _coincap_quote(symbol: str) -> dict:
+    """CoinCap fallback for live price."""
+    cap_id = CAP_ID.get(symbol.upper(), symbol.lower())
+    data   = _get(f"{CAP_BASE}/assets/{cap_id}")
+    if not data or "data" not in data:
+        return {"symbol": symbol.upper(), "price": 0, "change_24h": 0,
+                "volume_24h": 0, "market_cap": 0, "high_24h": 0, "low_24h": 0}
+    d = data["data"]
+    return {
+        "symbol":     symbol.upper(),
+        "price":      float(d.get("priceUsd", 0)),
+        "change_24h": float(d.get("changePercent24Hr", 0)),
+        "volume_24h": float(d.get("volumeUsd24Hr", 0)),
+        "market_cap": float(d.get("marketCapUsd", 0)),
+        "high_24h":   0,
+        "low_24h":    0,
+    }
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# 3. TECHNICAL INDICATORS  (Twelve Data — pre-computed, free 800/day)
+# ════════════════════════════════════════════════════════════════════════════
+def _td(endpoint: str, symbol: str, interval: str, **kwargs) -> Optional[dict]:
+    if not TD_KEY:
+        return None
+    params = {"symbol": TD_PAIR(symbol), "interval": interval.lower(),
+              "apikey": TD_KEY, "outputsize": 50, **kwargs}
+    return _get(f"{TD_BASE}/{endpoint}", params)
+
+def get_indicators(symbol: str, interval: str = "1h") -> dict:
+    """
+    Returns dict with rsi, macd, ema20, ema50, ema200, adx, atr, bb_upper, bb_lower, vwap.
+    Uses Twelve Data. Falls back to None values if key not set.
+    """
+    iv = interval.lower().replace("1h","1h").replace("4h","4h").replace("1d","1day")
+
+    def latest(data, key="value"):
+        if data and data.get("status") == "ok" and data.get("values"):
+            return float(data["values"][0].get(key, 0))
+        return None
+
+    rsi_data  = _td("rsi",  symbol, iv, time_period=14)
+    adx_data  = _td("adx",  symbol, iv, time_period=14)
+    atr_data  = _td("atr",  symbol, iv, time_period=14)
+    ema20     = _td("ema",  symbol, iv, time_period=20)
+    ema50     = _td("ema",  symbol, iv, time_period=50)
+    ema200    = _td("ema",  symbol, iv, time_period=200)
+    bb_data   = _td("bbands", symbol, iv, time_period=20)
+    macd_data = _td("macd", symbol, iv)
+
+    bb_upper = bb_lower = None
+    if bb_data and bb_data.get("status") == "ok" and bb_data.get("values"):
+        bb_upper = float(bb_data["values"][0].get("upper_band", 0))
+        bb_lower = float(bb_data["values"][0].get("lower_band", 0))
+
+    macd_val = macd_hist = None
+    if macd_data and macd_data.get("status") == "ok" and macd_data.get("values"):
+        macd_val  = float(macd_data["values"][0].get("macd", 0))
+        macd_hist = float(macd_data["values"][0].get("macd_hist", 0))
+
+    return {
+        "rsi":       latest(rsi_data),
+        "adx":       latest(adx_data),
+        "atr":       latest(atr_data),
+        "ema20":     latest(ema20),
+        "ema50":     latest(ema50),
+        "ema200":    latest(ema200),
+        "bb_upper":  bb_upper,
+        "bb_lower":  bb_lower,
+        "macd":      macd_val,
+        "macd_hist": macd_hist,
+    }
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# 4. TRENDING + GAINERS/LOSERS  (CoinGecko — free, no key)
+# ════════════════════════════════════════════════════════════════════════════
+@lru_cache(maxsize=1)
+def _trending_cached(ts: int) -> list:
+    """Cache busts every 5 minutes."""
+    data = _cg_headers_requests(f"{CG_BASE}/search/trending", {})
+    if not data or "coins" not in data:
+        return []
+    return [
+        {
+            "rank":   i + 1,
+            "symbol": c["item"]["symbol"].upper(),
+            "name":   c["item"]["name"],
+            "price":  c["item"].get("data",{}).get("price", 0),
+            "change_24h": c["item"].get("data",{}).get("price_change_percentage_24h",{}).get("usd", 0),
+        }
+        for i, c in enumerate(data["coins"][:10])
+    ]
+
+def get_trending() -> list:
+    ts = int(time.time() // 300)  # 5-min bucket
+    return _trending_cached(ts)
+
+@lru_cache(maxsize=1)
+def _gainers_cached(ts: int) -> dict:
+    """Top gainers + losers — requires CG Pro key."""
+    if not CG_KEY:
+        return {"gainers": [], "losers": []}
+    data = _cg_headers_requests(
+        f"{CG_BASE}/coins/top_gainers_losers",
+        {"vs_currency":"usd","duration":"24h","top_coins":"300"}
+    )
+    if not data:
+        return {"gainers": [], "losers": []}
+    def fmt(c):
+        return {
+            "symbol":     c.get("symbol","").upper(),
+            "name":       c.get("name",""),
+            "price":      c.get("usd", 0),
+            "change_24h": c.get("usd_24h_change", 0),
+        }
+    return {
+        "gainers": [fmt(c) for c in data.get("top_gainers", [])[:5]],
+        "losers":  [fmt(c) for c in data.get("top_losers",  [])[:5]],
+    }
+
+def get_gainers_losers() -> dict:
+    ts = int(time.time() // 300)
+    return _gainers_cached(ts)
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# 5. MARKET OVERVIEW  (CoinGecko global)
+# ════════════════════════════════════════════════════════════════════════════
+@lru_cache(maxsize=1)
+def _market_overview_cached(ts: int) -> dict:
+    data = _cg_headers_requests(f"{CG_BASE}/global", {})
+    if not data or "data" not in data:
+        return {}
+    d = data["data"]
+    return {
+        "total_market_cap_usd": d.get("total_market_cap",{}).get("usd", 0),
+        "market_cap_change_24h": d.get("market_cap_change_percentage_24h_usd", 0),
+        "btc_dominance":  d.get("market_cap_percentage",{}).get("btc", 0),
+        "eth_dominance":  d.get("market_cap_percentage",{}).get("eth", 0),
+        "total_volume_24h": d.get("total_volume",{}).get("usd", 0),
+        "active_coins":   d.get("active_cryptocurrencies", 0),
+    }
+
+def get_market_overview() -> dict:
+    ts = int(time.time() // 300)
+    return _market_overview_cached(ts)
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# 6. BTC ON-CHAIN  (Mempool.space — free, no key)
+# ════════════════════════════════════════════════════════════════════════════
+@lru_cache(maxsize=1)
+def _mempool_cached(ts: int) -> dict:
+    fees = _get(f"{MPOOL}/fees/recommended")
+    stats = _get(f"{MPOOL}/mining/hashrate/pools/1w")
+    return {
+        "fastest_fee":   fees.get("fastestFee", 0) if fees else 0,
+        "halfhour_fee":  fees.get("halfHourFee", 0) if fees else 0,
+        "hour_fee":      fees.get("hourFee", 0) if fees else 0,
+        "mempool_size":  None,  # requires /mempool endpoint
+    }
+
+def get_btc_onchain() -> dict:
+    ts = int(time.time() // 120)  # 2-min cache
+    return _mempool_cached(ts)
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# 7. ETH ON-CHAIN  (Etherscan — free, 5 calls/sec)
+# ════════════════════════════════════════════════════════════════════════════
+@lru_cache(maxsize=1)
+def _eth_onchain_cached(ts: int) -> dict:
+    if not ETHSCAN_KEY:
+        return {"exchange_netflow": None, "whale_transfers": None}
+    # Large transfers to/from known exchange wallets (simplified)
+    data = _get(ETHSCAN, {
+        "module": "stats", "action": "ethsupply", "apikey": ETHSCAN_KEY
+    })
+    return {
+        "eth_supply": int(data.get("result", 0)) / 1e18 if data else None,
+        "exchange_netflow": None,  # Requires Covalent for full whale data
+    }
+
+def get_eth_onchain() -> dict:
+    ts = int(time.time() // 300)
+    return _eth_onchain_cached(ts)
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# 8. NEWS FEED  (MarketAux — free 100 req/day)
+# ════════════════════════════════════════════════════════════════════════════
+@lru_cache(maxsize=32)
+def _news_cached(symbol: str, ts: int) -> list:
+    if not MAUX_KEY:
+        return _rss_news_fallback(symbol)
+    data = _get(f"{MAUX}/news/all", {
+        "symbols": symbol,
+        "filter_entities": "true",
+        "language": "en",
+        "limit": 5,
+        "api_token": MAUX_KEY,
+    })
+    if not data or "data" not in data:
+        return _rss_news_fallback(symbol)
+    return [
+        {
+            "title":     a.get("title",""),
+            "source":    a.get("source",""),
+            "url":       a.get("url",""),
+            "published": a.get("published_at",""),
+            "sentiment": _map_sentiment(a.get("entities",[]))
+        }
+        for a in data["data"][:5]
+    ]
+
+def _map_sentiment(entities: list) -> str:
+    if not entities:
+        return "neutral"
+    scores = [e.get("sentiment_score", 0) for e in entities if "sentiment_score" in e]
+    if not scores:
+        return "neutral"
+    avg = sum(scores) / len(scores)
+    return "bullish" if avg > 0.1 else "bearish" if avg < -0.1 else "neutral"
+
+def _rss_news_fallback(symbol: str) -> list:
+    """RSS fallback — CoinDesk for BTC/ETH, CoinTelegraph for others."""
+    import feedparser
+    feeds = {
+        "BTC": "https://feeds.feedburner.com/CoinDesk",
+        "ETH": "https://feeds.feedburner.com/CoinDesk",
+    }
+    url = feeds.get(symbol.upper(), "https://cointelegraph.com/rss")
+    try:
+        feed = feedparser.parse(url)
+        return [
+            {"title": e.title, "source": "RSS", "url": e.link,
+             "published": e.get("published",""), "sentiment": "neutral"}
+            for e in feed.entries[:5]
+        ]
+    except Exception:
+        return []
+
+def get_news(symbol: str) -> list:
+    ts = int(time.time() // 900)  # 15-min cache
+    return _news_cached(symbol.upper(), ts)
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# 9. MACRO DATA  (Econdb — free, no key for common series)
+# ════════════════════════════════════════════════════════════════════════════
+@lru_cache(maxsize=1)
+def _macro_cached(ts: int) -> dict:
+    # Econdb ticker codes
+    series_map = {
+        "fed_rate":  "FFER",    # Fed Funds Effective Rate
+        "us_cpi":   "USCPIY",  # US CPI YoY
+        "us_gdp":   "USGDP",   # US GDP Growth
+    }
+    macro = {}
+    for key, ticker in series_map.items():
+        data = _get(f"{ECONDB}/?ticker={ticker}&format=json&last=1")
+        if data and "results" in data and data["results"]:
+            vals = data["results"][0].get("observations",[])
+            macro[key] = vals[-1]["value"] if vals else None
+        else:
+            macro[key] = None
+
+    # DXY and Gold from CoinGecko (approximate via forex)
+    macro["dxy"]  = None  # Would need forex API
+    macro["gold"] = _get_gold_price()
+    return macro
+
+def _get_gold_price() -> Optional[float]:
+    """Get gold price via CoinGecko (PAXG token as proxy)."""
+    data = _cg_headers_requests(f"{CG_BASE}/simple/price",
+        {"ids":"pax-gold","vs_currencies":"usd"})
+    if data and "pax-gold" in data:
+        return data["pax-gold"].get("usd")
+    return None
+
+def get_macro() -> dict:
+    ts = int(time.time() // 3600)  # 1-hour cache
+    return _macro_cached(ts)
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# 10. MULTI-COIN WATCHLIST SCORES  (batch)
+# ════════════════════════════════════════════════════════════════════════════
+def get_watchlist_scores(symbols: list[str]) -> list[dict]:
+    """
+    Returns lightweight signal scores for a list of symbols.
+    Uses CoinGecko batch price endpoint (1 call).
+    """
+    ids = [CG_ID.get(s.upper(), s.lower()) for s in symbols]
+    ids_str = ",".join(ids)
+    data = _cg_headers_requests(f"{CG_BASE}/simple/price", {
+        "ids": ids_str,
+        "vs_currencies": "usd",
+        "include_24hr_change": "true",
+        "include_24hr_vol": "true",
+    })
+    if not data:
+        return []
+    results = []
+    for sym, coin_id in zip(symbols, ids):
+        d = data.get(coin_id, {})
+        price     = d.get("usd", 0)
+        chg       = d.get("usd_24h_change", 0)
+        # Lightweight score: just change momentum for watchlist
+        score     = 0
+        if chg > 5:   score += 3
+        elif chg > 2: score += 2
+        elif chg > 0: score += 1
+        results.append({
+            "symbol":    sym.upper(),
+            "price":     price,
+            "change_24h": chg,
+            "score":     score,
+            "signal":    "BUY" if score >= 3 else "HOLD" if score >= 1 else "WATCH",
+        })
+    return results
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# HEALTH CHECK
+# ════════════════════════════════════════════════════════════════════════════
+def health_check() -> dict:
+    """Check all data sources are reachable."""
+    results = {}
+
+    # CoinGecko ping
+    cg = _cg_headers_requests(f"{CG_BASE}/ping", {})
+    results["coingecko"] = "ok" if cg and "gecko_says" in cg else "error"
+
+    # Twelve Data ping
+    if TD_KEY:
+        td = _get(f"{TD_BASE}/api_usage", {"apikey": TD_KEY})
+        results["twelve_data"] = "ok" if td and "current_usage" in td else "error"
+    else:
+        results["twelve_data"] = "no_key"
+
+    # CoinCap ping
+    cap = _get(f"{CAP_BASE}/assets/bitcoin")
+    results["coincap"] = "ok" if cap and "data" in cap else "error"
+
+    # Mempool ping
+    mp = _get(f"{MPOOL}/fees/recommended")
+    results["mempool"] = "ok" if mp and "fastestFee" in mp else "error"
+
+    # MarketAux
+    results["marketaux"] = "ok" if MAUX_KEY else "no_key"
+
+    return results
