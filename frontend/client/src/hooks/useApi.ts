@@ -1,4 +1,4 @@
-// ─── Custom Hooks for Crypto Sniper V2 ──────────────────────────────────────
+// âââ Custom Hooks for Crypto Sniper V2 ââââââââââââââââââââââââââââââââââââââ
 import { useState, useEffect, useCallback, useRef } from "react";
 import {
   analyse, kronos, deepResearch,
@@ -11,7 +11,7 @@ import type {
   MacroData, WatchlistScore,
 } from "@/types/api";
 
-// ── Generic async hook ────────────────────────────────────────────────────────
+// ââ Generic async hook ââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 function useAsync<T>(
   fn: () => Promise<T>,
   deps: unknown[],
@@ -48,11 +48,11 @@ function useAsync<T>(
   return { data, loading, error, refetch: run };
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
+// âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 // ANALYSIS HOOKS
-// ═══════════════════════════════════════════════════════════════════════════════
+// âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
-/** Full V/P/R/T/S analysis — called on demand (not on mount) */
+/** Full V/P/R/T/S analysis â called on demand (not on mount) */
 export function useAnalyse() {
   const [data, setData]       = useState<AnalyseResponse | null>(null);
   const [loading, setLoading] = useState(false);
@@ -79,7 +79,7 @@ export function useAnalyse() {
   return { data, loading, error, run };
 }
 
-/** Kronos AI forecast + agent debate — called after analyse */
+/** Kronos AI forecast + agent debate â called after analyse */
 export function useKronos() {
   const [data, setData]       = useState<KronosResponse | null>(null);
   const [loading, setLoading] = useState(false);
@@ -144,16 +144,16 @@ export function useDeepResearch() {
   return { data, loading, error, run, reset };
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
+// âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 // MARKET DATA HOOKS (auto-refresh)
-// ═══════════════════════════════════════════════════════════════════════════════
+// âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
-/** Market overview — refreshes every 60s */
+/** Market overview â refreshes every 60s */
 export function useMarketOverview() {
   return useAsync<MarketOverview>(getMarketOverview, [], true);
 }
 
-/** Trending coins — refreshes every 5 min */
+/** Trending coins â refreshes every 5 min */
 export function useTrending() {
   const { data, loading, error, refetch } = useAsync(
     getTrending,
@@ -227,9 +227,9 @@ export function useWatchlist(symbols: string[]) {
   return { scores, loading, refresh };
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// COINCAP WEBSOCKET — Live price ticker
-// ═══════════════════════════════════════════════════════════════════════════════
+// âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+// COINCAP WEBSOCKET â Live price ticker
+// âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 const DEFAULT_TICKERS = ["bitcoin", "ethereum", "solana", "binance-coin", "dogecoin", "pepe"];
 
@@ -273,7 +273,7 @@ export function useLivePrices(assets = DEFAULT_TICKERS) {
           }
         };
 
-        ws.onerror = () => ws.close();
+        ws.onerror = () => ws?.close();
         ws.onclose = () => {
           // Reconnect after 3s
           setTimeout(connect, 3000);
@@ -305,7 +305,7 @@ const COINCAP_TO_SYMBOL: Record<string, string> = {
   "matic-network": "MATIC",
 };
 
-// ── PDF Export ────────────────────────────────────────────────────────────────
+// ââ PDF Export ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 export function usePdfExport() {
   const [exporting, setExporting] = useState(false);
 
