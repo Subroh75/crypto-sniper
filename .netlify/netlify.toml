@@ -1,25 +1,16 @@
-plugins = []
-headers = []
-redirects = []
-
-[functions]
-
-[functions."*"]
-
 [build]
-publish = "/home/user/workspace/crypto-sniper"
-publishOrigin = "default"
+  base    = "frontend/client"
+  command = "npm run build"
+  publish = "frontend/client/dist"
 
-[build.environment]
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "DENY"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
 
-[build.processing]
-
-[build.processing.css]
-
-[build.processing.html]
-
-[build.processing.images]
-
-[build.processing.js]
-
-[build.services]
+[[redirects]]
+  from = "/*"
+  to   = "/index.html"
+  status = 200
