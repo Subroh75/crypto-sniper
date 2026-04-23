@@ -1,9 +1,13 @@
 [build]
   base    = "frontend"
-  command = "npm install && npx tsx script/build.ts"
+  command = "npm install && npm run build"
   publish = "frontend/dist/public"
 
+[build.environment]
+  VITE_API_BASE = "https://crypto-sniper.onrender.com"
+  NODE_VERSION  = "22"
+
 [[redirects]]
-  from = "/*"
-  to   = "/index.html"
+  from   = "/*"
+  to     = "/index.html"
   status = 200
