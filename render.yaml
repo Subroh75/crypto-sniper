@@ -5,8 +5,8 @@ services:
     region: singapore
     plan: standard
     buildCommand: pip install -r requirements-api.txt
-    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
-    healthCheckPath: /
+    startCommand: uvicorn api:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
     envVars:
       - key: ALLOWED_ORIGINS
         value: https://crypto-sniper.app,https://www.crypto-sniper.app,http://localhost:5173
@@ -14,6 +14,14 @@ services:
         value: "3.11.9"
       - key: ETHERSCAN_API_KEY
         sync: false
-      - key: HELIUS_API_KEY
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: COINGECKO_API_KEY
+        sync: false
+      - key: TWELVEDATA_API_KEY
+        sync: false
+      - key: PERPLEXITY_API_KEY
+        sync: false
+      - key: MARKETAUX_API_KEY
         sync: false
     autoDeploy: true
