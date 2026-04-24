@@ -13,6 +13,7 @@ import {
   WatchlistCard, SubscribeCard, ExportCard,
 } from "@/components/Sidebar";
 import { TopSignals } from "@/components/TopSignals";
+import { CSOVerdict } from "@/components/CSOVerdict";
 import {
   TrendingSection, NewsSection, MacroSection,
 } from "@/components/BottomSections";
@@ -519,6 +520,7 @@ export default function Home() {
 
             {/*  RIGHT SIDEBAR  */}
             <div>
+              <CSOVerdict sig={sig} kron={kronosHk.data} fearGreed={sig?.fear_greed} />
               <TopSignals onSelect={(sym) => runAnalysis(sym)} interval={interval} />
               <TradeSetupCard setup={sig.trade_setup} close={sig.quote.price} />
               <ConvictionMeter conviction={sig.conviction} />
