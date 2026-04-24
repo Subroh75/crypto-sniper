@@ -53,55 +53,49 @@ export function TopSignals({ onSelect, interval = "1h" }: Props) {
     }
   }, [interval, minScore]);
 
-  // Auto-scan on mount
   useEffect(() => { scan(); }, [scan]);
-
-  // Auto-refresh every 5 minutes
   useEffect(() => {
     const t = setInterval(scan, 5 * 60 * 1000);
     return () => clearInterval(t);
   }, [scan]);
 
+  const nextScore = minScore === 7 ? 8 : minScore === 8 ? 9 : 7;
+
   return (
     <div style={{ marginBottom: 16 }}>
-      {/* Header */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <span style={{ color: "#f59e0b", fontSize: 14 }}>⚡</span>
+          <span style={{ color: "#f59e0b", fontSize: 14 }}>{"!"}</span>
           <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", color: "#94a3b8", textTransform: "uppercase" }}>
             Top Signals
           </span>
           <span style={{ fontSize: 10, color: "#475569", background: "#0f172a", padding: "1px 6px", borderRadius: 4, border: "1px solid #1e293b" }}>
-            score {'>='} {minScore}
+            {"score >= "}{minScore}
           </span>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          {/* Min score toggle */}
           <button
-            onClick={() => setMinScore(s => s === 7 ? 8 : s === 8 ? 9 : 7)}
+            onClick={() => setMinScore(nextScore)}
             style={{ fontSize: 10, color: "#64748b", background: "#0f172a", border: "1px solid #1e293b", borderRadius: 4, padding: "2px 6px", cursor: "pointer" }}
           >
-            {'>='}{minScore}
+            {">="}{minScore}
           </button>
-          {/* Refresh */}
           <button
             onClick={scan}
             disabled={loading}
             style={{ fontSize: 10, color: loading ? "#334155" : "#7c3aed", background: "#0f172a", border: "1px solid #1e293b", borderRadius: 4, padding: "2px 6px", cursor: loading ? "not-allowed" : "pointer" }}
           >
-            {loading ? "..." : "↻"}
+            {loading ? "..." : "Scan"}
           </button>
         </div>
       </div>
 
-      {/* Last scan time */}
       {lastScan && (
         <div style={{ fontSize: 10, color: "#334155", marginBottom: 8 }}>
-          Scanned top 50 coins · {lastScan}
+          {"Scanned top 50 coins - "}{lastScan}
         </div>
       )}
 
-      {/* Loading state */}
       {loading && signals.length === 0 && (
         <div style={{ padding: "20px 0", textAlign: "center" }}>
           <div style={{ fontSize: 11, color: "#475569" }}>Scanning top 50 coins...</div>
@@ -109,15 +103,13 @@ export function TopSignals({ onSelect, interval = "1h" }: Props) {
         </div>
       )}
 
-      {/* Empty state */}
       {!loading && signals.length === 0 && lastScan && (
         <div style={{ padding: "16px 0", textAlign: "center" }}>
-          <div style={{ fontSize: 11, color: "#475569" }}>No coins scoring {'>='} {minScore}</div>
-          <div style={{ fontSize: 10, color: "#334155", marginTop: 4 }}>Market may be ranging</div>
+          <div style={{ fontSize: 11, color: "#475569" }}>{"No coins scoring >= "}{minScore}</div>
+          <div style={{ fontSize: 10, color: "#334155", marginTop: 4 }}>Market may be ranging - try score {">= 5"}</div>
         </div>
       )}
 
-      {/* Signal rows */}
       {signals.map((sig) => (
         <button
           key={sig.symbol}
@@ -131,7 +123,6 @@ export function TopSignals({ onSelect, interval = "1h" }: Props) {
           onMouseEnter={e => (e.currentTarget.style.borderColor = "#7c3aed")}
           onMouseLeave={e => (e.currentTarget.style.borderColor = "#1e293b")}
         >
-          {/* Top row: symbol + signal badge + change */}
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <span style={{ fontSize: 13, fontWeight: 700, color: "#f1f5f9", fontFamily: "monospace" }}>
@@ -151,15 +142,13 @@ export function TopSignals({ onSelect, interval = "1h" }: Props) {
             </span>
           </div>
 
-          {/* Score bar */}
           <ScoreBar score={sig.score} max={sig.max_score} />
 
-          {/* Bottom row: V/P/R/T/S breakdown */}
           <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
-            {[["V", sig.v, 5], ["P", sig.p, 3], ["R", sig.r, 2], ["T", sig.t, 3], ["S", sig.s, 3]].map(([k, v, m]) => (
-              <div key={k as string} style={{ flex: 1, textAlign: "center" }}>
+            {([["V", sig.v, 5], ["P", sig.p, 3], ["R", sig.r, 2], ["T", sig.t, 3], ["S", sig.s, 3]] as [string, number, number][]).map(([k, v, m]) => (
+              <div key={k} style={{ flex: 1, textAlign: "center" }}>
                 <div style={{ fontSize: 9, color: "#475569", marginBottom: 2 }}>{k}</div>
-                <div style={{ fontSize: 11, color: (v as number) > 0 ? "#a78bfa" : "#334155", fontWeight: 600 }}>
+                <div style={{ fontSize: 11, color: v > 0 ? "#a78bfa" : "#334155", fontWeight: 600 }}>
                   {v}/{m}
                 </div>
               </div>
