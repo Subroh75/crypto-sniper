@@ -231,7 +231,7 @@ export function useWatchlist(symbols: string[]) {
 // COINCAP WEBSOCKET â Live price ticker
 // âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
-const DEFAULT_TICKERS = ["bitcoin", "ethereum", "solana", "binance-coin", "dogecoin", "pepe"];
+const DEFAULT_TICKERS = ["bitcoin", "ethereum", "solana", "bnb", "dogecoin", "pepe"];
 
 export interface LivePrice {
   symbol: string;
@@ -248,7 +248,7 @@ export function useLivePrices(assets = DEFAULT_TICKERS) {
     const assetsStr = assets.join(",");
     const connect = () => {
       try {
-        const ws = new WebSocket(`wss://ws.coincap.io/prices?assets=${assetsStr}`);
+        const ws = new WebSocket(`wss://stream.binance.com:9443/stream?streams=${assetsStr}`);
         wsRef.current = ws;
 
         ws.onmessage = (e) => {
@@ -302,7 +302,7 @@ const COINCAP_TO_SYMBOL: Record<string, string> = {
   "dogwifhat":  "WIF",
   hyperliquid:  "HYPE",
   cardano:      "ADA",
-  "matic-network": "MATIC",
+  "matic": "MATIC",
 };
 
 // ââ PDF Export ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
