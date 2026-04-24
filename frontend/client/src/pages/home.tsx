@@ -12,6 +12,7 @@ import {
   TradeSetupCard, ConvictionMeter, KeyLevelsCard,
   WatchlistCard, SubscribeCard, ExportCard,
 } from "@/components/Sidebar";
+import { TopSignals } from "@/components/TopSignals";
 import {
   TrendingSection, NewsSection, MacroSection,
 } from "@/components/BottomSections";
@@ -516,6 +517,7 @@ export default function Home() {
 
             {/* ?Â?Â RIGHT SIDEBAR ?Â?Â?Â?Â?Â?Â?Â?Â?Â?Â?Â?Â?Â?Â?Â?Â?Â?Â?Â?Â?Â?Â?Â?Â?Â?Â?Â?Â?Â?Â?Â?Â?Â?Â?Â?Â?Â?Â?Â?Â?Â?Â?Â?Â?Â */}
             <div>
+              <TopSignals onSelect={(sym) => runAnalysis(sym)} interval={interval} />
               <TradeSetupCard setup={sig.trade_setup} close={sig.quote.price} />
               <ConvictionMeter conviction={sig.conviction} />
               <KeyLevelsCard levels={sig.key_levels} />
