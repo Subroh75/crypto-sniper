@@ -62,7 +62,7 @@ export function TrendingSection({ onSelect }: { onSelect: (sym: string) => void 
                 <span className={`text-[10px] font-mono font-bold ${
                   coin.change_24h >= 0 ? "text-teal" : "text-red"
                 }`}>
-                  {coin.change_24h >= 0 ? "▲" : "▼"} {Math.abs(coin.change_24h).toFixed(1)}%
+                  {(coin.change_24h ?? 0) >= 0 ? "▲" : "▼"} {Math.abs(coin.change_24h ?? 0).toFixed(1)}%
                 </span>
               </button>
             ))}
