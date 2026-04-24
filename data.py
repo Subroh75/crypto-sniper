@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 # ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ API Keys (set in Render environment variables) ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ
 CG_KEY     = os.getenv("COINGECKO_API_KEY", "")          # demo or pro
-TD_KEY     = os.getenv("TWELVEDATA_API_KEY", "")         # free tier
+TD_KEY     = os.getenv("TWELVEDATA_API_KEY", "") or os.getenv("TWELVE_DATA_API_KEY", "")  # free tier
 MAUX_KEY   = os.getenv("MARKETAUX_API_KEY", "")          # free tier
 ETHSCAN_KEY= os.getenv("ETHERSCAN_API_KEY", "")          # free tier
 
@@ -75,11 +75,17 @@ DAYS_MAP = {"1m":1,"5m":1,"15m":2,"30m":5,"1H":14,"4H":60,"1D":365}
 def get_ohlcv(symbol: str, interval: str = "1H") -> list[list]:
     """
     Returns [[timestamp, open, high, low, close], ...] newest last.
-    Uses /market_chart (free tier) then converts to OHLCV format.
-    Falls back to synthetic OHLCV from price data if needed.
+    Primary: Twelve Data (real OHLCV, 300 candles).
+    Fallback: CoinGecko market_chart -> CoinCap -> synthetic.
     """
+    # Try Twelve Data first (real tick data, accurate OHLCV)
+    if TD_KEY:
+        bars = _twelve_data_ohlcv(symbol, interval, outputsize=300)
+        if len(bars) >= 20:
+            return bars
+
     coin_id = CG_ID.get(symbol.upper(), symbol.lower())
-    days    = DAYS_MAP.get(interval, 1)
+    days    = DAYS_MAP.get(interval, 14)
     # /market_chart is free on all tiers including demo
     url  = f"{CG_BASE}/coins/{coin_id}/market_chart"
     data = _cg_headers_requests(url, {"vs_currency":"usd","days":days,"interval":"hourly" if days<=1 else "daily"})
@@ -99,6 +105,31 @@ def get_ohlcv(symbol: str, interval: str = "1H") -> list[list]:
         bars.append([int(ts), round(prev, 8), high, low, round(price, 8)])
     return bars[-96:]  # last 96 bars max
 
+
+
+def _twelve_data_ohlcv(symbol: str, interval: str = "1h", outputsize: int = 300) -> list[list]:
+    """Fetch real OHLCV candles from Twelve Data API."""
+    if not TD_KEY:
+        return []
+    # Map our interval codes to Twelve Data format
+    iv_map = {"1m":"1min","5m":"5min","15m":"15min","30m":"30min","1H":"1h","4H":"4h","1D":"1day"}
+    iv = iv_map.get(interval, interval.lower())
+    # Twelve Data uses crypto symbol format: BTC/USD
+    sym = f"{symbol.upper()}/USD"
+    data = _get(f"{TD_BASE}/time_series", {
+        "symbol": sym, "interval": iv, "outputsize": outputsize,
+        "order": "ASC", "apikey": TD_KEY
+    })
+    if not data or "values" not in data:
+        return []
+    bars = []
+    for c in data["values"]:
+        try:
+            ts = int(__import__('datetime').datetime.fromisoformat(c["datetime"].replace("Z","")).timestamp() * 1000)
+            bars.append([ts, float(c["open"]), float(c["high"]), float(c["low"]), float(c["close"])])
+        except Exception:
+            continue
+    return bars
 
 
 def _coincap_ohlcv(symbol: str, days: int = 1) -> list[list]:
