@@ -72,7 +72,7 @@ export function TopSignals({ onSelect, interval = "1h" }: Props) {
             Top Signals
           </span>
           <span style={{ fontSize: 10, color: "#475569", background: "#0f172a", padding: "1px 6px", borderRadius: 4, border: "1px solid #1e293b" }}>
-            score >= {minScore}
+            score {'>='} {minScore}
           </span>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -81,7 +81,7 @@ export function TopSignals({ onSelect, interval = "1h" }: Props) {
             onClick={() => setMinScore(s => s === 7 ? 8 : s === 8 ? 9 : 7)}
             style={{ fontSize: 10, color: "#64748b", background: "#0f172a", border: "1px solid #1e293b", borderRadius: 4, padding: "2px 6px", cursor: "pointer" }}
           >
-            >={minScore}
+            {'>='}{minScore}
           </button>
           {/* Refresh */}
           <button
@@ -112,7 +112,7 @@ export function TopSignals({ onSelect, interval = "1h" }: Props) {
       {/* Empty state */}
       {!loading && signals.length === 0 && lastScan && (
         <div style={{ padding: "16px 0", textAlign: "center" }}>
-          <div style={{ fontSize: 11, color: "#475569" }}>No coins scoring >= {minScore}</div>
+          <div style={{ fontSize: 11, color: "#475569" }}>No coins scoring {'>='} {minScore}</div>
           <div style={{ fontSize: 10, color: "#334155", marginTop: 4 }}>Market may be ranging</div>
         </div>
       )}
