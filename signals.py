@@ -93,6 +93,8 @@ def calculate_signals(
     ohlcv: list[list],
     quote: dict,
     indicators: dict,
+    fear_greed: dict = None,
+    cp_news: list = None,
     social_delta: float = 0.0,  # % change in social score (LunarCrush)
 ) -> SignalResult:
     """
@@ -192,10 +194,27 @@ def calculate_signals(
         t_score = min(t_score + 1, 3)
 
     # ── S: Social Score (0–3) ──────────────────────────────────────────────
+    # S score: Fear & Greed + CryptoPanic + social delta
     s_score = 0
-    if social_delta >= 20:   s_score = 3
-    elif social_delta >= 10: s_score = 2
-    elif social_delta >= 5:  s_score = 1
+    fg = fear_greed or {}
+    fg_val   = fg.get("value", 50)
+    fg_delta = fg.get("delta", 0)
+    news     = cp_news or []
+    bull_n = sum(1 for n in news if n.get("sentiment") == "bullish")
+    bear_n = sum(1 for n in news if n.get("sentiment") == "bearish")
+    # Fear & Greed signal (1pt)
+    if fg_val >= 70 and fg_delta > 0: s_score += 1   # greed rising = momentum
+    elif fg_val <= 25:                s_score += 1   # extreme fear = buy dip
+    # News sentiment (1pt)
+    if bull_n > bear_n and bull_n >= 2: s_score += 1
+    # Social delta (1pt)
+    if social_delta >= 5:               s_score += 1
+    s_score = min(s_score, 3)
+    # Update conviction signals with sentiment context
+    if fg_val <= 25:   bull_signals.append(f"Fear&Greed {fg_val} - extreme fear, potential reversal")
+    elif fg_val >= 75: bear_signals.append(f"Fear&Greed {fg_val} - extreme greed, fade risk")
+    if bull_n > bear_n: bull_signals.append(f"News {bull_n} bullish vs {bear_n} bearish")
+    elif bear_n > bull_n: bear_signals.append(f"News {bear_n} bearish vs {bull_n} bullish")
 
     # ── Total ──────────────────────────────────────────────────────────────
     total = v_score + p_score + r_score + t_score + s_score
