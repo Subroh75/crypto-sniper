@@ -126,7 +126,7 @@ def calculate_signals(
 
     # ── Indicators (prefer Twelve Data, fallback to manual calc) ───────────
     rsi       = indicators.get("rsi") or _calc_rsi(closes, 14)
-    adx       = indicators.get("adx") or 25.0
+    adx       = indicators.get("adx") or _calc_adx(highs, lows, closes, 14)
     atr       = indicators.get("atr") or _calc_atr(highs, lows, closes, 14)
     ema20     = indicators.get("ema20") or _calc_ema(closes, 20)
     ema50     = indicators.get("ema50") or _calc_ema(closes, 50)
@@ -236,7 +236,10 @@ def calculate_signals(
     if social_delta > 5: bull_signals.append(f"Social ↑{social_delta:.0f}% — retail accumulating")
     if rel_vol > 2:      bull_signals.append(f"Volume {rel_vol:.1f}× above average")
 
-    if rsi >= 70:        bear_signals.append(f"RSI {rsi:.0f} — overbought, fade risk")
+    if rsi >= 70:        bear_signals.append(f"RSI {rsi:.0f} - overbought, fade risk")
+    if ema200 and close < ema200: bear_signals.append("Price below EMA200 - macro trend bearish")
+    if ema50  and close < ema50:  bear_signals.append("Price below EMA50 - medium trend bearish")
+    if adx > 20 and chg < 0: bear_signals.append(f"ADX {adx:.0f} - bearish trend has strength")
     if rsi <= 30:        bull_signals.append(f"RSI {rsi:.0f} — oversold, bounce potential")
     if chg < -3:         bear_signals.append(f"24H change {chg:.1f}% — selling pressure")
     if macd_hist < 0:    bear_signals.append("MACD histogram negative — momentum fading")
@@ -315,6 +318,49 @@ def _calc_atr(highs, lows, closes, period=14) -> float:
         tr = max(highs[i] - lows[i], abs(highs[i] - closes[i-1]), abs(lows[i] - closes[i-1]))
         trs.append(tr)
     return sum(trs[-period:]) / period
+
+
+def _calc_adx(highs: list, lows: list, closes: list, period: int = 14) -> float:
+    """Calculate ADX (Average Directional Index) from OHLCV data."""
+    if len(highs) < period * 2 + 1:
+        return 0.0
+    try:
+        tr_list, pdm_list, ndm_list = [], [], []
+        for i in range(1, len(highs)):
+            h, l, pc = highs[i], lows[i], closes[i-1]
+            tr  = max(h - l, abs(h - pc), abs(l - pc))
+            pdm = max(highs[i] - highs[i-1], 0) if highs[i] - highs[i-1] > lows[i-1] - lows[i] else 0
+            ndm = max(lows[i-1] - lows[i], 0) if lows[i-1] - lows[i] > highs[i] - highs[i-1] else 0
+            tr_list.append(tr); pdm_list.append(pdm); ndm_list.append(ndm)
+
+        def smooth(data, p):
+            s = sum(data[:p])
+            result = [s]
+            for v in data[p:]:
+                s = s - s/p + v
+                result.append(s)
+            return result
+
+        atr_s  = smooth(tr_list, period)
+        pdm_s  = smooth(pdm_list, period)
+        ndm_s  = smooth(ndm_list, period)
+
+        dx_list = []
+        for a, p, n in zip(atr_s, pdm_s, ndm_s):
+            if a == 0: continue
+            pdi = 100 * p / a
+            ndi = 100 * n / a
+            dx  = 100 * abs(pdi - ndi) / (pdi + ndi) if (pdi + ndi) > 0 else 0
+            dx_list.append(dx)
+
+        if len(dx_list) < period:
+            return 0.0
+        adx = sum(dx_list[:period]) / period
+        for dx in dx_list[period:]:
+            adx = (adx * (period - 1) + dx) / period
+        return round(adx, 1)
+    except Exception:
+        return 0.0
 
 def _calc_vwap_approx(ohlcv: list[list]) -> float:
     """Approximate VWAP using typical price average."""
