@@ -140,8 +140,8 @@ export function TradeSetupCard({ setup, close }: { setup: TradeSetup | null; clo
             <div className="space-y-1">
               {[
                 ["Risk Amount",    "$100 (1% of $10K)"],
-                ["Stop Distance",  `$${(close * stopDistPct / 100).toFixed(0)}`],
-                ["Position Size",  `${(100 / (close * stopDistPct / 100)).toFixed(4)} ${" BTC"}`],
+                ["Stop Distance",  `${stopDistPct ? (close * stopDistPct / 100).toFixed(0) : "—"}`],
+                ["Position Size",  `${stopDistPct ? (100 / (close * stopDistPct / 100)).toFixed(4) : "—"} BTC`],
               ].map(([k, v]) => (
                 <div key={k} className="flex justify-between text-[11px] font-mono">
                   <span className="text-text-muted/70">{k}</span>
