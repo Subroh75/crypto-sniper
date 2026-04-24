@@ -302,7 +302,7 @@ export function KeyLevelsCard({ levels }: { levels: KeyLevel[] }) {
               </span>
               {!isCurrent && (
                 <span className={`text-[9px] font-mono ${level.dist_pct >= 0 ? "text-teal/60" : "text-red/60"}`}>
-                  {level.dist_pct >= 0 ? "+" : ""}{level.dist_pct.toFixed(2)}%
+                  {level.dist_pct != null ? (level.dist_pct >= 0 ? "+" : "") + level.dist_pct.toFixed(2) + "%" : "—"}
                 </span>
               )}
             </div>
@@ -368,7 +368,7 @@ export function WatchlistCard({
                 <div className="text-right">
                   <div className="text-[11px] font-mono font-bold text-text">{fmtPrice(s.price)}</div>
                   <div className={`text-[10px] font-mono ${s.change_24h >= 0 ? "text-teal" : "text-red"}`}>
-                    {s.change_24h >= 0 ? "▲" : "▼"} {Math.abs(s.change_24h).toFixed(2)}%
+                    {s.change_24h != null ? (s.change_24h >= 0 ? "▲" : "▼") + " " + Math.abs(s.change_24h).toFixed(2) + "%" : "—"}
                   </div>
                 </div>
               </button>
