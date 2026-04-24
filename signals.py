@@ -229,23 +229,41 @@ def calculate_signals(
     bull_signals = []
     bear_signals = []
 
-    if ema_stack:        bull_signals.append("EMA20 > EMA50 — bullish structure")
-    if ema200 and close > ema200: bull_signals.append("Price above EMA200 — macro trend intact")
-    if chg > 2:          bull_signals.append(f"24H change +{chg:.1f}% — momentum")
-    if macd_hist > 0:    bull_signals.append("MACD histogram positive")
-    if social_delta > 5: bull_signals.append(f"Social ↑{social_delta:.0f}% — retail accumulating")
-    if rel_vol > 2:      bull_signals.append(f"Volume {rel_vol:.1f}× above average")
+    # Bull signals - price action
+    if ema_stack:
+        bull_signals.append("EMA20 > EMA50 - bullish structure")
+    if ema50 and close > ema50:
+        bull_signals.append("Price above EMA50 - medium trend bullish")
+    if ema200 and close > ema200:
+        bull_signals.append("Price above EMA200 - macro trend intact")
+    if chg > 2:
+        bull_signals.append(f"24H change +{chg:.1f}% - momentum")
+    if macd_hist > 0:
+        bull_signals.append("MACD histogram positive")
+    if adx > 20 and chg > 0:
+        bull_signals.append(f"ADX {adx:.0f} - trend has strength")
+    if social_delta > 5:
+        bull_signals.append(f"Social +{social_delta:.0f}% - retail accumulating")
+    if rel_vol > 2:
+        bull_signals.append(f"Volume {rel_vol:.1f}x above average")
+    if rsi <= 30:
+        bull_signals.append(f"RSI {rsi:.0f} - oversold, bounce potential")
 
-    if rsi >= 70:        bear_signals.append(f"RSI {rsi:.0f} - overbought, fade risk")
-    if ema200 and close < ema200: bear_signals.append("Price below EMA200 - macro trend bearish")
-    if ema50  and close < ema50:  bear_signals.append("Price below EMA50 - medium trend bearish")
-    if adx > 20 and chg < 0: bear_signals.append(f"ADX {adx:.0f} - bearish trend has strength")
-    if rsi <= 30:        bull_signals.append(f"RSI {rsi:.0f} — oversold, bounce potential")
-    if chg < -3:         bear_signals.append(f"24H change {chg:.1f}% — selling pressure")
-    if macd_hist < 0:    bear_signals.append("MACD histogram negative — momentum fading")
-    if close < ema20 if ema20 else False:
-                         bear_signals.append("Price below EMA20 — bearish near-term")
-
+    # Bear signals
+    if rsi >= 70:
+        bear_signals.append(f"RSI {rsi:.0f} - overbought, fade risk")
+    if ema200 and close < ema200:
+        bear_signals.append("Price below EMA200 - macro trend bearish")
+    if ema50 and close < ema50:
+        bear_signals.append("Price below EMA50 - medium trend bearish")
+    if adx > 20 and chg < 0:
+        bear_signals.append(f"ADX {adx:.0f} - bearish trend has strength")
+    if chg < -3:
+        bear_signals.append(f"24H change {chg:.1f}% - selling pressure")
+    if macd_hist < 0:
+        bear_signals.append("MACD histogram negative")
+    if rel_vol > 2 and chg < 0:
+        bear_signals.append(f"Volume {rel_vol:.1f}x - heavy distribution")
     # ── Populate result ─────────────────────────────────────────────────────
     result.v_score   = v_score
     result.p_score   = p_score
