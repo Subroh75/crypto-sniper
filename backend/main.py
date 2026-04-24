@@ -575,4 +575,84 @@ def backtest_get(
     return backtest(BacktestRequest(symbol=symbol, pred_len=pred_len,
                                    lookback=lookback, step=step))
 
+# ──────────────────────────────────────────────────────────────────────────────
+# TOP SIGNALS SCANNER
+# ──────────────────────────────────────────────────────────────────────────────
+
+_scan_cache: dict = {"ts": 0, "data": []}
+_SCAN_TTL = 300  # 5 minutes
+
+@app.get("/scan", tags=["Signal"])
+def scan_top_signals(interval: str = Query("1h", regex="^(1m|5m|15m|30m|1h|4h|1d)$"), min_score: int = Query(7, ge=1, le=16)):
+    """
+    Scan top 50 coins by market cap, return those scoring >= min_score.
+    Results cached for 5 minutes to avoid rate limits.
+    """
+    import time
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    now = int(time.time())
+    cache_key = f"{interval}:{min_score}"
+    if _scan_cache.get("key") == cache_key and now - _scan_cache["ts"] < _SCAN_TTL:
+        return {"signals": _scan_cache["data"], "cached": True, "timestamp": _scan_cache["ts"]}
+
+    # Get top 50 coins from CoinGecko market data
+    import requests as _req
+    try:
+        cg_url = "https://api.coingecko.com/api/v3/coins/markets"
+        cg_params = {
+            "vs_currency": "usd",
+            "order": "market_cap_desc",
+            "per_page": 50,
+            "page": 1,
+            "sparkline": False,
+            "price_change_percentage": "24h"
+        }
+        cg_key = os.getenv("COINGECKO_API_KEY", "")
+        if cg_key:
+            cg_params["x_cg_demo_api_key"] = cg_key
+        resp = _req.get(cg_url, params=cg_params, timeout=10)
+        coins = resp.json()
+        symbols = [c["symbol"].upper() for c in coins if c.get("symbol")]
+    except Exception:
+        symbols = ["BTC","ETH","BNB","SOL","XRP","ADA","AVAX","DOGE","DOT","MATIC",
+                   "LINK","UNI","ATOM","LTC","ETC","XLM","ALGO","ICP","FIL","HBAR"]
+
+    results = []
+
+    def score_coin(sym):
+        try:
+            base, df, sc = _fetch_and_score(sym, interval)
+            if sc.total >= min_score:
+                last = df.iloc[-1]
+                return {
+                    "symbol": base,
+                    "score": sc.total,
+                    "max_score": sc.max_score,
+                    "signal": sc.signal,
+                    "v": sc.v_score,
+                    "p": sc.p_score,
+                    "r": sc.r_score,
+                    "t": sc.t_score,
+                    "s": sc.s_score,
+                    "price": float(last.get("close", 0)),
+                    "change_24h": float(last.get("close", 0) / df.iloc[-25].get("close", last.get("close", 1)) - 1) * 100 if len(df) > 25 else 0,
+                    "rsi": round(sc.rsi, 1),
+                    "adx": round(sc.adx, 1),
+                }
+        except Exception:
+            return None
+
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        futures = {ex.submit(score_coin, s): s for s in symbols}
+        for f in as_completed(futures):
+            r = f.result()
+            if r:
+                results.append(r)
+
+    results.sort(key=lambda x: x["score"], reverse=True)
+    results = results[:10]  # top 10 only
+
+    _scan_cache.update({"key": cache_key, "ts": now, "data": results})
+    return {"signals": results, "cached": False, "timestamp": now}
 
