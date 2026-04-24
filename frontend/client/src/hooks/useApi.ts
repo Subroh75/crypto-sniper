@@ -239,73 +239,35 @@ export interface LivePrice {
   prev:   number;
 }
 
-export function useLivePrices(assets = DEFAULT_TICKERS) {
-  const [prices, setPrices] = useState<Record<string, LivePrice>>({});
-  const prevRef = useRef<Record<string, number>>({});
-  const wsRef   = useRef<WebSocket | null>(null);
+export function useLivePrices() {
+  const [prices, setPrices] = useState<Record<string, { price: number; change: number }>>({});
 
   useEffect(() => {
-    const assetsStr = assets.join(",");
-    const connect = () => {
+    const COINS = ["btc","eth","sol","bnb","xrp","ada","doge","pepe","wif","hype"];
+    const streams = COINS.map(c => c + "usdt@miniTicker").join("/");
+    const ws = new WebSocket("wss://stream.binance.com:9443/stream?streams=" + streams);
+
+    ws.onmessage = (e) => {
       try {
-        const ws = new WebSocket(`wss://stream.binance.com:9443/stream?streams=${assetsStr}`);
-        wsRef.current = ws;
-
-        ws.onmessage = (e) => {
-          try {
-            const data = JSON.parse(e.data) as Record<string, string>;
-            setPrices((prev) => {
-              const next = { ...prev };
-              for (const [id, priceStr] of Object.entries(data)) {
-                const price = parseFloat(priceStr);
-                const symbol = COINCAP_TO_SYMBOL[id] ?? id.toUpperCase();
-                next[symbol] = {
-                  symbol,
-                  price,
-                  prev: prevRef.current[symbol] ?? price,
-                };
-                prevRef.current[symbol] = price;
-              }
-              return next;
-            });
-          } catch {
-            // ignore malformed messages
-          }
-        };
-
-        ws.onerror = () => ws?.close();
-        ws.onclose = () => {
-          // Reconnect after 3s
-          setTimeout(connect, 3000);
-        };
-      } catch {
-        setTimeout(connect, 5000);
-      }
+        const msg = JSON.parse(e.data);
+        const d = msg.data;
+        if (!d || !d.s) return;
+        const sym = d.s.replace("USDT","").toLowerCase();
+        const price = parseFloat(d.c);
+        const open = parseFloat(d.o);
+        const change = open > 0 ? ((price - open) / open) * 100 : 0;
+        setPrices(prev => ({ ...prev, [sym]: { price, change } }));
+      } catch {}
     };
 
-    connect();
-    return () => {
-      wsRef.current?.close();
-    };
-  }, [assets.join(",")]); // eslint-disable-line
+    ws.onerror = () => {};
+    return () => ws?.close();
+  }, []);
 
   return prices;
 }
 
-const COINCAP_TO_SYMBOL: Record<string, string> = {
-  bitcoin:      "BTC",
-  ethereum:     "ETH",
-  solana:       "SOL",
-  "binance-coin": "BNB",
-  dogecoin:     "DOGE",
-  pepe:         "PEPE",
-  "dogwifhat":  "WIF",
-  hyperliquid:  "HYPE",
-  cardano:      "ADA",
-  "matic": "MATIC",
-};
 
-// ââ PDF Export ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 export function usePdfExport() {
   const [exporting, setExporting] = useState(false);
 
