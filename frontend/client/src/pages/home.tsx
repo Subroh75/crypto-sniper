@@ -304,11 +304,11 @@ export default function Home() {
                       {sig.signal.total} / {sig.signal.max} ?Â” {sig.signal.label !== "STRONG BUY" ? "below threshold (<5)" : "strong setup!"}
                     </div>
                     <div className="flex justify-center gap-4 text-[11px] font-mono text-text-muted flex-wrap">
-                      <span>CLOSE <span className="text-text font-bold">{fmtPrice(sig.quote.price)}</span></span>
+                      <span>CLOSE <span className="text-text font-bold">{fmtPrice((sig.quote?.price ?? 1))}</span></span>
                       <span>24H <span className={sig.quote.change_24h >= 0 ? "text-teal font-bold" : "text-red font-bold"}>{fmtPct(sig.quote.change_24h)}</span></span>
-                      <span>VOL <span className="text-text font-bold">{sig.timing.rel_volume.toFixed(1)}?</span></span>
-                      <span>ADX <span className="text-text font-bold">{sig.timing.adx.toFixed(0)}</span></span>
-                      <span>RSI <span className={sig.timing.rsi >= 70 ? "text-red font-bold" : sig.timing.rsi <= 30 ? "text-teal font-bold" : "text-text font-bold"}>{sig.timing.rsi.toFixed(0)}</span></span>
+                      <span>VOL <span className="text-text font-bold">{(sig.timing?.rel_volume ?? 0).toFixed(1)}?</span></span>
+                      <span>ADX <span className="text-text font-bold">{(sig.timing?.adx ?? 0).toFixed(0)}</span></span>
+                      <span>RSI <span className={(sig.timing?.rsi ?? 50) >= 70 ? "text-red font-bold" : (sig.timing?.rsi ?? 50) <= 30 ? "text-teal font-bold" : "text-text font-bold"}>{(sig.timing?.rsi ?? 50).toFixed(0)}</span></span>
                       <span>S <span className="text-orange font-bold">?Â‘{sig.components.S.score * 4}%</span></span>
                     </div>
                   </div>
@@ -382,10 +382,10 @@ export default function Home() {
                   <div className="p-4">
                     <div className="grid grid-cols-2 gap-2">
                       {[
-                        { label: "RSI 14",  value: sig.timing.rsi.toFixed(1),    sub: sig.timing.rsi >= 70 ? "OVERBOUGHT" : sig.timing.rsi <= 30 ? "OVERSOLD" : "NEUTRAL",  color: sig.timing.rsi >= 70 ? "text-red" : sig.timing.rsi <= 30 ? "text-teal" : "text-text" },
-                        { label: "ADX 14",  value: sig.timing.adx.toFixed(1),    sub: sig.timing.adx >= 25 ? "TRENDING" : "RANGING",   color: sig.timing.adx >= 25 ? "text-teal" : "text-text" },
-                        { label: "ATR 14",  value: sig.timing.atr.toFixed(0),    sub: `${((sig.timing.atr / sig.quote.price) * 100).toFixed(2)}% of price`, color: "text-text" },
-                        { label: "Rel Vol", value: `${sig.timing.rel_volume.toFixed(2)}?`, sub: sig.timing.rel_volume >= 2 ? "HIGH" : "NORMAL", color: sig.timing.rel_volume >= 2 ? "text-teal" : "text-text" },
+                        { label: "RSI 14",  value: (sig.timing?.rsi ?? 50).toFixed(1),    sub: (sig.timing?.rsi ?? 50) >= 70 ? "OVERBOUGHT" : (sig.timing?.rsi ?? 50) <= 30 ? "OVERSOLD" : "NEUTRAL",  color: (sig.timing?.rsi ?? 50) >= 70 ? "text-red" : (sig.timing?.rsi ?? 50) <= 30 ? "text-teal" : "text-text" },
+                        { label: "ADX 14",  value: (sig.timing?.adx ?? 0).toFixed(1),    sub: (sig.timing?.adx ?? 0) >= 25 ? "TRENDING" : "RANGING",   color: (sig.timing?.adx ?? 0) >= 25 ? "text-teal" : "text-text" },
+                        { label: "ATR 14",  value: (sig.timing?.atr ?? 0).toFixed(0),    sub: `${((sig.timing.atr / (sig.quote?.price ?? 1)) * 100).toFixed(2)}% of price`, color: "text-text" },
+                        { label: "Rel Vol", value: `${(sig.timing?.rel_volume ?? 0).toFixed(2)}?`, sub: (sig.timing?.rel_volume ?? 0) >= 2 ? "HIGH" : "NORMAL", color: (sig.timing?.rel_volume ?? 0) >= 2 ? "text-teal" : "text-text" },
                       ].map(({ label, value, sub, color }) => (
                         <div key={label} className="bg-surface-2 rounded-lg border border-border/40 p-3">
                           <div className="text-[9px] font-mono text-text-muted/70 uppercase tracking-wide mb-1">{label}</div>
@@ -436,7 +436,7 @@ export default function Home() {
                       <div className="grid grid-cols-3 gap-2 mb-3">
                         {[
                           { label: "AI Forecast",    value: kron.forecast.direction,        color: kron.forecast.direction === "Falling" ? "text-red" : kron.forecast.direction === "Rising" ? "text-teal" : "text-text" },
-                          { label: "Expected Move",  value: `${kron.forecast.expected_move_pct >= 0 ? "?Â²" : "?Â¼"} ${Math.abs(kron.forecast.expected_move_pct).toFixed(2)}%`, color: kron.forecast.expected_move_pct >= 0 ? "text-teal" : "text-red" },
+                          { label: "Expected Move",  value: `${(kron.forecast?.expected_move_pct ?? 0) >= 0 ? "?Â²" : "?Â¼"} ${Math.abs(kron.forecast.expected_move_pct).toFixed(2)}%`, color: (kron.forecast?.expected_move_pct ?? 0) >= 0 ? "text-teal" : "text-red" },
                           { label: "Trade Quality",  value: kron.forecast.trade_quality,    color: kron.forecast.trade_quality.includes("Avoid") ? "text-red" : "text-teal" },
                           { label: "Target Price",   value: fmtPrice(kron.forecast.target_price), color: "text-text" },
                           { label: "Bull Case",      value: kron.forecast.bull_case,        color: kron.forecast.bull_case === "TAKE" ? "text-teal" : "text-text-muted" },
