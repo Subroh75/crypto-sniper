@@ -138,7 +138,7 @@ export function TopSignals({ onSelect, interval = "1h" }: Props) {
               </span>
             </div>
             <span style={{ fontSize: 11, color: sig.change_24h >= 0 ? "#22c55e" : "#ef4444", fontWeight: 600 }}>
-              {sig.change_24h >= 0 ? "+" : ""}{sig.change_24h.toFixed(1)}%
+              {(sig.change_24h ?? 0) >= 0 ? "+" : ""}{(sig.change_24h ?? 0).toFixed(1)}%
             </span>
           </div>
 
