@@ -131,6 +131,7 @@ export default function Home() {
   const runAnalysis = useCallback(async (sym?: string, iv?: string) => {
     const s = (sym ?? (input.trim().toUpperCase() || symbol));
     const i = iv ?? interval;
+    if (!s) return;
     setSymbol(s);
     setInput(s);
 
