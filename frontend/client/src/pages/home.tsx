@@ -3,7 +3,7 @@
 // Left: 10 analysis sections. Right: sidebar (Trade Setup, Conviction,
 // Key Levels, Watchlist, Subscribe, Export).
 
-import { useState, useCallback, useId, useRef, useEffect } from "react";
+import { useState, useCallback, useId, useRef } from "react";
 import { Logo } from "@/components/Logo";
 import { LiveTicker } from "@/components/LiveTicker";
 import { MarketBar } from "@/components/MarketBar";
@@ -134,9 +134,6 @@ export default function Home() {
     setSymbol(s);
     setInput(s);
 
-
-  // Auto-run BTC 1H on mount
-  useEffect(() => { runAnalysis("BTC", "1h"); }, []);
 
     const result = await analyse.run(s, i);
     if (!result) return;
