@@ -471,7 +471,7 @@ export function SubscribeCard() {
             ["Whale tracker — on-chain data",   false],
             ["Perplexity deep research",        false],
             ["Watchlist scanner — 20 coins",    false],
-            ["LunarCrush social sentiment",     false],
+            ["Fear & Greed + CryptoPanic",     false],
             ["PDF export + trade history",      false],
           ].map(([feature, isPro]) => (
             <div key={feature as string} className="flex items-center gap-2 text-[10px] font-mono text-text-muted">
