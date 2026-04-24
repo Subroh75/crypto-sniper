@@ -67,12 +67,12 @@ export function TopSignals({ onSelect, interval = "1h" }: Props) {
       {/* Header */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <span style={{ color: "#f59e0b", fontSize: 14 }}>&#9889;</span>
+          <span style={{ color: "#f59e0b", fontSize: 14 }}>⚡</span>
           <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", color: "#94a3b8", textTransform: "uppercase" }}>
             Top Signals
           </span>
           <span style={{ fontSize: 10, color: "#475569", background: "#0f172a", padding: "1px 6px", borderRadius: 4, border: "1px solid #1e293b" }}>
-            score &ge; {minScore}
+            score >= {minScore}
           </span>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -81,7 +81,7 @@ export function TopSignals({ onSelect, interval = "1h" }: Props) {
             onClick={() => setMinScore(s => s === 7 ? 8 : s === 8 ? 9 : 7)}
             style={{ fontSize: 10, color: "#64748b", background: "#0f172a", border: "1px solid #1e293b", borderRadius: 4, padding: "2px 6px", cursor: "pointer" }}
           >
-            &ge;{minScore}
+            >={minScore}
           </button>
           {/* Refresh */}
           <button
@@ -89,7 +89,7 @@ export function TopSignals({ onSelect, interval = "1h" }: Props) {
             disabled={loading}
             style={{ fontSize: 10, color: loading ? "#334155" : "#7c3aed", background: "#0f172a", border: "1px solid #1e293b", borderRadius: 4, padding: "2px 6px", cursor: loading ? "not-allowed" : "pointer" }}
           >
-            {loading ? "..." : "&#8635;"}
+            {loading ? "..." : "↻"}
           </button>
         </div>
       </div>
@@ -97,7 +97,7 @@ export function TopSignals({ onSelect, interval = "1h" }: Props) {
       {/* Last scan time */}
       {lastScan && (
         <div style={{ fontSize: 10, color: "#334155", marginBottom: 8 }}>
-          Scanned top 50 coins &middot; {lastScan}
+          Scanned top 50 coins · {lastScan}
         </div>
       )}
 
@@ -112,7 +112,7 @@ export function TopSignals({ onSelect, interval = "1h" }: Props) {
       {/* Empty state */}
       {!loading && signals.length === 0 && lastScan && (
         <div style={{ padding: "16px 0", textAlign: "center" }}>
-          <div style={{ fontSize: 11, color: "#475569" }}>No coins scoring &ge; {minScore}</div>
+          <div style={{ fontSize: 11, color: "#475569" }}>No coins scoring >= {minScore}</div>
           <div style={{ fontSize: 10, color: "#334155", marginTop: 4 }}>Market may be ranging</div>
         </div>
       )}
