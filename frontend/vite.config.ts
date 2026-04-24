@@ -39,7 +39,7 @@ export default defineConfig({
             },
           },
           {
-            urlPattern: /^https:\/\/crypto-sniper-api\.onrender\.com\/.*/i,
+            urlPattern: /^https:\/\/crypto-sniper\.onrender\.com\/.*/i,
             handler: "NetworkFirst",
             options: {
               cacheName: "api-cache",
