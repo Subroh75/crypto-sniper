@@ -77,7 +77,7 @@ export function MarketBar() {
           sub={
             market ? (
               <span className={capChange >= 0 ? "text-teal" : "text-red"}>
-                {capChange >= 0 ? "▲" : "▼"} {Math.abs(capChange).toFixed(2)}% today
+                {capChange != null ? (capChange >= 0 ? "▲" : "▼") + " " + Math.abs(capChange).toFixed(2) + "% today" : ""}
               </span>
             ) : null
           }
@@ -87,7 +87,7 @@ export function MarketBar() {
       <div className="border-r border-border/40">
         <Stat
           label="BTC Dominance"
-          value={market ? `${market.btc_dominance.toFixed(1)}%` : "—"}
+          value={market?.btc_dominance != null ? `${market.btc_dominance.toFixed(1)}%` : "—"}
           sub={<span className="text-text-muted/60">→ Holding</span>}
         />
       </div>
