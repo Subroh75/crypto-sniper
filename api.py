@@ -11,7 +11,7 @@ from pydantic import BaseModel
 from data import (
     get_ohlcv, get_quote, get_indicators, get_trending,
     get_gainers_losers, get_market_overview, get_btc_onchain,
-    get_news, get_macro, get_watchlist_scores, health_check,
+    get_news, get_macro, get_watchlist_scores, get_fear_greed, get_crypto_panic, health_check,
 )
 from signals import calculate_signals, get_key_levels
 from agents import run_agent_council
@@ -69,14 +69,16 @@ async def analyse(req: AnalyseRequest):
     symbol = req.symbol.upper().strip()
     t_start = time.time()
     try:
-        ohlcv = get_ohlcv(symbol, req.interval)
-        quote = get_quote(symbol)
+        ohlcv      = get_ohlcv(symbol, req.interval)
+        quote      = get_quote(symbol)
         indicators = get_indicators(symbol, req.interval)
+        fear_greed = get_fear_greed()
+        cp_news    = get_crypto_panic(symbol)
     except Exception as e:
         raise HTTPException(status_code=502, detail=str(e))
     if not ohlcv:
         raise HTTPException(status_code=404, detail=f"No data for {symbol}")
-    sig = calculate_signals(ohlcv, quote, indicators)
+    sig = calculate_signals(ohlcv, quote, indicators, fear_greed=fear_greed, cp_news=cp_news)
     levels = get_key_levels(sig)
     return {
         "symbol":symbol,"interval":req.interval,"timestamp":int(time.time()),
@@ -94,7 +96,7 @@ async def analyse(req: AnalyseRequest):
         "quote":{"price":quote.get("price",sig.close),"change_24h":quote.get("change_24h",0),"volume_24h":quote.get("volume_24h",0),"high_24h":quote.get("high_24h",0),"low_24h":quote.get("low_24h",0)},
         "trade_setup":{"direction":sig.direction,"entry":sig.entry,"stop":sig.stop,"target":sig.target,"rr_ratio":sig.rr_ratio,"atr":sig.atr,"stop_dist_pct":round(((sig.close-sig.stop)/sig.close)*100,3) if sig.stop else None},
         "conviction":{"bull_pct":sig.bull_conviction,"bear_pct":sig.bear_conviction,"bull_signals":sig.bull_signals,"bear_signals":sig.bear_signals},
-        "key_levels":levels,
+        "fear_greed":fear_greed,"cp_news":cp_news[:3],"key_levels":levels,
         "ohlcv":ohlcv[-48:],
     }
 
