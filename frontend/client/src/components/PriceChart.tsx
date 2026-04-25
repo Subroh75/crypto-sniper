@@ -19,49 +19,64 @@ interface Props {
 
 // Custom candle shape
 function CandleBar(props: Record<string, unknown>) {
-  const { x, y, width, height, open, close, high, low, payload } = props as {
+  const { x, y, width, payload, background } = props as {
     x: number; y: number; width: number; height: number;
-    open: number; close: number; high: number; low: number;
-    payload: { isUp: boolean; wickTop: number; wickBot: number };
+    payload: { open: number; high: number; low: number; close: number; isGreen: boolean };
+    background: { x: number; y: number; width: number; height: number };
+  };
+  if (!payload || !background) return null;
+
+  const { open, high, low, close, isGreen } = payload;
+  const chartTop = background.y;
+  const chartH = background.height;
+  const chartBottom = chartTop + chartH;
+
+  // Get y-axis min/max from the chart's actual scale
+  // We use the "close" price y position that Recharts computed
+  // and work backwards to get the scale
+  // Actually: use two known points — we'll compute from the data
+  // Simpler: use the yAxis computed min/max from siblings
+
+  // Since we don't have direct access to the yScale,
+  // use the background rect dimensions to compute the full price range
+  // by finding min/max from all bars
+  const allBars = (props as any).allData as { open: number; high: number; low: number; close: number }[];
+  if (!allBars || allBars.length < 2) return null;
+
+  const allPrices = allBars.flatMap(b => [b.open, b.high, b.low, b.close]);
+  const priceMin = Math.min(...allPrices);
+  const priceMax = Math.max(...allPrices);
+  const priceRange = priceMax - priceMin || 1;
+  const pad = priceRange * 0.08;
+
+  const scaleY = (price: number) => {
+    return chartBottom - ((price - (priceMin - pad)) / (priceRange + 2 * pad)) * chartH;
   };
 
-  if (!payload) return null;
-  const { isUp, wickTop, wickBot } = payload;
-  const fill   = isUp ? "#00d4aa" : "#ff3d5a";
-  const stroke = fill;
-  const cx     = x + width / 2;
+  const yHigh = scaleY(high);
+  const yLow = scaleY(low);
+  const yOpen = scaleY(open);
+  const yClose = scaleY(close);
+  const bodyTop = Math.min(yOpen, yClose);
+  const bodyBot = Math.max(yOpen, yClose);
+  const bodyH = Math.max(bodyBot - bodyTop, 1);
+  const cx = x + width / 2;
+  const barW = Math.max(width - 2, 2);
+  const color = isGreen ? "#22c55e" : "#ef4444";
 
   return (
     <g>
-      {/* Wick */}
-      <line x1={cx} y1={wickTop} x2={cx} y2={wickBot} stroke={stroke} strokeWidth={1} opacity={0.7} />
-      {/* Body */}
-      <rect x={x + 1} y={y} width={Math.max(width - 2, 1)} height={Math.max(height, 1)}
-            fill={fill} opacity={0.9} rx={1} />
+      <line x1={cx} y1={yHigh} x2={cx} y2={yLow} stroke={color} strokeWidth={1} />
+      <rect x={x + 1} y={bodyTop} width={barW} height={bodyH} fill={color} opacity={0.9} />
     </g>
   );
 }
 
-function formatBarData(ohlcv: OHLCVBar[], yMin: number, yMax: number) {
-  return ohlcv.map(([ts, o, h, l, c]) => {
-    const isGreen = c >= o;
-    const bodyBot = Math.min(o, c);
-    const bodyTop = Math.max(o, c);
-    return {
-      ts,
-      open: o, high: h, low: l, close: c,
-      // barBottom = price of body bottom, barHeight = price range of body
-      // Recharts Bar stacks: invisible bar from 0 to barBottom, visible bar of barHeight
-      barBottom: bodyBot,
-      barHeight: Math.max(bodyTop - bodyBot, (yMax - yMin) * 0.001),
-      wickLow: l,
-      wickHigh: h,
-      isGreen,
-      // Indicators
-      bbU: 0, bbL: 0, vwap: 0, ema20: 0, ema50: 0,
-      vol: Math.abs(c - o),
-    };
-  });
+function formatBarData(ohlcv: OHLCVBar[]) {
+  return ohlcv.map(([ts, o, h, l, c]) => ({
+    ts, open: o, high: h, low: l, close: c, isGreen: c >= o,
+    bbU: 0, bbL: 0, vwap: 0, ema20: 0, ema50: 0,
+  }));
 }
 
 function CustomTooltip({ active, payload }: TooltipProps) {
@@ -250,15 +265,7 @@ export function PriceChart({ ohlcv, structure, interval, symbol, onTfChange }: P
 
             {/* Candles as bars — body */}
             <Bar
-              dataKey="barBottom"
-              stackId="candle"
-              fill="transparent"
-              stroke="none"
-              isAnimationActive={false}
-            />
-            <Bar
-              dataKey="barHeight"
-              stackId="candle"
+              dataKey="close"
               fill="transparent"
               stroke="none"
               isAnimationActive={false}
