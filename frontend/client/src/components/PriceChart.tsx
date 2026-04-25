@@ -1,8 +1,4 @@
 // ─── PriceChart.tsx — Candlestick chart with indicators ─────────────────────
-  const allPrices = chartData.flatMap((d: any) => [d.open, d.high, d.low, d.close]);
-  const priceMin = allPrices.length ? Math.min(...allPrices) : 0;
-  const priceMax = allPrices.length ? Math.max(...allPrices) : 1;
-  const candleShape = (props: any) => <CandleBar {...props} priceMin={priceMin} priceMax={priceMax} />;
 // Uses Recharts ComposedChart with custom candle rendering
 import {
   ComposedChart, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -21,50 +17,33 @@ interface Props {
   onTfChange?: (tf: string) => void;
 }
 
-// Custom candle shape
-function CandleBar(props: Record<string, unknown>) {
-  const { x, y, width, background, priceMin, priceMax } = props as {
-    x: number; y: number; width: number; height: number;
-    background: { height: number; y: number };
-    priceMin: number; priceMax: number;
-  };
-  const payload = props.payload as {
-    open: number; high: number; low: number; close: number; isGreen: boolean;
-  } | undefined;
+// Custom candle shape - uses Recharts yAxis.scale for pixel-accurate positioning
+function CandleBar(props: any) {
+  const { x, y, width, background, payload, yAxis } = props;
+  if (!payload || !background || !yAxis?.scale) return null;
 
-  if (!payload || !background?.height || !priceMin || !priceMax) return null;
-  if (priceMax === priceMin) return null;
-
+  const scale = yAxis.scale;
   const { open, high, low, close, isGreen } = payload;
-  const chartH = background.height;
-  const chartTop = background.y ?? 0;
-  const pad = (priceMax - priceMin) * 0.08;
-  const dMin = priceMin - pad;
-  const dMax = priceMax + pad;
-  const range = dMax - dMin;
 
-  const toY = (p: number) => chartTop + chartH - ((p - dMin) / range) * chartH;
-
-  const yH = toY(high);
-  const yL = toY(low);
-  const yO = toY(open);
-  const yC = toY(close);
+  const yH  = scale(high);
+  const yL  = scale(low);
+  const yO  = scale(open);
+  const yC  = scale(close);
   const top = Math.min(yO, yC);
   const bot = Math.max(yO, yC);
-  const bH = Math.max(bot - top, 1.5);
-  const bW = Math.max((width as number) - 1, 1);
-  const cx = (x as number) + (width as number) / 2;
-  const color = isGreen ? "#22c55e" : "#ef4444";
+  const bH  = Math.max(bot - top, 1.5);
+  const bW  = Math.max(width - 2, 2);
+  const cx  = x + width / 2;
+  const col = isGreen ? "#22c55e" : "#ef4444";
 
   return (
     <g>
-      <line x1={cx} y1={yH} x2={cx} y2={top} stroke={color} strokeWidth={1} />
-      <line x1={cx} y1={bot} x2={cx} y2={yL} stroke={color} strokeWidth={1} />
-      <rect x={(x as number) + 0.5} y={top} width={bW} height={bH} fill={color} fillOpacity={0.85} />
+      <line x1={cx} y1={yH} x2={cx} y2={top} stroke={col} strokeWidth={1} />
+      <line x1={cx} y1={bot} x2={cx} y2={yL} stroke={col} strokeWidth={1} />
+      <rect x={x + 1} y={top} width={bW} height={bH} fill={col} fillOpacity={0.9} />
     </g>
   );
 }
-
 function formatBarData(ohlcv: OHLCVBar[]) {
   return ohlcv.map(([ts, o, h, l, c]) => ({
     ts, open: o, high: h, low: l, close: c, isGreen: c >= o,
