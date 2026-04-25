@@ -1,4 +1,7 @@
 // ─── PriceChart.tsx — Candlestick chart with indicators ─────────────────────
+  const allPrices = chartData.flatMap((d: any) => [d.open, d.high, d.low, d.close]);
+  const priceMin = allPrices.length ? Math.min(...allPrices) : 0;
+  const priceMax = allPrices.length ? Math.max(...allPrices) : 1;
 // Uses Recharts ComposedChart with custom candle rendering
 import {
   ComposedChart, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -19,53 +22,44 @@ interface Props {
 
 // Custom candle shape
 function CandleBar(props: Record<string, unknown>) {
-  const { x, y, width, background } = props as {
+  const { x, y, width, background, priceMin, priceMax } = props as {
     x: number; y: number; width: number; height: number;
     background: { height: number; y: number };
+    priceMin: number; priceMax: number;
   };
-  const payload = props.payload as { open: number; high: number; low: number; close: number; isGreen: boolean } | undefined;
-  if (!payload || !background || !background.height) return null;
+  const payload = props.payload as {
+    open: number; high: number; low: number; close: number; isGreen: boolean;
+  } | undefined;
+
+  if (!payload || !background?.height || !priceMin || !priceMax) return null;
+  if (priceMax === priceMin) return null;
 
   const { open, high, low, close, isGreen } = payload;
   const chartH = background.height;
-  const chartTop = background.y || 0;
+  const chartTop = background.y ?? 0;
+  const pad = (priceMax - priceMin) * 0.08;
+  const dMin = priceMin - pad;
+  const dMax = priceMax + pad;
+  const range = dMax - dMin;
 
-  // Compute all prices across visible data to get scale
-  // We use the Recharts yAxis by finding min/max from the chart's domain
-  // The background rect tells us total pixel height
-  // y = pixel position of "close" value (from Recharts YAxis)
-  // We compute other prices relatively using the close position as anchor
+  const toY = (p: number) => chartTop + chartH - ((p - dMin) / range) * chartH;
 
-  // Get the yAxis domain from nearest recharts-yAxis element text
-  const yAxisTexts = Array.from(document.querySelectorAll('.recharts-yAxis .recharts-text tspan'))
-    .map(el => parseFloat(el.textContent || '0'))
-    .filter(v => v > 0)
-    .sort((a, b) => a - b);
-
-  if (yAxisTexts.length < 2) return null;
-  const domainMin = yAxisTexts[0];
-  const domainMax = yAxisTexts[yAxisTexts.length - 1];
-  const priceRange = domainMax - domainMin;
-  if (priceRange === 0) return null;
-
-  const toY = (price: number) => chartTop + chartH - ((price - domainMin) / priceRange) * chartH;
-
-  const yHigh = toY(high);
-  const yLow = toY(low);
-  const yOpen = toY(open);
-  const yClose = toY(close);
-  const bodyTop = Math.min(yOpen, yClose);
-  const bodyBot = Math.max(yOpen, yClose);
-  const bodyH = Math.max(bodyBot - bodyTop, 1.5);
-  const barW = Math.max((width as number) - 1, 1);
+  const yH = toY(high);
+  const yL = toY(low);
+  const yO = toY(open);
+  const yC = toY(close);
+  const top = Math.min(yO, yC);
+  const bot = Math.max(yO, yC);
+  const bH = Math.max(bot - top, 1.5);
+  const bW = Math.max((width as number) - 1, 1);
   const cx = (x as number) + (width as number) / 2;
   const color = isGreen ? "#22c55e" : "#ef4444";
 
   return (
     <g>
-      <line x1={cx} y1={yHigh} x2={cx} y2={bodyTop} stroke={color} strokeWidth={1} />
-      <line x1={cx} y1={bodyBot} x2={cx} y2={yLow} stroke={color} strokeWidth={1} />
-      <rect x={(x as number) + 0.5} y={bodyTop} width={barW} height={bodyH} fill={color} fillOpacity={0.85} />
+      <line x1={cx} y1={yH} x2={cx} y2={top} stroke={color} strokeWidth={1} />
+      <line x1={cx} y1={bot} x2={cx} y2={yL} stroke={color} strokeWidth={1} />
+      <rect x={(x as number) + 0.5} y={top} width={bW} height={bH} fill={color} fillOpacity={0.85} />
     </g>
   );
 }
@@ -267,12 +261,7 @@ export function PriceChart({ ohlcv, structure, interval, symbol, onTfChange }: P
               fill="transparent"
               stroke="none"
               isAnimationActive={false}
-              shape={(props: Record<string, unknown>) => {
-                const { x, width, payload } = props as { x: number; width: number; payload: typeof chartData[0] };
-                const { isUp, open, close: c, high, low } = payload;
-                const yScale = props.yAxis as { scale?: (v: number) => number };
-                const scale = yScale?.scale;
-                if (!scale) return <g />;
+              shape={(props: Record<string, unknown>) => <CandleBar {...props} priceMin={priceMin} priceMax={priceMax} />};
                 const y1 = scale(Math.max(open, c));
                 const y2 = scale(Math.min(open, c));
                 const yHigh = scale(high);
