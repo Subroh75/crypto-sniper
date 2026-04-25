@@ -452,9 +452,16 @@ export default function Home() {
                         <div className="text-[9px] font-mono text-text-muted/70 uppercase tracking-wide mb-2">
                           PREDICTED OHLCV - NEXT 24 CANDLES
                         </div>
-                        <ResponsiveContainer width="100%" height={90}>
-                          <LineChart data={kron.forecast.predicted_ohlcv}>
-                            <Line type="monotone" dataKey="close" stroke="#7c5cfc" strokeWidth={2} dot={false} />
+                        <ResponsiveContainer width="100%" height={160}>
+                          <LineChart data={kron.forecast.predicted_ohlcv} margin={{ top: 4, right: 8, left: 0, bottom: 4 }}>
+                            <YAxis
+                              domain={([min, max]: [number, number]) => { const p = (max - min) * 0.15 || min * 0.01; return [min - p, max + p]; }}
+                              hide={true}
+                              width={0}
+                            />
+                            <Line type="monotone" dataKey="close" stroke="#7c5cfc" strokeWidth={2} dot={false} isAnimationActive={false} />
+                            <Line type="monotone" dataKey="high" stroke="#22c55e" strokeWidth={1} dot={false} strokeDasharray="3 3" isAnimationActive={false} />
+                            <Line type="monotone" dataKey="low" stroke="#ef4444" strokeWidth={1} dot={false} strokeDasharray="3 3" isAnimationActive={false} />
                           </LineChart>
                         </ResponsiveContainer>
                       </div>
