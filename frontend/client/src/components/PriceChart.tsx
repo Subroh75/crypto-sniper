@@ -19,55 +19,53 @@ interface Props {
 
 // Custom candle shape
 function CandleBar(props: Record<string, unknown>) {
-  const { x, y, width, payload, background } = props as {
+  const { x, y, width, background } = props as {
     x: number; y: number; width: number; height: number;
-    payload: { open: number; high: number; low: number; close: number; isGreen: boolean };
-    background: { x: number; y: number; width: number; height: number };
+    background: { height: number; y: number };
   };
-  if (!payload || !background) return null;
+  const payload = props.payload as { open: number; high: number; low: number; close: number; isGreen: boolean } | undefined;
+  if (!payload || !background || !background.height) return null;
 
   const { open, high, low, close, isGreen } = payload;
-  const chartTop = background.y;
   const chartH = background.height;
-  const chartBottom = chartTop + chartH;
+  const chartTop = background.y || 0;
 
-  // Get y-axis min/max from the chart's actual scale
-  // We use the "close" price y position that Recharts computed
-  // and work backwards to get the scale
-  // Actually: use two known points — we'll compute from the data
-  // Simpler: use the yAxis computed min/max from siblings
+  // Compute all prices across visible data to get scale
+  // We use the Recharts yAxis by finding min/max from the chart's domain
+  // The background rect tells us total pixel height
+  // y = pixel position of "close" value (from Recharts YAxis)
+  // We compute other prices relatively using the close position as anchor
 
-  // Since we don't have direct access to the yScale,
-  // use the background rect dimensions to compute the full price range
-  // by finding min/max from all bars
-  const allBars = (props as any).allData as { open: number; high: number; low: number; close: number }[];
-  if (!allBars || allBars.length < 2) return null;
+  // Get the yAxis domain from nearest recharts-yAxis element text
+  const yAxisTexts = Array.from(document.querySelectorAll('.recharts-yAxis .recharts-text tspan'))
+    .map(el => parseFloat(el.textContent || '0'))
+    .filter(v => v > 0)
+    .sort((a, b) => a - b);
 
-  const allPrices = allBars.flatMap(b => [b.open, b.high, b.low, b.close]);
-  const priceMin = Math.min(...allPrices);
-  const priceMax = Math.max(...allPrices);
-  const priceRange = priceMax - priceMin || 1;
-  const pad = priceRange * 0.08;
+  if (yAxisTexts.length < 2) return null;
+  const domainMin = yAxisTexts[0];
+  const domainMax = yAxisTexts[yAxisTexts.length - 1];
+  const priceRange = domainMax - domainMin;
+  if (priceRange === 0) return null;
 
-  const scaleY = (price: number) => {
-    return chartBottom - ((price - (priceMin - pad)) / (priceRange + 2 * pad)) * chartH;
-  };
+  const toY = (price: number) => chartTop + chartH - ((price - domainMin) / priceRange) * chartH;
 
-  const yHigh = scaleY(high);
-  const yLow = scaleY(low);
-  const yOpen = scaleY(open);
-  const yClose = scaleY(close);
+  const yHigh = toY(high);
+  const yLow = toY(low);
+  const yOpen = toY(open);
+  const yClose = toY(close);
   const bodyTop = Math.min(yOpen, yClose);
   const bodyBot = Math.max(yOpen, yClose);
-  const bodyH = Math.max(bodyBot - bodyTop, 1);
-  const cx = x + width / 2;
-  const barW = Math.max(width - 2, 2);
+  const bodyH = Math.max(bodyBot - bodyTop, 1.5);
+  const barW = Math.max((width as number) - 1, 1);
+  const cx = (x as number) + (width as number) / 2;
   const color = isGreen ? "#22c55e" : "#ef4444";
 
   return (
     <g>
-      <line x1={cx} y1={yHigh} x2={cx} y2={yLow} stroke={color} strokeWidth={1} />
-      <rect x={x + 1} y={bodyTop} width={barW} height={bodyH} fill={color} opacity={0.9} />
+      <line x1={cx} y1={yHigh} x2={cx} y2={bodyTop} stroke={color} strokeWidth={1} />
+      <line x1={cx} y1={bodyBot} x2={cx} y2={yLow} stroke={color} strokeWidth={1} />
+      <rect x={(x as number) + 0.5} y={bodyTop} width={barW} height={bodyH} fill={color} fillOpacity={0.85} />
     </g>
   );
 }
