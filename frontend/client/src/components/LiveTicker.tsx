@@ -1,33 +1,58 @@
-// ─── LiveTicker.tsx — Scrolling price ticker in header ──────────────────────
+// LiveTicker.tsx - scrolling price ticker with Binance WS live prices
 import { useLivePrices } from "@/hooks/useApi";
-import { fmtPrice, fmtPct } from "@/lib/api";
+import { fmtPct } from "@/lib/api";
 
-const SYMBOLS = ["BTC","ETH","SOL","BNB","DOGE","PEPE","WIF","HYPE"];
+const SYMBOLS = ["BTC","ETH","SOL","BNB","DOGE","PEPE","WIF","HYPE","XRP","ADA"];
+
+function fmtP(p: number): string {
+  if (!p || p === 0) return "--";
+  if (p >= 1) return "$" + p.toLocaleString("en-US", {minimumFractionDigits:2,maximumFractionDigits:2});
+  if (p >= 0.01) return "$" + p.toFixed(4);
+  return "$" + p.toFixed(8);
+}
 
 export function LiveTicker() {
   const prices = useLivePrices();
 
   return (
-    <div className="flex-1 overflow-hidden mask-fade-x">
-      <div className="flex gap-6 animate-ticker whitespace-nowrap">
-        {/* Duplicate for seamless loop */}
+    <div style={{ overflow: "hidden", flex: 1, position: "relative" }}>
+      <style>{
+        `@keyframes tickerScroll {
+          0%   { transform: translateX(0); }
+          100% { transform: translateX(-50%); }
+        }
+        .ticker-track {
+          display: flex;
+          width: max-content;
+          animation: tickerScroll 30s linear infinite;
+        }
+        .ticker-track:hover { animation-play-state: paused; }
+        .ticker-item {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          padding: 0 20px;
+          white-space: nowrap;
+          font-family: monospace;
+          font-size: 12px;
+        }`
+      }</style>
+      <div className="ticker-track">
         {[...SYMBOLS, ...SYMBOLS].map((sym, i) => {
-          const p = prices[sym];
-          const chg = 0; // change shown from quote, not WS
-          const up  = p ? p.price >= p.prev : true;
-
+          const d = prices[sym];
+          const up = d ? d.change >= 0 : true;
           return (
-            <span key={i} className="inline-flex items-center gap-1.5 text-[11px] font-mono">
-              <span className="text-text-muted font-semibold">{sym}</span>
-              <span className="text-text font-bold">
-                {p ? fmtPrice(p.price) : "—"}
+            <div key={i} className="ticker-item">
+              <span style={{ color: "#64748b", fontWeight: 600 }}>{sym}</span>
+              <span style={{ color: "#f1f5f9", fontWeight: 700 }}>
+                {d ? fmtP(d.price) : "--"}
               </span>
-              {p && p.price !== p.prev && (
-                <span className={up ? "text-teal" : "text-red"}>
-                  {up ? "▲" : "▼"}
+              {d && (
+                <span style={{ color: up ? "#22c55e" : "#ef4444", fontSize: 10 }}>
+                  {up ? "+" : ""}{d.change.toFixed(2)}%
                 </span>
               )}
-            </span>
+            </div>
           );
         })}
       </div>
