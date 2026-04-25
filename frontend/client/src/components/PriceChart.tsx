@@ -2,6 +2,7 @@
   const allPrices = chartData.flatMap((d: any) => [d.open, d.high, d.low, d.close]);
   const priceMin = allPrices.length ? Math.min(...allPrices) : 0;
   const priceMax = allPrices.length ? Math.max(...allPrices) : 1;
+  const candleShape = (props: any) => <CandleBar {...props} priceMin={priceMin} priceMax={priceMax} />;
 // Uses Recharts ComposedChart with custom candle rendering
 import {
   ComposedChart, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -261,7 +262,7 @@ export function PriceChart({ ohlcv, structure, interval, symbol, onTfChange }: P
               fill="transparent"
               stroke="none"
               isAnimationActive={false}
-              shape={(props) => <CandleBar {...(props as Record<string,unknown>)} priceMin={priceMin} priceMax={priceMax} />};
+              shape={candleShape}
                 const y1 = scale(Math.max(open, c));
                 const y2 = scale(Math.min(open, c));
                 const yHigh = scale(high);
