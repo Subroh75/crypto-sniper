@@ -241,7 +241,7 @@ export function PriceChart({ ohlcv, structure, interval, symbol, onTfChange }: P
               fill="transparent"
               stroke="none"
               isAnimationActive={false}
-              shape={candleShape}
+              shape={(props: any) => <CandleBar {...props} />}
                 const y1 = scale(Math.max(open, c));
                 const y2 = scale(Math.min(open, c));
                 const yHigh = scale(high);
