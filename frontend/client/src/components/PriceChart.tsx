@@ -242,27 +242,6 @@ export function PriceChart({ ohlcv, structure, interval, symbol, onTfChange }: P
               stroke="none"
               isAnimationActive={false}
               shape={(props: any) => <CandleBar {...props} />}
-                const y1 = scale(Math.max(open, c));
-                const y2 = scale(Math.min(open, c));
-                const yHigh = scale(high);
-                const yLow  = scale(low);
-                const fill  = isUp ? "#00d4aa" : "#ff3d5a";
-                const cx    = (x as number) + (width as number) / 2;
-                return (
-                  <g key={`candle-${(x as number)}`}>
-                    <line x1={cx} y1={yHigh} x2={cx} y2={yLow} stroke={fill} strokeWidth={1} opacity={0.65} />
-                    <rect
-                      x={(x as number) + 1}
-                      y={y1}
-                      width={Math.max((width as number) - 2, 1)}
-                      height={Math.max(y2 - y1, 1)}
-                      fill={fill}
-                      opacity={0.9}
-                      rx={1}
-                    />
-                  </g>
-                );
-              }}
             />
           </ComposedChart>
         </ResponsiveContainer>
