@@ -37,12 +37,12 @@ export function TopSignals({ onSelect, interval = "1h" }: Props) {
   const [signals, setSignals] = useState<Signal[]>([]);
   const [loading, setLoading] = useState(false);
   const [lastScan, setLastScan] = useState<string>("");
-  const [minScore, setMinScore] = useState(7);
+  const [minScore, setMinScore] = useState(5);
 
   const scan = useCallback(async () => {
     setLoading(true);
     try {
-      const r = await fetch(`${API}/scan?interval=${interval}&min_score=${minScore}`);
+      const r = await fetch(`${API}/scan?interval=${interval.toLowerCase()}&min_score=${minScore}`);
       const j = await r.json();
       setSignals(j.signals || []);
       setLastScan(new Date().toLocaleTimeString());
@@ -59,7 +59,7 @@ export function TopSignals({ onSelect, interval = "1h" }: Props) {
     return () => clearInterval(t);
   }, [scan]);
 
-  const nextScore = minScore === 7 ? 8 : minScore === 8 ? 9 : 7;
+  const nextScore = minScore === 5 ? 7 : minScore === 7 ? 9 : 5;
 
   return (
     <div style={{ marginBottom: 16 }}>
