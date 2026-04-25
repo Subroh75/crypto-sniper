@@ -243,8 +243,8 @@ export function useLivePrices() {
   const [prices, setPrices] = useState<Record<string, { price: number; change: number }>>({});
 
   useEffect(() => {
-    const COINS = ["btc","eth","sol","bnb","xrp","ada","doge","pepe","wif","hype"];
-    const streams = COINS.map(c => c + "usdt@miniTicker").join("/");
+    const COINS = ["BTC","ETH","SOL","BNB","DOGE","PEPE","WIF","HYPE","XRP","ADA"];
+    const streams = COINS.map(c => c.toLowerCase() + "usdt@miniTicker").join("/");
     const ws = new WebSocket("wss://stream.binance.com:9443/stream?streams=" + streams);
 
     ws.onmessage = (e) => {
@@ -252,7 +252,7 @@ export function useLivePrices() {
         const msg = JSON.parse(e.data);
         const d = msg.data;
         if (!d || !d.s) return;
-        const sym = d.s.replace("USDT","").toLowerCase();
+        const sym = d.s.replace("USDT","").toUpperCase();
         const price = parseFloat(d.c);
         const open = parseFloat(d.o);
         const change = open > 0 ? ((price - open) / open) * 100 : 0;
@@ -261,7 +261,8 @@ export function useLivePrices() {
     };
 
     ws.onerror = () => {};
-    return () => ws?.close();
+    ws.onclose = () => {};
+    return () => { try { ws.close(); } catch {} };
   }, []);
 
   return prices;
