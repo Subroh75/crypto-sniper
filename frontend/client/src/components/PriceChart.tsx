@@ -250,10 +250,18 @@ export function PriceChart({ ohlcv, structure, interval, symbol, onTfChange }: P
 
             {/* Candles as bars — body */}
             <Bar
+              dataKey="barBottom"
+              stackId="candle"
+              fill="transparent"
+              stroke="none"
+              isAnimationActive={false}
+            />
+            <Bar
               dataKey="barHeight"
               stackId="candle"
               fill="transparent"
               stroke="none"
+              isAnimationActive={false}
               shape={(props: Record<string, unknown>) => {
                 const { x, width, payload } = props as { x: number; width: number; payload: typeof chartData[0] };
                 const { isUp, open, close: c, high, low } = payload;
