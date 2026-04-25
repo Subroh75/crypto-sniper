@@ -44,31 +44,24 @@ function CandleBar(props: Record<string, unknown>) {
 
 function formatBarData(ohlcv: OHLCVBar[], yMin: number, yMax: number) {
   return ohlcv.map(([ts, o, h, l, c]) => {
-    const isUp = c >= o;
-    const bodyTop    = Math.max(o, c);
-    const bodyBot    = Math.min(o, c);
-    const bodyHeight = Math.max(bodyTop - bodyBot, yMax * 0.001); // min 0.1%
+    const isGreen = c >= o;
+    const bodyBot = Math.min(o, c);
+    const bodyTop = Math.max(o, c);
     return {
       ts,
       open: o, high: h, low: l, close: c,
-      isUp,
-      bodyTop,
-      bodyBot,
-      bodyHeight,
-      wickTop: h,
-      wickBot: l,
-      // For bar rendering: y position and height in data space
+      // barBottom = price of body bottom, barHeight = price range of body
+      // Recharts Bar stacks: invisible bar from 0 to barBottom, visible bar of barHeight
       barBottom: bodyBot,
-      barHeight: bodyHeight,
-      // Volume proxy
-      vol: Math.abs(c - o) * 10,
+      barHeight: Math.max(bodyTop - bodyBot, (yMax - yMin) * 0.001),
+      wickLow: l,
+      wickHigh: h,
+      isGreen,
+      // Indicators
+      bbU: 0, bbL: 0, vwap: 0, ema20: 0, ema50: 0,
+      vol: Math.abs(c - o),
     };
   });
-}
-
-interface TooltipProps {
-  active?: boolean;
-  payload?: Array<{ payload: ReturnType<typeof formatBarData>[number] }>;
 }
 
 function CustomTooltip({ active, payload }: TooltipProps) {
