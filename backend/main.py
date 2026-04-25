@@ -583,11 +583,12 @@ _scan_cache: dict = {"ts": 0, "data": []}
 _SCAN_TTL = 300  # 5 minutes
 
 @app.get("/scan", tags=["Signal"])
-def scan_top_signals(interval: str = Query("1h", regex="^(1m|5m|15m|30m|1h|4h|1d)$"), min_score: int = Query(7, ge=1, le=16)):
+def scan_top_signals(interval: str = Query("1h"), min_score: int = Query(5, ge=1, le=16)):
     """
     Scan top 50 coins by market cap, return those scoring >= min_score.
     Results cached for 5 minutes to avoid rate limits.
     """
+    interval = interval.lower()  # normalise 1H -> 1h
     import time
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
