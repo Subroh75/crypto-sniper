@@ -23,7 +23,7 @@ import {
 } from "@/hooks/useApi";
 import { fmtPrice, fmtPct } from "@/lib/api";
 import type { AnalyseResponse, KronosResponse } from "@/types/api";
-import { ComposedChart, Bar, Line, ResponsiveContainer, YAxis, XAxis, CartesianGrid } from "recharts";
+import { ComposedChart, Bar, Line, ResponsiveContainer, YAxis, XAxis } from "recharts";
 
 //  Constants 
 const INTERVALS = ["1m","5m","15m","30m","1H","4H","1D"] as const;
@@ -452,8 +452,8 @@ export default function Home() {
                         <div className="text-[9px] font-mono text-text-muted/70 uppercase tracking-wide mb-2">
                           PREDICTED OHLCV - NEXT 24 CANDLES
                         </div>
-                        <ResponsiveContainer width="100%" height={160}>
-                          <ComposedChart data={(() => {
+                        <ResponsiveContainer width="100%" height={180}>
+                          <ComposedChart margin={{ top: 4, right: 56, left: 0, bottom: 20 }} data={(() => {
                               const candles = kron.forecast.predicted_ohlcv;
                               const allP = candles.flatMap((c: any) => [c.open, c.high, c.low, c.close]);
                               const pMin = Math.min(...allP);
@@ -463,6 +463,25 @@ export default function Home() {
                             <YAxis
                               domain={([min, max]: [number,number]) => { const p=(max-min)*0.15||min*0.01; return [min-p,max+p]; }}
                               hide={true} width={0}
+                            />
+                            <XAxis
+                              dataKey="h"
+                              tickFormatter={(_: any, i: number) => i % 6 === 0 ? `+${i}h` : ""}
+                              tick={{ fontSize: 8, fill: "#475569" }}
+                              tickLine={false} axisLine={false}
+                            />
+                            <YAxis
+                              domain={([min, max]: [number, number]) => {
+                                const p = (max - min) * 0.15 || min * 0.01;
+                                return [min - p, max + p];
+                              }}
+                              tickFormatter={(v: number) => {
+                                if (v >= 1000) return "$" + (v/1000).toFixed(1) + "k";
+                                return "$" + v.toFixed(2);
+                              }}
+                              tick={{ fontSize: 8, fill: "#475569" }}
+                              tickLine={false} axisLine={false}
+                              width={56} orientation="right"
                             />
                             <Bar dataKey="close" fill="transparent" stroke="none" isAnimationActive={false}
                               background={{ fill:"transparent" }}
