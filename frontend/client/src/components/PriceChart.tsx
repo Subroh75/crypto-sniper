@@ -1,5 +1,4 @@
-// ─── PriceChart.tsx — Candlestick chart with indicators ─────────────────────
-// Uses Recharts ComposedChart with custom candle rendering
+// PriceChart.tsx
 import {
   ComposedChart, XAxis, YAxis, CartesianGrid, Tooltip,
   Line, Bar, ResponsiveContainer, ReferenceLine,
@@ -7,245 +6,143 @@ import {
 import type { OHLCVBar, MarketStructure } from "@/types/api";
 import { fmtPrice } from "@/lib/api";
 
-const TIMEFRAMES = ["5m", "15m", "1H", "4H", "1D"] as const;
-
 interface Props {
-  ohlcv:     OHLCVBar[];
-  structure: MarketStructure | null;
-  interval:  string;
-  symbol:    string;
-  onTfChange?: (tf: string) => void;
+  ohlcv:      OHLCVBar[];
+  structure:  MarketStructure | null;
+  interval:   string;
+  symbol:     string;
+  onTfChange: (tf: string) => void;
 }
 
-// Custom candle shape - uses Recharts yAxis.scale for pixel-accurate positioning
-function CandleBar(props: any) {
-  const { x, y, width, background, payload, yAxis } = props;
-  if (!payload || !background || !yAxis?.scale) return null;
-
-  const scale = yAxis.scale;
-  const { open, high, low, close, isGreen } = payload;
-
-  const yH  = scale(high);
-  const yL  = scale(low);
-  const yO  = scale(open);
-  const yC  = scale(close);
-  const top = Math.min(yO, yC);
-  const bot = Math.max(yO, yC);
-  const bH  = Math.max(bot - top, 1.5);
-  const bW  = Math.max(width - 2, 2);
-  const cx  = x + width / 2;
-  const col = isGreen ? "#22c55e" : "#ef4444";
-
-  return (
-    <g>
-      <line x1={cx} y1={yH} x2={cx} y2={top} stroke={col} strokeWidth={1} />
-      <line x1={cx} y1={bot} x2={cx} y2={yL} stroke={col} strokeWidth={1} />
-      <rect x={x + 1} y={top} width={bW} height={bH} fill={col} fillOpacity={0.9} />
-    </g>
-  );
-}
-function formatBarData(ohlcv: OHLCVBar[]) {
-  return ohlcv.map(([ts, o, h, l, c]) => ({
-    ts, open: o, high: h, low: l, close: c, isGreen: c >= o,
-    bbU: 0, bbL: 0, vwap: 0, ema20: 0, ema50: 0,
-  }));
+// Stacked bar candlestick approach:
+// s1 = invisible base at low price (positions stack)
+// s2 = lower wick (low -> body bottom)
+// s3 = candle body (body bottom -> body top)
+// s4 = upper wick (body top -> high)
+function prepareData(ohlcv: OHLCVBar[]) {
+  return ohlcv.map(([ts, o, h, l, c]) => {
+    const bLow  = Math.min(o, c);
+    const bHigh = Math.max(o, c);
+    return {
+      ts, open: o, high: h, low: l, close: c, isGreen: c >= o,
+      s1: l,
+      s2: bLow - l,
+      s3: Math.max(bHigh - bLow, (h - l) * 0.005),
+      s4: h - bHigh,
+      ema20: 0, ema50: 0, bbU: 0, bbL: 0, vwap: 0,
+    };
+  });
 }
 
-function CustomTooltip({ active, payload }: TooltipProps) {
-  if (!active || !payload?.length) return null;
-  const d = payload[0].payload;
-  return (
-    <div className="bg-surface-2 border border-border rounded-lg px-3 py-2 text-[10px] font-mono shadow-xl">
-      <div className="flex gap-3">
-        <div>
-          <div className="text-text-muted">O</div>
-          <div className="text-text">{fmtPrice(d.open)}</div>
-        </div>
-        <div>
-          <div className="text-text-muted">H</div>
-          <div className="text-teal">{fmtPrice(d.high)}</div>
-        </div>
-        <div>
-          <div className="text-text-muted">L</div>
-          <div className="text-red">{fmtPrice(d.low)}</div>
-        </div>
-        <div>
-          <div className="text-text-muted">C</div>
-          <div className={d.isUp ? "text-teal" : "text-red"}>{fmtPrice(d.close)}</div>
-        </div>
-      </div>
-    </div>
-  );
+function BodyBar(props: any) {
+  const { x, y, width, height, payload } = props;
+  if (!payload || height < 0.5) return null;
+  const col = payload.isGreen ? "#22c55e" : "#ef4444";
+  return <rect x={x + 1} y={y} width={Math.max(width - 2, 2)} height={Math.max(height, 1)} fill={col} fillOpacity={0.9} />;
 }
+
+function WickBar(props: any) {
+  const { x, y, width, height } = props;
+  if (height < 0.5) return null;
+  const { payload } = props;
+  const col = payload?.isGreen ? "#22c55e" : "#ef4444";
+  return <line x1={x + width / 2} y1={y} x2={x + width / 2} y2={y + height} stroke={col} strokeWidth={1} />;
+}
+
+const TF = ["1m","5m","15m","30m","1H","4H","1D"];
 
 export function PriceChart({ ohlcv, structure, interval, symbol, onTfChange }: Props) {
   if (!ohlcv || ohlcv.length < 2) {
-    return (
-      <div className="card mb-3">
-        <div className="card-header">
-          <span className="section-num">02b</span>
-          <span>PRICE CHART</span>
-        </div>
-        <div className="h-[260px] flex items-center justify-center text-text-muted text-sm font-mono">
-          No chart data
-        </div>
-      </div>
-    );
+    return <div className="flex items-center justify-center h-48 text-text-muted text-sm">No data</div>;
   }
 
-  const prices = ohlcv.map(b => b[4]);
-  const allPrices = ohlcv.flatMap(b => [b[2], b[3]]);
-  const yMin = Math.min(...allPrices) * 0.998;
-  const yMax = Math.max(...allPrices) * 1.002;
+  const data = prepareData(ohlcv as any);
 
-  const data   = formatBarData(ohlcv, yMin, yMax);
-  const latest = ohlcv[ohlcv.length - 1];
-  const close  = latest[4];
-  const chg    = ohlcv.length > 1
-    ? ((close - ohlcv[0][1]) / ohlcv[0][1]) * 100
-    : 0;
-  const high24h = Math.max(...ohlcv.map(b => b[2]));
-  const low24h  = Math.min(...ohlcv.map(b => b[3]));
+  if (structure) {
+    data.forEach(d => {
+      d.ema20 = structure.ema20 ?? 0;
+      d.ema50 = structure.ema50 ?? 0;
+      d.bbU   = structure.bb_upper ?? 0;
+      d.bbL   = structure.bb_lower ?? 0;
+      d.vwap  = structure.vwap ?? 0;
+    });
+  }
 
-  // Build EMA20/50 overlay data
-  const ema20 = structure?.ema20;
-  const ema50 = structure?.ema50;
-  const vwap  = structure?.vwap;
-  const bbU   = structure?.bb_upper;
-  const bbL   = structure?.bb_lower;
+  const allP = data.flatMap(d => [d.open, d.high, d.low, d.close]);
+  const pMin = Math.min(...allP);
+  const pMax = Math.max(...allP);
+  const pad  = (pMax - pMin) * 0.08 || pMin * 0.01;
 
-  // Inject indicator values into data (constant lines for now — real per-bar values need API upgrade)
-  const chartData = data.map(d => ({
-    ...d,
-    ema20: ema20,
-    ema50: ema50,
-    vwap:  vwap,
-    bbU:   bbU,
-    bbL:   bbL,
-  }));
+  const inds = [
+    { key: "ema20", color: "#22c55e", label: "EMA 20" },
+    { key: "ema50", color: "#f59e0b", label: "EMA 50" },
+    { key: "vwap",  color: "#f97316", label: "VWAP"   },
+    { key: "bbU",   color: "#6366f1", label: "BB+"    },
+    { key: "bbL",   color: "#6366f1", label: "BB-"    },
+  ].filter(i => data.some(d => (d as any)[i.key] > 0));
 
-  const indicators = [
-    { key: "ema20", color: "#00d4aa", label: `EMA 20: ${fmtPrice(ema20)}` },
-    { key: "ema50", color: "#f7c948", label: `EMA 50: ${fmtPrice(ema50)}` },
-    { key: "vwap",  color: "#ff8c42", label: `VWAP: ${fmtPrice(vwap)}`, dash: "4 3" },
-    { key: "bbU",   color: "#7c5cfc", label: "BB Upper", dash: "3 3" },
-    { key: "bbL",   color: "#7c5cfc", label: "BB Lower", dash: "3 3" },
-  ].filter(ind => !!structure?.[ind.key as keyof MarketStructure]);
+  const lastClose = data[data.length - 1]?.close ?? 0;
 
   return (
-    <div className="card mb-3">
-      {/* Top bar */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-border/60">
-        <div className="flex items-center gap-3">
-          <span className="text-[15px] font-black font-mono text-text">{symbol}/USDT</span>
-          <span className="text-[20px] font-mono font-bold text-text">
-            {fmtPrice(close)}
-          </span>
-          <span className={`text-[11px] font-mono font-bold px-2 py-0.5 rounded ${
-            chg >= 0
-              ? "bg-teal/10 text-teal border border-teal/20"
-              : "bg-red/10 text-red border border-red/20"
-          }`}>
-            {chg >= 0 ? "▲" : "▼"} {Math.abs(chg).toFixed(2)}%
-          </span>
-          <span className="text-[10px] font-mono text-text-muted hidden sm:inline">
-            H: {fmtPrice(high24h)} · L: {fmtPrice(low24h)}
-          </span>
-        </div>
-        {/* TF pills */}
-        <div className="flex gap-1.5">
-          {TIMEFRAMES.map(tf => (
-            <button
-              key={tf}
-              onClick={() => onTfChange?.(tf)}
-              className={`text-[10px] font-mono font-bold px-2.5 py-1 rounded-md border transition-all ${
-                tf === interval || (tf === "1H" && interval === "1h")
-                  ? "border-purple text-purple bg-purple/8"
-                  : "border-border/60 text-text-muted hover:border-text-muted hover:text-text"
-              }`}
-            >
-              {tf}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Indicators legend */}
-      <div className="flex items-center gap-4 px-4 py-1.5 border-b border-border/40 bg-surface/50">
-        {indicators.map(ind => (
-          <div key={ind.key} className="flex items-center gap-1.5">
-            <div className="w-4 h-[2px] rounded" style={{ background: ind.color }} />
-            <span className="text-[9px] font-mono font-bold text-text-muted">{ind.label}</span>
-          </div>
+    <div className="w-full">
+      <div className="flex items-center gap-1 mb-2 px-1">
+        {TF.map(tf => (
+          <button key={tf} onClick={() => onTfChange(tf)}
+            className={`text-[11px] font-mono px-2 py-0.5 rounded ${interval===tf?"text-violet bg-violet/10 font-bold":"text-text-muted"}`}>
+            {tf}
+          </button>
         ))}
       </div>
-
-      {/* Chart */}
-      <div className="px-1 py-2" style={{ height: 220 }}>
-        <ResponsiveContainer width="100%" height="100%">
-          <ComposedChart data={chartData} margin={{ top: 4, right: 40, left: 0, bottom: 4 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" vertical={false} />
-
-            <XAxis
-              dataKey="ts"
-              tickFormatter={(ts) => {
-                const d = new Date(ts);
-                return `${d.getHours().toString().padStart(2,"0")}:${d.getMinutes().toString().padStart(2,"0")}`;
-              }}
-              tick={{ fontSize: 9, fill: "#4a5470", fontFamily: "monospace" }}
-              axisLine={false}
-              tickLine={false}
-              interval="preserveStartEnd"
-            />
-
-            <YAxis
-              domain={([dataMin, dataMax]) => { const pad = (dataMax - dataMin) * 0.05 || dataMin * 0.01; return [dataMin - pad, dataMax + pad]; }}
-              tickFormatter={(v) => fmtPrice(v).replace("$","")}
-              tick={{ fontSize: 9, fill: "#4a5470", fontFamily: "monospace" }}
-              axisLine={false}
-              tickLine={false}
-              width={55}
-              orientation="right"
-            />
-
-            <Tooltip content={<CustomTooltip />} />
-
-            {/* Current price reference line */}
-            {close > 0 && (
-              <ReferenceLine
-                y={close}
-                stroke="rgba(255,255,255,0.18)"
-                strokeDasharray="4 4"
-                label={{
-                  value: fmtPrice(close),
-                  position: "right",
-                  fontSize: 9,
-                  fill: "#b8c2dc",
-                  fontFamily: "monospace",
-                }}
-              />
-            )}
-
-            {/* BB Upper/Lower */}
-            {bbU && <Line dataKey="bbU" stroke="#7c5cfc" strokeWidth={1} dot={false} strokeDasharray="3 3" strokeOpacity={0.5} />}
-            {bbL && <Line dataKey="bbL" stroke="#7c5cfc" strokeWidth={1} dot={false} strokeDasharray="3 3" strokeOpacity={0.5} />}
-
-            {/* EMA/VWAP lines */}
-            {vwap  && <Line dataKey="vwap" stroke="#ff8c42" strokeWidth={1.5} dot={false} strokeDasharray="4 3" strokeOpacity={0.75} />}
-            {ema50 && <Line dataKey="ema50" stroke="#f7c948" strokeWidth={1.5} dot={false} strokeOpacity={0.75} />}
-            {ema20 && <Line dataKey="ema20" stroke="#00d4aa" strokeWidth={1.5} dot={false} strokeOpacity={0.85} />}
-
-            {/* Candles as bars — body */}
-            <Bar
-              dataKey="close"
-              fill="transparent"
-              stroke="none"
-              isAnimationActive={false}
-              shape={(props: any) => <CandleBar {...props} />}
-            />
-          </ComposedChart>
-        </ResponsiveContainer>
-      </div>
+      {inds.length > 0 && (
+        <div className="flex gap-4 px-2 mb-1">
+          {inds.map(i => (
+            <div key={i.key} className="flex items-center gap-1">
+              <div className="w-4 h-[2px]" style={{ background: i.color }} />
+              <span className="text-[10px] font-mono text-text-muted">{i.label}: {fmtPrice((data[data.length-1] as any)[i.key])}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      <ResponsiveContainer width="100%" height={220}>
+        <ComposedChart data={data} margin={{ top:4, right:56, left:0, bottom:4 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
+          <XAxis dataKey="ts"
+            tickFormatter={v => {
+              const d = new Date(v);
+              return d.getHours()===0
+                ? d.toLocaleDateString("en-GB",{day:"2-digit",month:"2-digit"})
+                : d.toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"});
+            }}
+            tick={{ fontSize:9, fill:"#475569" }} tickLine={false} axisLine={false} minTickGap={40}
+          />
+          <YAxis
+            domain={[pMin - pad, pMax + pad]}
+            tickFormatter={v => fmtPrice(v)}
+            tick={{ fontSize:9, fill:"#475569" }} tickLine={false} axisLine={false}
+            width={72} orientation="right"
+          />
+          <Tooltip
+            contentStyle={{ background:"#0f172a", border:"1px solid #1e293b", borderRadius:8, fontSize:11 }}
+            formatter={(v: any, n: string) => [fmtPrice(v), n]}
+            labelFormatter={ts => new Date(ts).toLocaleString()}
+          />
+          <Bar dataKey="s1" stackId="c" fill="transparent" stroke="none" isAnimationActive={false} />
+          <Bar dataKey="s2" stackId="c" fill="transparent" stroke="none" isAnimationActive={false}
+            shape={(props: any) => <WickBar {...props} />} />
+          <Bar dataKey="s3" stackId="c" fill="transparent" stroke="none" isAnimationActive={false}
+            shape={(props: any) => <BodyBar {...props} />} />
+          <Bar dataKey="s4" stackId="c" fill="transparent" stroke="none" isAnimationActive={false}
+            shape={(props: any) => <WickBar {...props} />} />
+          {inds.map(i => (
+            <Line key={i.key} type="monotone" dataKey={i.key}
+              stroke={i.color} strokeWidth={1} dot={false} isAnimationActive={false} />
+          ))}
+          {lastClose > 0 && (
+            <ReferenceLine y={lastClose} stroke="#7c3aed" strokeDasharray="4 4" strokeWidth={1}
+              label={{ value: fmtPrice(lastClose), position:"right", fontSize:10, fill:"#7c3aed" }} />
+          )}
+        </ComposedChart>
+      </ResponsiveContainer>
     </div>
   );
 }
