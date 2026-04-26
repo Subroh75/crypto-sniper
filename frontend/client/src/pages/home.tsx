@@ -23,7 +23,7 @@ import {
 } from "@/hooks/useApi";
 import { fmtPrice, fmtPct } from "@/lib/api";
 import type { AnalyseResponse, KronosResponse } from "@/types/api";
-import { LineChart, Line, ResponsiveContainer } from "recharts";
+import { LineChart, Line, ResponsiveContainer, YAxis } from "recharts";
 
 //  Constants 
 const INTERVALS = ["1m","5m","15m","30m","1H","4H","1D"] as const;
