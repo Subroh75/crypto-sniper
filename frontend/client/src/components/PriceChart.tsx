@@ -199,7 +199,7 @@ export function PriceChart({ ohlcv, structure, interval, symbol, onTfChange }: P
             />
 
             <YAxis
-              domain={([dataMin, dataMax]: number[]) => { const pad = (dataMax - dataMin) * 0.05 || dataMin * 0.01; return [dataMin - pad, dataMax + pad]; }}
+              domain={([dataMin, dataMax]) => { const pad = (dataMax - dataMin) * 0.05 || dataMin * 0.01; return [dataMin - pad, dataMax + pad]; }}
               tickFormatter={(v) => fmtPrice(v).replace("$","")}
               tick={{ fontSize: 9, fill: "#4a5470", fontFamily: "monospace" }}
               axisLine={false}
