@@ -23,7 +23,7 @@ import {
 } from "@/hooks/useApi";
 import { fmtPrice, fmtPct } from "@/lib/api";
 import type { AnalyseResponse, KronosResponse } from "@/types/api";
-import { LineChart, Line, ResponsiveContainer, YAxis } from "recharts";
+import { ComposedChart, Bar, Line, ResponsiveContainer, YAxis, XAxis, CartesianGrid } from "recharts";
 
 //  Constants 
 const INTERVALS = ["1m","5m","15m","30m","1H","4H","1D"] as const;
@@ -453,16 +453,40 @@ export default function Home() {
                           PREDICTED OHLCV - NEXT 24 CANDLES
                         </div>
                         <ResponsiveContainer width="100%" height={160}>
-                          <LineChart data={kron.forecast.predicted_ohlcv} margin={{ top: 4, right: 8, left: 0, bottom: 4 }}>
+                          <ComposedChart data={(() => {
+                              const candles = kron.forecast.predicted_ohlcv;
+                              const allP = candles.flatMap((c: any) => [c.open, c.high, c.low, c.close]);
+                              const pMin = Math.min(...allP);
+                              const pMax = Math.max(...allP);
+                              return candles.map((c: any) => ({ ...c, pMin, pMax, isGreen: c.close >= c.open }));
+                            })()} margin={{ top:4, right:8, left:0, bottom:4 }}>
                             <YAxis
-                              domain={([min, max]: [number, number]) => { const p = (max - min) * 0.15 || min * 0.01; return [min - p, max + p]; }}
-                              hide={true}
-                              width={0}
+                              domain={([min, max]: [number,number]) => { const p=(max-min)*0.15||min*0.01; return [min-p,max+p]; }}
+                              hide={true} width={0}
                             />
-                            <Line type="monotone" dataKey="close" stroke="#7c5cfc" strokeWidth={2} dot={false} isAnimationActive={false} />
-                            <Line type="monotone" dataKey="high" stroke="#22c55e" strokeWidth={1} dot={false} strokeDasharray="3 3" isAnimationActive={false} />
-                            <Line type="monotone" dataKey="low" stroke="#ef4444" strokeWidth={1} dot={false} strokeDasharray="3 3" isAnimationActive={false} />
-                          </LineChart>
+                            <Bar dataKey="close" fill="transparent" stroke="none" isAnimationActive={false}
+                              background={{ fill:"transparent" }}
+                              shape={(props: any) => {
+                                const { x, y, width, background: bg, payload } = props;
+                                if (!payload || !bg || bg.height <= 0) return null;
+                                const { open, high, low, close, isGreen, pMin, pMax } = payload;
+                                const pad = (pMax-pMin)*0.15||pMin*0.01;
+                                const dMin=pMin-pad, dMax=pMax+pad, range=dMax-dMin||1;
+                                const py = (p: number) => bg.y + bg.height - ((p-dMin)/range)*bg.height;
+                                const yH=py(high),yL=py(low),yO=py(open),yC=py(close);
+                                const top=Math.min(yO,yC),bot=Math.max(yO,yC);
+                                const col=isGreen?"#22c55e":"#ef4444";
+                                const cx=x+width/2, bW=Math.max(width-1,2), bH=Math.max(bot-top,1.5);
+                                return (
+                                  <g>
+                                    <line x1={cx} y1={yH} x2={cx} y2={top} stroke={col} strokeWidth={1}/>
+                                    <line x1={cx} y1={bot} x2={cx} y2={yL} stroke={col} strokeWidth={1}/>
+                                    <rect x={x+0.5} y={top} width={bW} height={bH} fill={col} fillOpacity={0.85}/>
+                                  </g>
+                                );
+                              }}
+                            />
+                          </ComposedChart>
                         </ResponsiveContainer>
                       </div>
                     </>
