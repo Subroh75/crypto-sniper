@@ -366,10 +366,10 @@ export default function Home() {
                     ].map(([label, price, dir]) => (
                       <div key={label as string} className="flex justify-between items-center border-b border-border/30 pb-1.5 last:border-none last:pb-0">
                         <span className="text-[10px] font-mono text-text-muted/70 uppercase tracking-wide">{label as string}</span>
-                        <span className={`text-[12px] font-mono font-bold ${
+                        <span className={`text-[12px] font-mono font-bold flex items-center gap-1 ${
                           dir === "up" ? "text-teal" : dir === "warn" ? "text-red" : "text-text"
                         }`}>
-                          {dir === "up" ? "^ " : dir === "warn" ? "~ " : "v "}{fmtPrice(price as number)}
+                          <span className="text-[10px] leading-none">{dir === "up" ? "▲" : dir === "warn" ? "●" : "▼"}</span>{fmtPrice(price as number)}
                         </span>
                       </div>
                     ))}
@@ -437,7 +437,7 @@ export default function Home() {
                         {[
                           { label: "AI Forecast",   value: kron.forecast.direction,
                             color: kron.forecast.direction === "Falling" ? "text-red" : kron.forecast.direction === "Rising" ? "text-teal" : "text-amber" },
-                          { label: "Expected Move", value: `${(kron.forecast?.expected_move_pct ?? 0) >= 0 ? "^" : "v"} ${Math.abs(kron.forecast.expected_move_pct).toFixed(2)}%`,
+                          { label: "Expected Move", value: `${(kron.forecast?.expected_move_pct ?? 0) >= 0 ? "▲" : "▼"} ${Math.abs(kron.forecast.expected_move_pct).toFixed(2)}%`,
                             color: (kron.forecast?.expected_move_pct ?? 0) >= 0 ? "text-teal" : "text-red" },
                           { label: "Trade Quality", value: kron.forecast.trade_quality,
                             color: kron.forecast.trade_quality.includes("Avoid") ? "text-red" : kron.forecast.trade_quality.includes("Moderate") ? "text-amber" : "text-teal" },

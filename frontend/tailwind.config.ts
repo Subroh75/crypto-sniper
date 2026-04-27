@@ -30,8 +30,8 @@ export default {
           hover: "#6d28d9",
         },
         teal: {
-          DEFAULT: "#38bdf8",
-          hover: "#0ea5e9",
+          DEFAULT: "#22c55e",
+          hover: "#16a34a",
         },
         violet: {
           DEFAULT: "#818cf8",
