@@ -285,9 +285,16 @@ export default function Home() {
 
       {/*  MAIN TWO-COL LAYOUT  */}
       <div className="max-w-[1380px] mx-auto px-4 pb-20">
+
+        {/* 11: Backtest + 12: Confluence — always visible, no analysis required */}
+        <div className="mb-4 space-y-0">
+          <BacktestCard symbol={symbol} />
+          <MultiTimeframeCard symbol={symbol} />
+        </div>
+
         {!sig && !loading && (
-          <div className="text-center py-16 text-text-muted text-[13px] font-mono">
-            Enter a coin symbol above to get started
+          <div className="text-center py-10 text-text-muted text-[13px] font-mono">
+            Enter a coin symbol above to analyse
           </div>
         )}
 
@@ -816,12 +823,6 @@ export default function Home() {
                   </div>
                 </Card>
               )}
-
-              {/* 11: Backtest */}
-              <BacktestCard symbol={symbol} />
-
-              {/* 12: Multi-Timeframe Confluence */}
-              <MultiTimeframeCard symbol={symbol} />
 
             </div>
             {/*  end LEFT column  */}
