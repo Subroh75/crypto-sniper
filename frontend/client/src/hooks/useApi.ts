@@ -426,3 +426,131 @@ export function usePdfExport() {
 
   return { exporting, exportPdf };
 }
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// NEW HOOKS — Backtest, Confluence, Editable Watchlist, Auth
+// ─────────────────────────────────────────────────────────────────────────────
+
+import {
+  getBacktest, getConfluence,
+  getWatchlistItems, addWatchlistItem, removeWatchlistItem,
+  requestMagicLink, verifyMagicLink, getMe,
+} from "@/lib/api";
+import type {
+  BacktestData, ConfluenceData,
+  MagicLinkResult, VerifyResult, AuthUser,
+} from "@/types/api";
+
+/** Backtest of STRONG BUY signals */
+export function useBacktest(symbol?: string | null, days = 30) {
+  return useAsync<BacktestData>(
+    () => getBacktest(symbol ?? undefined, days),
+    [symbol, days],
+    true,
+  );
+}
+
+/** Multi-timeframe confluence */
+export function useConfluence(symbol: string | null, intervals = "1H,4H,1D") {
+  return useAsync<ConfluenceData>(
+    () => getConfluence(symbol ?? "BTC", intervals),
+    [symbol, intervals],
+    !!symbol,
+  );
+}
+
+/** Editable watchlist persisted to backend DB */
+export function useEditableWatchlist(userId: string) {
+  const [symbols, setSymbols] = useState<string[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await getWatchlistItems(userId);
+      setSymbols(res.symbols ?? []);
+    } catch { /* silent */ }
+    finally { setLoading(false); }
+  }, [userId]);
+
+  useEffect(() => { refresh(); }, [refresh]);
+
+  const add = useCallback(async (symbol: string) => {
+    await addWatchlistItem(userId, symbol);
+    refresh();
+  }, [userId, refresh]);
+
+  const remove = useCallback(async (symbol: string) => {
+    await removeWatchlistItem(userId, symbol);
+    refresh();
+  }, [userId, refresh]);
+
+  return { symbols, loading, refresh, add, remove };
+}
+
+/** Auth: magic-link flow */
+export function useAuth() {
+  const [user, setUser]           = useState<AuthUser | null>(null);
+  const [sessionToken, setToken]  = useState<string | null>(() => {
+    // Read from memory only — do NOT use localStorage
+    return null;
+  });
+  const [loading, setLoading]     = useState(false);
+  const [error, setError]         = useState<string | null>(null);
+  const [linkSent, setLinkSent]   = useState(false);
+
+  // On mount, try session from in-memory (page reload clears it — by design, no localStorage)
+  useEffect(() => {
+    if (sessionToken) {
+      getMe(sessionToken)
+        .then(u => setUser({ email: u.email }))
+        .catch(() => { setToken(null); setUser(null); });
+    }
+  }, [sessionToken]);
+
+  const login = useCallback(async (email: string): Promise<MagicLinkResult> => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await requestMagicLink(email);
+      if (res.error) { setError(res.error); return res; }
+      setLinkSent(true);
+      return res;
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Login failed";
+      setError(msg);
+      return { message: msg, error: msg };
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const verify = useCallback(async (token: string): Promise<VerifyResult> => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await verifyMagicLink(token);
+      if (res.error) { setError(res.error); return res; }
+      if (res.session_token && res.email) {
+        setToken(res.session_token);
+        setUser({ email: res.email });
+      }
+      return res;
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Verification failed";
+      setError(msg);
+      return { message: msg, error: msg };
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const logout = useCallback(() => {
+    setToken(null);
+    setUser(null);
+    setLinkSent(false);
+  }, []);
+
+  return { user, loading, error, linkSent, login, verify, logout };
+}

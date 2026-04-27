@@ -18,9 +18,13 @@ import {
   TrendingSection, NewsSection, MacroSection,
 } from "@/components/BottomSections";
 import { DeepResearchSection } from "@/components/DeepResearch";
+import { MultiTimeframeCard } from "@/components/MultiTimeframe";
+import { BacktestCard } from "@/components/BacktestCard";
+import { AuthModal, AuthButton } from "@/components/AuthModal";
 import {
   useAnalyse, useKronos, useWatchlist, usePdfExport,
   useHitRate, useScannerPerformance, useAlerts,
+  useEditableWatchlist, useAuth,
 } from "@/hooks/useApi";
 import { fmtPrice, fmtPct } from "@/lib/api";
 import { MetricTooltip } from "@/components/Tooltip";
@@ -30,7 +34,6 @@ import { ComposedChart, Bar, Line, ResponsiveContainer, YAxis, XAxis, CartesianG
 //  Constants 
 const INTERVALS = ["1m","5m","15m","30m","1H","4H","1D"] as const;
 const QUICK_COINS = ["BTC","ETH","SOL","BNB","DOGE","KAVA"] as const;
-const WATCHLIST_SYMS = ["BTC","ETH","SOL","BNB","DOGE","KAVA"] as const;
 
 const VERDICT_COLOR: Record<string, string> = {
   "STRONG BUY": "text-teal",
@@ -129,10 +132,20 @@ export default function Home() {
   const [alertThreshold, setAlertThreshold] = useState(9);
   const [alertDirection, setAlertDirection] = useState<"above"|"below">("above");
   const [alertMsg,     setAlertMsg]     = useState("");
+  const [authOpen,     setAuthOpen]     = useState(false);
+
+  // Auth
+  const auth = useAuth();
+  // Stable user_id: logged-in users use email, anonymous users use a stable string
+  const userId = auth.user?.email ?? "anon";
 
   const analyse  = useAnalyse();
   const kronosHk = useKronos();
-  const { scores: wlScores, loading: wlLoading } = useWatchlist([...WATCHLIST_SYMS]);
+
+  // Editable watchlist from backend DB
+  const editableWL = useEditableWatchlist(userId);
+  const { scores: wlScores, loading: wlLoading } = useWatchlist(editableWL.symbols.length ? editableWL.symbols : ["BTC","ETH","SOL","BNB","DOGE"]);
+
   const { exporting, exportPdf } = usePdfExport();
   const hitRate = useHitRate(null, 30);
   const scanPerf = useScannerPerformance(7);
@@ -194,9 +207,7 @@ export default function Home() {
               <div className="w-[6px] h-[6px] rounded-full bg-teal animate-pulse shadow-sm shadow-teal/50" />
               LIVE
             </div>
-            <button className="text-[11px] font-mono text-text-muted border border-border/50 px-3 py-1.5 rounded hover:border-purple/40 hover:text-text transition-all">
-              Log in
-            </button>
+            <AuthButton user={auth.user} onClick={() => setAuthOpen(true)} />
             <button
               className="text-[11px] font-mono font-bold text-white px-3 py-1.5 rounded transition-all"
               style={{ background: "#7c3aed" }}
@@ -806,6 +817,12 @@ export default function Home() {
                 </Card>
               )}
 
+              {/* 11: Backtest */}
+              <BacktestCard symbol={symbol} />
+
+              {/* 12: Multi-Timeframe Confluence */}
+              <MultiTimeframeCard symbol={symbol} />
+
             </div>
             {/*  end LEFT column  */}
 
@@ -821,6 +838,8 @@ export default function Home() {
                 loading={wlLoading}
                 onSelect={(sym) => runAnalysis(sym)}
                 currentSymbol={symbol}
+                onAdd={editableWL.add}
+                onRemove={editableWL.remove}
               />
               <SubscribeCard />
               <ExportCard
@@ -836,6 +855,19 @@ export default function Home() {
           </div>
         )}
       </div>
+
+      {/* AUTH MODAL */}
+      <AuthModal
+        open={authOpen}
+        onClose={() => setAuthOpen(false)}
+        onLogin={auth.login}
+        onVerify={auth.verify}
+        user={auth.user}
+        loading={auth.loading}
+        error={auth.error}
+        linkSent={auth.linkSent}
+        onLogout={auth.logout}
+      />
 
       {/* ALERTS MODAL */}
       {alertOpen && (

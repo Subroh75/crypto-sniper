@@ -185,3 +185,47 @@ export function timeAgo(ts: string | number): string {
   if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
   return `${Math.floor(diff / 86400)}d ago`;
 }
+
+// ── New endpoints ─────────────────────────────────────────────────────────────
+
+/** Backtest: STRONG BUY signals and their outcomes */
+export function getBacktest(symbol?: string | null, days = 30): Promise<import("@/types/api").BacktestData> {
+  const qs = new URLSearchParams({ days: String(days) });
+  if (symbol) qs.set("symbol", symbol);
+  return get(`/backtest?${qs}`, 1);
+}
+
+/** Multi-timeframe confluence for a symbol */
+export function getConfluence(symbol: string, intervals = "1H,4H,1D"): Promise<import("@/types/api").ConfluenceData> {
+  return get(`/confluence/${encodeURIComponent(symbol)}?intervals=${encodeURIComponent(intervals)}`, 1);
+}
+
+/** Get persisted watchlist symbols */
+export function getWatchlistItems(userId: string): Promise<import("@/types/api").WatchlistItemsResponse> {
+  return get(`/watchlist-items?user_id=${encodeURIComponent(userId)}`, 1);
+}
+
+/** Add a symbol to watchlist */
+export function addWatchlistItem(userId: string, symbol: string): Promise<{ added: boolean; symbol: string }> {
+  return post(`/watchlist-items`, { user_id: userId, symbol }, 0);
+}
+
+/** Remove a symbol from watchlist */
+export function removeWatchlistItem(userId: string, symbol: string): Promise<{ deleted: boolean; symbol: string }> {
+  return apiFetch(`/watchlist-items/${encodeURIComponent(symbol)}?user_id=${encodeURIComponent(userId)}`, { method: "DELETE" }, 0);
+}
+
+/** Request magic-link login email */
+export function requestMagicLink(email: string): Promise<import("@/types/api").MagicLinkResult> {
+  return post(`/auth/magic-link`, { email }, 0);
+}
+
+/** Verify magic-link token */
+export function verifyMagicLink(token: string): Promise<import("@/types/api").VerifyResult> {
+  return get(`/auth/verify?token=${encodeURIComponent(token)}`, 0);
+}
+
+/** Get current user from session token */
+export function getMe(sessionToken: string): Promise<import("@/types/api").AuthUser & { timestamp: number }> {
+  return get(`/auth/me?session_token=${encodeURIComponent(sessionToken)}`, 0);
+}

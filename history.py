@@ -247,3 +247,73 @@ def get_scanner_performance(days: int = 7) -> dict:
     except Exception as e:
         logger.warning(f"get_scanner_performance failed: {e}")
         return {"picks": [], "summary": {"total_picks": 0, "checked": 0, "avg_return_pct": None, "win_rate_pct": None, "days": days}}
+
+
+# ── Backtest ─────────────────────────────────────────────────────────────────
+def get_backtest(symbol: Optional[str] = None, days: int = 30) -> dict:
+    """
+    Simple backtest: for every STRONG BUY signal in the last N days,
+    compute the % return from entry price to the latest recorded price/outcome.
+
+    Returns:
+      - trades: list of {symbol, ts, entry, exit_pct, outcome_pct}
+      - summary: {total, wins, losses, avg_return, total_return, win_rate, days}
+    """
+    cutoff_ts = int(time.time()) - days * 86_400
+    try:
+        with _get_conn() as c:
+            sym_filter = "AND symbol=?" if symbol else ""
+            params: tuple = (cutoff_ts,) + ((symbol.upper(),) if symbol else ()) + ("STRONG BUY",)
+            rows = c.execute(
+                f"""SELECT symbol, interval, close_price, ts, outcome_pct, outcome_checked
+                    FROM signals
+                    WHERE ts >= ? {sym_filter}
+                    AND signal_label = ?
+                    ORDER BY ts ASC""",
+                params,
+            ).fetchall()
+
+        trades = []
+        for r in rows:
+            row = dict(r)
+            trades.append({
+                "symbol":      row["symbol"],
+                "interval":    row["interval"],
+                "entry_price": row["close_price"],
+                "ts":          row["ts"],
+                "outcome_pct": row["outcome_pct"],    # None = not yet resolved
+                "resolved":    bool(row["outcome_checked"]),
+            })
+
+        # Stats on resolved trades only
+        resolved = [t for t in trades if t["outcome_pct"] is not None]
+        wins     = [t for t in resolved if t["outcome_pct"] >= 2.0]
+        losses   = [t for t in resolved if t["outcome_pct"] < 0]
+
+        avg_return   = round(sum(t["outcome_pct"] for t in resolved) / len(resolved), 2) if resolved else None
+        total_return = round(sum(t["outcome_pct"] for t in resolved), 2) if resolved else None
+        win_rate     = round(len(wins) / len(resolved) * 100, 1) if resolved else None
+
+        return {
+            "trades": trades,
+            "summary": {
+                "total":        len(trades),
+                "resolved":     len(resolved),
+                "wins":         len(wins),
+                "losses":       len(losses),
+                "avg_return":   avg_return,
+                "total_return": total_return,
+                "win_rate":     win_rate,
+                "threshold_pct": 2.0,
+                "days":         days,
+                "symbol":       symbol,
+            },
+        }
+    except Exception as e:
+        logger.warning(f"get_backtest failed: {e}")
+        return {
+            "trades": [],
+            "summary": {"total": 0, "resolved": 0, "wins": 0, "losses": 0,
+                        "avg_return": None, "total_return": None, "win_rate": None,
+                        "threshold_pct": 2.0, "days": days, "symbol": symbol},
+        }

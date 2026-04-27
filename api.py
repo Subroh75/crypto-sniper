@@ -20,7 +20,13 @@ from perplexity_research import run_deep_research
 from derivatives import get_derivatives
 from history import (
     record_signal, get_symbol_history, get_hit_rate,
-    get_scanner_performance, record_scan_result,
+    get_scanner_performance, record_scan_result, get_backtest,
+)
+from watchlist_db import (
+    get_watchlist, add_watchlist_symbol, remove_watchlist_symbol,
+)
+from auth import (
+    send_magic_link, verify_magic_link, verify_session,
 )
 from alerts import (
     AlertRequest, register_alert, get_alerts, delete_alert,
@@ -298,3 +304,131 @@ async def remove_alert(alert_id: int):
     """Delete an alert by ID."""
     ok = delete_alert(alert_id)
     return {"deleted": ok, "alert_id": alert_id}
+
+
+# ── Backtest ─────────────────────────────────────────────────────────────────
+
+@app.get("/backtest")
+async def backtest(symbol: Optional[str] = None, days: int = 30):
+    """Simple backtest of STRONG BUY signals from history DB."""
+    data = get_backtest(symbol.upper() if symbol else None, days)
+    return {**data, "timestamp": int(time.time())}
+
+
+# ── Editable watchlist ───────────────────────────────────────────────────────
+
+class WatchlistItemRequest(BaseModel):
+    user_id: str = "anon"
+    symbol: str
+
+
+@app.get("/watchlist-items")
+async def get_watchlist_items(user_id: str = "anon"):
+    """Get persisted watchlist symbols for a user."""
+    syms = get_watchlist(user_id)
+    return {"user_id": user_id, "symbols": syms, "timestamp": int(time.time())}
+
+
+@app.post("/watchlist-items")
+async def add_watchlist_item(req: WatchlistItemRequest):
+    """Add a symbol to the user's watchlist."""
+    return add_watchlist_symbol(req.user_id, req.symbol)
+
+
+@app.delete("/watchlist-items/{symbol}")
+async def remove_watchlist_item(symbol: str, user_id: str = "anon"):
+    """Remove a symbol from the user's watchlist."""
+    return remove_watchlist_symbol(user_id, symbol)
+
+
+# ── Auth ─────────────────────────────────────────────────────────────────────
+
+class MagicLinkRequest(BaseModel):
+    email: str
+
+
+class VerifyRequest(BaseModel):
+    token: str
+
+
+@app.post("/auth/magic-link")
+async def request_magic_link(req: MagicLinkRequest):
+    """Send a magic-link login email."""
+    return send_magic_link(req.email)
+
+
+@app.get("/auth/verify")
+async def verify_link(token: str):
+    """Verify a magic-link token and return a session token."""
+    return verify_magic_link(token)
+
+
+@app.get("/auth/me")
+async def me(session_token: str):
+    """Return authenticated user email if session is valid."""
+    email = verify_session(session_token)
+    if not email:
+        raise HTTPException(status_code=401, detail="Invalid or expired session")
+    return {"email": email, "timestamp": int(time.time())}
+
+
+# ── Multi-timeframe confluence ────────────────────────────────────────────────
+
+@app.get("/confluence/{symbol}")
+async def confluence(symbol: str, intervals: str = "1H,4H,1D"):
+    """
+    Run /analyse for the same symbol across multiple timeframes.
+    Returns a compact summary for each interval.
+    """
+    sym = symbol.upper().strip()
+    interval_list = [i.strip() for i in intervals.split(",") if i.strip()]
+    if not interval_list:
+        interval_list = ["1H", "4H", "1D"]
+
+    import asyncio
+    from concurrent.futures import ThreadPoolExecutor
+
+    def analyse_tf(interval: str):
+        try:
+            ohlcv      = get_ohlcv(sym, interval)
+            quote      = get_quote(sym)
+            indicators = get_indicators(sym, interval)
+            if not ohlcv:
+                return {"interval": interval, "error": "No data"}
+            sig = calculate_signals(ohlcv, quote, indicators)
+            return {
+                "interval":  interval,
+                "score":     sig.total,
+                "max_score": sig.max_score,
+                "signal":    sig.signal_label,
+                "direction": sig.direction,
+                "close":     sig.close,
+                "rsi":       sig.rsi,
+                "adx":       sig.adx,
+                "ema_stack": sig.ema_stack,
+                "rel_volume":sig.rel_volume,
+                "components": {
+                    "V": sig.v_score, "P": sig.p_score,
+                    "R": sig.r_score, "T": sig.t_score, "S": sig.s_score,
+                },
+            }
+        except Exception as e:
+            return {"interval": interval, "error": str(e)}
+
+    with ThreadPoolExecutor(max_workers=3) as ex:
+        results = list(ex.map(analyse_tf, interval_list))
+
+    # Confluence score = avg of scores across timeframes
+    valid = [r for r in results if "error" not in r]
+    confluence_score = round(sum(r["score"] for r in valid) / len(valid), 1) if valid else 0
+    all_bull = all(r.get("direction") == "LONG" for r in valid)
+    any_strong = any(r.get("signal") == "STRONG BUY" for r in valid)
+
+    return {
+        "symbol":            sym,
+        "timeframes":        results,
+        "confluence_score":  confluence_score,
+        "all_bullish":       all_bull,
+        "any_strong_buy":    any_strong,
+        "timestamp":         int(time.time()),
+    }

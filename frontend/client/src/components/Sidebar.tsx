@@ -1,5 +1,5 @@
 // ─── Sidebar.tsx — Right column panels ──────────────────────────────────────
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { fmtPrice, fmtPct } from "@/lib/api";
 import type { TradeSetup, Conviction, KeyLevel, WatchlistScore, AnalyseResponse } from "@/types/api";
 
@@ -314,7 +314,7 @@ export function KeyLevelsCard({ levels }: { levels: KeyLevel[] }) {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// 4. WATCHLIST SCANNER
+// 4. WATCHLIST SCANNER (editable)
 // ════════════════════════════════════════════════════════════════════════════
 const PILL_STYLE: Record<string, string> = {
   BUY:   "bg-teal/10 text-teal border-teal/20",
@@ -327,15 +327,32 @@ export function WatchlistCard({
   loading,
   onSelect,
   currentSymbol,
+  onAdd,
+  onRemove,
 }: {
   scores: WatchlistScore[];
   loading: boolean;
   onSelect: (sym: string) => void;
   currentSymbol: string;
+  onAdd?: (sym: string) => void;
+  onRemove?: (sym: string) => void;
 }) {
+  const [addMode, setAddMode] = useState(false);
+  const [input, setInput]     = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const handleAdd = () => {
+    const sym = input.trim().toUpperCase();
+    if (sym && onAdd) {
+      onAdd(sym);
+      setInput("");
+      setAddMode(false);
+    }
+  };
+
   return (
     <SideCard>
-      <SideCardHeader icon="👁" title="WATCHLIST SCANNER" badge="NEW" src="CoinGecko" />
+      <SideCardHeader icon="👁" title="WATCHLIST" badge="LIVE" src="CoinGecko" />
       <div className="p-3">
         <div className="space-y-1.5">
           {loading ? (
@@ -344,41 +361,84 @@ export function WatchlistCard({
             ))
           ) : scores.length === 0 ? (
             <div className="text-center text-[10px] font-mono text-text-muted/60 py-4">
-              No watchlist data
+              Add coins to your watchlist
             </div>
           ) : (
             scores.map((s) => (
-              <button
-                key={s.symbol}
-                onClick={() => onSelect(s.symbol)}
-                className={`w-full flex items-center justify-between px-3 py-2 rounded-lg border transition-all text-left ${
-                  s.symbol === currentSymbol
-                    ? "border-purple/40 bg-purple/5"
-                    : "border-border/40 bg-surface-2 hover:border-purple/30"
-                }`}
-              >
-                <div className="flex items-center gap-2">
-                  <span className={`text-[13px] font-mono font-black ${
-                    s.change_24h >= 0 ? "text-teal" : s.change_24h < -3 ? "text-red" : "text-text"
-                  }`}>{s.symbol}</span>
-                  <span className={`text-[9px] font-mono font-bold px-1.5 py-0.5 rounded border ${PILL_STYLE[s.signal] ?? PILL_STYLE.HOLD}`}>
-                    {s.signal === "BUY" ? "⚡ " : ""}{s.signal}
-                  </span>
-                </div>
-                <div className="text-right">
-                  <div className="text-[11px] font-mono font-bold text-text">{fmtPrice(s.price)}</div>
-                  <div className={`text-[10px] font-mono ${s.change_24h >= 0 ? "text-teal" : "text-red"}`}>
-                    {s.change_24h != null ? (s.change_24h >= 0 ? "▲" : "▼") + " " + Math.abs(s.change_24h).toFixed(2) + "%" : "—"}
+              <div key={s.symbol} className="group relative">
+                <button
+                  onClick={() => onSelect(s.symbol)}
+                  className={`w-full flex items-center justify-between px-3 py-2 rounded-lg border transition-all text-left ${
+                    s.symbol === currentSymbol
+                      ? "border-purple/40 bg-purple/5"
+                      : "border-border/40 bg-surface-2 hover:border-purple/30"
+                  }`}
+                >
+                  <div className="flex items-center gap-2">
+                    <span className={`text-[13px] font-mono font-black ${
+                      s.change_24h >= 0 ? "text-teal" : s.change_24h < -3 ? "text-red" : "text-text"
+                    }`}>{s.symbol}</span>
+                    <span className={`text-[9px] font-mono font-bold px-1.5 py-0.5 rounded border ${PILL_STYLE[s.signal] ?? PILL_STYLE.HOLD}`}>
+                      {s.signal === "BUY" ? "⚡ " : ""}{s.signal}
+                    </span>
                   </div>
-                </div>
-              </button>
+                  <div className="text-right">
+                    <div className="text-[11px] font-mono font-bold text-text">{fmtPrice(s.price)}</div>
+                    <div className={`text-[10px] font-mono ${s.change_24h >= 0 ? "text-teal" : "text-red"}`}>
+                      {s.change_24h != null ? (s.change_24h >= 0 ? "▲" : "▼") + " " + Math.abs(s.change_24h).toFixed(2) + "%" : "—"}
+                    </div>
+                  </div>
+                </button>
+                {/* Remove button — appears on hover */}
+                {onRemove && (
+                  <button
+                    onClick={e => { e.stopPropagation(); onRemove(s.symbol); }}
+                    className="absolute right-1 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 w-5 h-5 flex items-center justify-center rounded text-[10px] text-red/70 hover:text-red hover:bg-red/10 transition-all"
+                    title={`Remove ${s.symbol}`}
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
             ))
           )}
         </div>
 
-        <button className="w-full mt-2 py-2 text-[10px] font-mono text-text-muted/60 border border-dashed border-border/40 rounded-lg hover:border-purple/40 hover:text-purple transition-all">
-          + Add coin to watchlist
-        </button>
+        {/* Add coin */}
+        {addMode ? (
+          <div className="mt-2 flex gap-1.5">
+            <input
+              ref={inputRef}
+              type="text"
+              value={input}
+              onChange={e => setInput(e.target.value.toUpperCase())}
+              onKeyDown={e => { if (e.key === "Enter") handleAdd(); if (e.key === "Escape") setAddMode(false); }}
+              placeholder="BTC, ETH…"
+              autoFocus
+              maxLength={10}
+              className="flex-1 min-w-0 px-2.5 py-1.5 rounded-lg border border-purple/40 bg-surface-2 text-text text-[12px] font-mono placeholder:text-text-muted/40 focus:outline-none"
+            />
+            <button
+              onClick={handleAdd}
+              className="px-2.5 py-1.5 rounded-lg text-[10px] font-mono font-bold bg-purple/10 text-purple border border-purple/30 hover:bg-purple/20 transition-all"
+            >
+              Add
+            </button>
+            <button
+              onClick={() => setAddMode(false)}
+              className="px-2 py-1.5 rounded-lg text-[10px] font-mono text-text-muted/60 border border-border/40 hover:border-border/70 transition-all"
+            >
+              ✕
+            </button>
+          </div>
+        ) : (
+          <button
+            onClick={() => setAddMode(true)}
+            className="w-full mt-2 py-2 text-[10px] font-mono text-text-muted/60 border border-dashed border-border/40 rounded-lg hover:border-purple/40 hover:text-purple transition-all"
+          >
+            + Add coin
+          </button>
+        )}
       </div>
     </SideCard>
   );

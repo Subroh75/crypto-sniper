@@ -328,3 +328,86 @@ export interface AlertItem {
   fired_ts:   number | null;
   fire_count: number;
 }
+
+// ── Backtest ──────────────────────────────────────────────────────────────────
+export interface BacktestTrade {
+  symbol:      string;
+  interval:    string;
+  entry_price: number;
+  ts:          number;
+  outcome_pct: number | null;
+  resolved:    boolean;
+}
+
+export interface BacktestSummary {
+  total:        number;
+  resolved:     number;
+  wins:         number;
+  losses:       number;
+  avg_return:   number | null;
+  total_return: number | null;
+  win_rate:     number | null;
+  threshold_pct: number;
+  days:         number;
+  symbol:       string | null;
+}
+
+export interface BacktestData {
+  trades:    BacktestTrade[];
+  summary:   BacktestSummary;
+  timestamp: number;
+}
+
+// ── Confluence ────────────────────────────────────────────────────────────────
+export interface ConfluenceTF {
+  interval:   string;
+  score:      number;
+  max_score:  number;
+  signal:     string;
+  direction:  string;
+  close:      number;
+  rsi:        number;
+  adx:        number;
+  ema_stack:  boolean;
+  rel_volume: number;
+  components: { V: number; P: number; R: number; T: number; S: number };
+  error?:     string;
+}
+
+export interface ConfluenceData {
+  symbol:           string;
+  timeframes:       ConfluenceTF[];
+  confluence_score: number;
+  all_bullish:      boolean;
+  any_strong_buy:   boolean;
+  timestamp:        number;
+}
+
+// ── Auth ──────────────────────────────────────────────────────────────────────
+export interface MagicLinkResult {
+  sent?:        boolean;
+  email?:       string;
+  expires_in?:  number;
+  message:      string;
+  dev_link?:    string | null;
+  error?:       string;
+}
+
+export interface VerifyResult {
+  verified?:      boolean;
+  email?:         string;
+  session_token?: string;
+  message?:       string;
+  error?:         string;
+}
+
+export interface AuthUser {
+  email: string;
+}
+
+// ── Editable Watchlist ────────────────────────────────────────────────────────
+export interface WatchlistItemsResponse {
+  user_id:  string;
+  symbols:  string[];
+  timestamp: number;
+}
