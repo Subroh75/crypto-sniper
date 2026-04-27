@@ -470,11 +470,13 @@ export default function Home() {
                               tick={{ fontSize: 8, fill: "#475569" }} tickLine={false} axisLine={false}
                             />
                             <YAxis
-                              domain={([mn, mx]) => { const p=(mx-mn)*0.12||mn*0.01; return [mn-p,mx+p]; }}
+                              domain={([mn, mx]) => { const p=(mx-mn)*0.05||mn*0.005; return [mn-p,mx+p]; }}
                               tickFormatter={(v) => v >= 1000 ? "$"+(v/1000).toFixed(1)+"k" : "$"+v.toFixed(2)}
                               tick={{ fontSize: 8, fill: "#475569" }} tickLine={false} axisLine={false}
                               width={56} orientation="right"
                             />
+                            <Bar dataKey="pMin" stackId="anchor" fill="none" stroke="none" isAnimationActive={false} />
+                            <Bar dataKey="pMax" stackId="anchor" fill="none" stroke="none" isAnimationActive={false} />
                             <Bar dataKey="close" fill="transparent" stroke="none"
                               isAnimationActive={false}
                               background={{ fill: "transparent" }}
