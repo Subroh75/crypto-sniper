@@ -32,6 +32,7 @@ from alerts import (
     AlertRequest, register_alert, get_alerts, delete_alert,
     check_and_fire_alerts,
 )
+from onchain import get_onchain
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -370,6 +371,19 @@ async def me(session_token: str):
     if not email:
         raise HTTPException(status_code=401, detail="Invalid or expired session")
     return {"email": email, "timestamp": int(time.time())}
+
+
+# ── On-Chain Intelligence ────────────────────────────────────────────────────
+
+@app.get("/onchain/{symbol}")
+async def onchain_intelligence(symbol: str):
+    """
+    On-chain intelligence for a symbol:
+    supply metrics, MC/FDV ratio, NVT proxy, TVL, unlock schedule, risk signals.
+    """
+    sym = symbol.upper().strip()
+    data = get_onchain(sym)
+    return {**data, "timestamp": int(time.time())}
 
 
 # ── Multi-timeframe confluence ────────────────────────────────────────────────

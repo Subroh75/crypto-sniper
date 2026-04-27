@@ -405,6 +405,60 @@ export interface AuthUser {
   email: string;
 }
 
+// ── On-Chain Intelligence ─────────────────────────────────────────────────────
+export interface OnChainSignal {
+  type:   "positive" | "caution" | "risk";
+  label:  string;
+  detail: string;
+}
+
+export interface OnChainUnlockEvent {
+  date:       number;      // unix timestamp
+  amount_usd: number | null;
+  label:      string;
+}
+
+export interface OnChainUnlock {
+  total_locked_usd: number | null;
+  next_unlock:      OnChainUnlockEvent | null;
+}
+
+export interface OnChainConcentration {
+  top10_holders:  number;
+  top10_quantity: number;
+  source:         string;
+}
+
+export interface OnChainData {
+  symbol:             string;
+  source:             string[];
+  // Supply
+  circulating_supply: number | null;
+  total_supply:       number | null;
+  max_supply:         number | null;
+  supply_pct:         number | null;
+  // Valuation
+  market_cap_usd:     number | null;
+  fdv_usd:            number | null;
+  mc_fdv_ratio:       number | null;
+  // Activity
+  volume_24h:         number | null;
+  nvt_proxy:          number | null;
+  // DeFi
+  tvl_usd:            number | null;
+  tvl_mc_ratio:       number | null;
+  // Unlocks
+  unlock:             OnChainUnlock | null;
+  // Concentration
+  concentration:      OnChainConcentration | null;
+  // Signals
+  signals:            OnChainSignal[];
+  risk_score:         number | null;
+  // Meta
+  timestamp:          number;
+  error?:             string;
+}
+
 // ── Editable Watchlist ────────────────────────────────────────────────────────
 export interface WatchlistItemsResponse {
   user_id:  string;

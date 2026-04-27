@@ -436,10 +436,12 @@ import {
   getBacktest, getConfluence,
   getWatchlistItems, addWatchlistItem, removeWatchlistItem,
   requestMagicLink, verifyMagicLink, getMe,
+  getOnchain,
 } from "@/lib/api";
 import type {
   BacktestData, ConfluenceData,
   MagicLinkResult, VerifyResult, AuthUser,
+  OnChainData,
 } from "@/types/api";
 
 /** Backtest of STRONG BUY signals */
@@ -490,6 +492,15 @@ export function useEditableWatchlist(userId: string) {
 }
 
 /** Auth: magic-link flow */
+/** On-chain intelligence — triggered on demand (symbol change) */
+export function useOnChain(symbol: string | null) {
+  return useAsync<OnChainData>(
+    () => getOnchain(symbol ?? "BTC"),
+    [symbol],
+    !!symbol,
+  );
+}
+
 export function useAuth() {
   const [user, setUser]           = useState<AuthUser | null>(null);
   const [sessionToken, setToken]  = useState<string | null>(() => {

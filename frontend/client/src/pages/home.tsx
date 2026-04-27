@@ -20,6 +20,7 @@ import {
 import { DeepResearchSection } from "@/components/DeepResearch";
 import { MultiTimeframeCard } from "@/components/MultiTimeframe";
 import { BacktestCard } from "@/components/BacktestCard";
+import { OnChainCard } from "@/components/OnChainCard";
 import { AuthModal, AuthButton } from "@/components/AuthModal";
 import {
   useAnalyse, useKronos, useWatchlist, usePdfExport,
@@ -823,6 +824,9 @@ export default function Home() {
 
               {/* 12: Multi-Timeframe Confluence */}
               <MultiTimeframeCard symbol={symbol} />
+
+              {/* 13: On-Chain Intelligence */}
+              <OnChainCard symbol={symbol} />
 
             </div>
             {/*  end LEFT column  */}

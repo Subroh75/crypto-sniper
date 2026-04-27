@@ -229,3 +229,8 @@ export function verifyMagicLink(token: string): Promise<import("@/types/api").Ve
 export function getMe(sessionToken: string): Promise<import("@/types/api").AuthUser & { timestamp: number }> {
   return get(`/auth/me?session_token=${encodeURIComponent(sessionToken)}`, 0);
 }
+
+/** On-chain intelligence for a symbol */
+export function getOnchain(symbol: string): Promise<import("@/types/api").OnChainData> {
+  return get(`/onchain/${encodeURIComponent(symbol.toUpperCase())}`, 1);
+}
