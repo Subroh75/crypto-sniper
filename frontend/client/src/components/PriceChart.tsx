@@ -59,13 +59,12 @@ function calcBodyVolume(raw: number[][]): number[] {
 }
 
 function Candle(props: any) {
-  const { x, y, width, background, payload } = props;
+  const { x, width, background, payload } = props;
   if (!payload || !background || background.height <= 0) return null;
-  const { open, high, low, close, isGreen, pMin, pMax } = payload;
-  const pad  = (pMax - pMin) * 0.08 || pMin * 0.01;
-  const dMin = pMin - pad, dMax = pMax + pad, range = dMax - dMin || 1;
-  const py   = (p: number) => background.y + background.height - ((p - dMin) / range) * background.height;
-  const yH = py(high), yL = py(low), yO = py(open), yC = py(close);
+  // Use the shared domain values pre-calculated in PriceChart (same as YAxis)
+  const { open, high, low, close, isGreen, domMin, domRange } = payload;
+  const py  = (p: number) => background.y + background.height - ((p - domMin) / domRange) * background.height;
+  const yH  = py(high), yL = py(low), yO = py(open), yC = py(close);
   const top = Math.min(yO, yC), bot = Math.max(yO, yC);
   const bH  = Math.max(bot - top, 1.5), bW = Math.max(width - 2, 2);
   const cx  = x + width / 2;
@@ -91,7 +90,12 @@ export function PriceChart({ ohlcv, structure, interval, symbol, onTfChange }: P
   const allP   = raw.flatMap(([, o, h, l, c]) => [o, h, l, c]);
   const pMin   = Math.min(...allP);
   const pMax   = Math.max(...allP);
-  const pad    = (pMax - pMin) * 0.08 || pMin * 0.01;
+  // Price-aware padding: minimum 1.5% of price so low-price coins
+  // (DOGE $0.10, XRP $0.50) produce visible candles
+  const pad    = Math.max((pMax - pMin) * 0.08, pMin * 0.015);
+  const domMin  = pMin - pad;
+  const domMax  = pMax + pad;
+  const domRange = domMax - domMin || pMin * 0.1 || 1;
 
   const ema20 = calcEMA(closes, 20);
   const ema50 = calcEMA(closes, 50);
@@ -102,7 +106,8 @@ export function PriceChart({ ohlcv, structure, interval, symbol, onTfChange }: P
 
   const data = raw.map(([ts, o, h, l, c], i) => ({
     ts, open: o, high: h, low: l, close: c,
-    isGreen: c >= o, pMin, pMax,
+    isGreen: c >= o,
+    domMin, domRange,          // shared with Candle renderer
     ema20: ema20[i], ema50: ema50[i],
     bbU: bb.upper[i], bbL: bb.lower[i],
     vwap: vwap[i],
@@ -162,7 +167,7 @@ export function PriceChart({ ohlcv, structure, interval, symbol, onTfChange }: P
             tick={{ fontSize: 9, fill: "#475569" }} tickLine={false} axisLine={false} minTickGap={48}
           />
           <YAxis
-            domain={[pMin - pad, pMax + pad]}
+            domain={[domMin, domMax]}
             tickFormatter={v => fmtPrice(v)}
             tick={{ fontSize: 9, fill: "#475569" }} tickLine={false} axisLine={false}
             width={72} orientation="right"

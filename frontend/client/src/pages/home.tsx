@@ -504,65 +504,81 @@ export default function Home() {
                         <div className="text-[9px] font-mono text-text-muted/70 uppercase tracking-wide mb-2">
                           PREDICTED OHLCV — NEXT 24 CANDLES
                         </div>
-                        <ResponsiveContainer width="100%" height={190}>
-                          <ComposedChart
-                            margin={{ top: 4, right: 56, left: 0, bottom: 4 }}
-                            data={(() => {
-                              const candles = kron.forecast.predicted_ohlcv;
-                              const allP = candles.flatMap((c: any) => [c.open, c.high, c.low, c.close]);
-                              const pMin = Math.min(...allP);
-                              const pMax = Math.max(...allP);
-                              return candles.map((c: any, i: number) => ({
-                                ...c, i, pMin, pMax, isGreen: c.close >= c.open,
-                              }));
-                            })()}
-                          >
-                            <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
-                            <XAxis dataKey="i"
-                              tickFormatter={(v) => v % 6 === 0 ? `+${v}h` : ""}
-                              tick={{ fontSize: 8, fill: "#475569" }} tickLine={false} axisLine={false}
-                            />
-                            <YAxis
-                              domain={[
-                                kron.forecast.predicted_ohlcv.reduce((m,c)=>Math.min(m,c.low,c.open,c.close),Infinity)*0.999,
-                                kron.forecast.predicted_ohlcv.reduce((m,c)=>Math.max(m,c.high,c.open,c.close),0)*1.001
-                              ]}
-                              tickFormatter={(v) => v >= 1000 ? `$${(v/1000).toFixed(1)}k` : `$${v.toFixed(2)}`}
-                              tick={{ fontSize: 8, fill: "#475569" }} tickLine={false} axisLine={false}
-                              width={60} orientation="right"
-                            />
-                            {/* Target price reference line */}
-                            <ReferenceLine
-                              y={kron.forecast.target_price}
-                              stroke="#7c3aed" strokeDasharray="4 4" strokeWidth={1}
-                              label={{ value: "Target", position: "right", fontSize: 8, fill: "#7c3aed" }}
-                            />
-                            <Bar dataKey="close" fill="transparent" stroke="none"
-                              isAnimationActive={false}
-                              background={{ fill: "transparent" }}
-                              shape={(props: any) => {
-                                const { x, width: w, background: bg, payload: pl } = props as any;
-                                if (!pl || !bg || bg.height <= 0) return null;
-                                const { open, high, low, close: c, isGreen, pMin, pMax } = pl;
-                                const pd = (pMax-pMin)*0.1||pMin*0.01;
-                                const dMin=pMin-pd, dMax=pMax+pd, range=dMax-dMin||1;
-                                const py = (p: number) => bg.y + bg.height - ((p-dMin)/range)*bg.height;
-                                const yH=py(high),yL=py(low),yO=py(open),yC=py(c);
-                                const top=Math.min(yO,yC), bot=Math.max(yO,yC);
-                                const col=isGreen?"#22c55e":"#ef4444";
-                                const cx2=x+w/2, bW=Math.max(w-1.5,1.5), bH=Math.max(bot-top,1.5);
-                                return (
-                                  <g>
-                                    <line x1={cx2} y1={yH} x2={cx2} y2={top} stroke={col} strokeWidth={1}/>
-                                    <line x1={cx2} y1={bot} x2={cx2} y2={yL} stroke={col} strokeWidth={1}/>
-                                    <rect x={x+0.75} y={top} width={bW} height={bH} fill={col} fillOpacity={isGreen ? 0.85 : 0.75}
-                                      rx={0.5}/>
-                                  </g>
-                                );
-                              }}
-                            />
-                          </ComposedChart>
-                        </ResponsiveContainer>
+                        {(() => {
+                          const candles = kron.forecast.predicted_ohlcv;
+                          const allP = candles.flatMap((c: any) => [c.open, c.high, c.low, c.close]);
+                          const kpMin = Math.min(...allP);
+                          const kpMax = Math.max(...allP);
+                          // Price-aware padding: at least 1.5% of price so low-price
+                          // coins (DOGE $0.10, SHIB $0.00001) get visible candles
+                          const kPad = Math.max((kpMax - kpMin) * 0.15, kpMin * 0.015);
+                          const kDomMin = kpMin - kPad;
+                          const kDomMax = kpMax + kPad;
+                          const kRange = kDomMax - kDomMin || kpMin * 0.1 || 1;
+                          // Smart tick formatter — show enough decimal places
+                          const kFmt = (v: number) => {
+                            if (v >= 1000)  return `$${(v/1000).toFixed(1)}k`;
+                            if (v >= 1)     return `$${v.toFixed(2)}`;
+                            if (v >= 0.01)  return `$${v.toFixed(4)}`;
+                            if (v >= 0.0001)return `$${v.toFixed(6)}`;
+                            return `$${v.toExponential(2)}`;
+                          };
+                          const kData = candles.map((c: any, i: number) => ({
+                            ...c, i,
+                            isGreen: c.close >= c.open,
+                            kDomMin, kDomMax, kRange,
+                          }));
+                          return (
+                            <ResponsiveContainer width="100%" height={190}>
+                              <ComposedChart
+                                margin={{ top: 4, right: 56, left: 0, bottom: 4 }}
+                                data={kData}
+                              >
+                                <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
+                                <XAxis dataKey="i"
+                                  tickFormatter={(v) => v % 6 === 0 ? `+${v}h` : ""}
+                                  tick={{ fontSize: 8, fill: "#475569" }} tickLine={false} axisLine={false}
+                                />
+                                <YAxis
+                                  domain={[kDomMin, kDomMax]}
+                                  tickFormatter={kFmt}
+                                  tick={{ fontSize: 8, fill: "#475569" }} tickLine={false} axisLine={false}
+                                  width={60} orientation="right"
+                                />
+                                <ReferenceLine
+                                  y={kron.forecast.target_price}
+                                  stroke="#7c3aed" strokeDasharray="4 4" strokeWidth={1}
+                                  label={{ value: "Target", position: "right", fontSize: 8, fill: "#7c3aed" }}
+                                />
+                                <Bar dataKey="close" fill="transparent" stroke="none"
+                                  isAnimationActive={false}
+                                  background={{ fill: "transparent" }}
+                                  shape={(props: any) => {
+                                    const { x, width: w, background: bg, payload: pl } = props as any;
+                                    if (!pl || !bg || bg.height <= 0) return null;
+                                    const { open, high, low, close: c, isGreen: ig, kDomMin: dMin, kRange: range } = pl;
+                                    // Use the SAME domain as YAxis — no independent mapping
+                                    const py = (p: number) => bg.y + bg.height - ((p - dMin) / range) * bg.height;
+                                    const yH=py(high), yL=py(low), yO=py(open), yC=py(c);
+                                    const top=Math.min(yO,yC), bot=Math.max(yO,yC);
+                                    const col = ig ? "#22c55e" : "#ef4444";
+                                    const cx2 = x + w/2;
+                                    const bW = Math.max(w - 1.5, 1.5);
+                                    const bH = Math.max(bot - top, 1.5);
+                                    return (
+                                      <g>
+                                        <line x1={cx2} y1={yH} x2={cx2} y2={top} stroke={col} strokeWidth={1}/>
+                                        <line x1={cx2} y1={bot} x2={cx2} y2={yL} stroke={col} strokeWidth={1}/>
+                                        <rect x={x+0.75} y={top} width={bW} height={bH}
+                                          fill={col} fillOpacity={ig ? 0.85 : 0.75} rx={0.5}/>
+                                      </g>
+                                    );
+                                  }}
+                                />
+                              </ComposedChart>
+                            </ResponsiveContainer>
+                          );
+                        })()}
                       </div>
                     </>
                   )}
