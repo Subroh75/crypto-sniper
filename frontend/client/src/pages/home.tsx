@@ -466,12 +466,12 @@ export default function Home() {
                             })()}
                           >
                             <XAxis dataKey="i"
-                              tickFormatter={(i: number) => i % 6 === 0 ? `+${i}h` : ""}
+                              tickFormatter={(_, i) => i % 6 === 0 ? `+${i}h` : ""}
                               tick={{ fontSize: 8, fill: "#475569" }} tickLine={false} axisLine={false}
                             />
                             <YAxis
-                              domain={([mn, mx]: [number,number]) => { const p=(mx-mn)*0.12||mn*0.01; return [mn-p,mx+p]; }}
-                              tickFormatter={(v: number) => v >= 1000 ? "$"+(v/1000).toFixed(1)+"k" : "$"+v.toFixed(2)}
+                              domain={([mn, mx]) => { const p=(mx-mn)*0.12||mn*0.01; return [mn-p,mx+p]; }}
+                              tickFormatter={(v) => v >= 1000 ? "$"+(v/1000).toFixed(1)+"k" : "$"+v.toFixed(2)}
                               tick={{ fontSize: 8, fill: "#475569" }} tickLine={false} axisLine={false}
                               width={56} orientation="right"
                             />
@@ -479,7 +479,7 @@ export default function Home() {
                               isAnimationActive={false}
                               background={{ fill: "transparent" }}
                               shape={(props: any) => {
-                                const { x, y, width: w, background: bg, payload: pl } = props;
+                                const { x, y, width: w, background: bg, payload: pl } = props as any;
                                 if (!pl || !bg || bg.height <= 0) return null;
                                 const { open, high, low, close, isGreen, pMin, pMax } = pl;
                                 const pad = (pMax-pMin)*0.12||pMin*0.01;
