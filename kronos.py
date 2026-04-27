@@ -134,11 +134,16 @@ def _heuristic_forecast(symbol: str, ctx: dict) -> dict:
     candles = []
     price = close
     step  = (target - close) / 24
+    atr = close * 0.005  # ~0.5% ATR per candle - realistic for crypto
     for h in range(1, 25):
-        open_ = price
-        price = price + step + (price * 0.002 * (0.5 - (h % 3) / 3))
-        high_c = max(open_, price) * 1.003
-        low_c  = min(open_, price) * 0.997
+        open_ = round(price, 4)
+        noise = atr * (0.3 - (h % 5) * 0.12)  # oscillate around trend
+        price = price + step + noise
+        body_size = abs(price - open_)
+        # Wicks are 20-50% of body size - realistic candlestick proportions
+        wick_extra = max(body_size * 0.3, atr * 0.1)
+        high_c = max(open_, price) + wick_extra
+        low_c  = min(open_, price) - wick_extra
         candles.append({
             "h": h, "open": round(open_, 2), "high": round(high_c, 2),
             "low": round(low_c, 2), "close": round(price, 2)
