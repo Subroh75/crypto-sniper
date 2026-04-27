@@ -43,7 +43,7 @@ export function BacktestCard({ symbol }: { symbol?: string | null }) {
   const insufficientResolved = !loading && data && summary?.total > 0 && summary?.resolved === 0;
 
   return (
-    <div className="rounded-xl border border-border/60 bg-surface-card overflow-hidden mb-4">
+    <div className="rounded-xl border border-border/60 bg-surface-card overflow-hidden mb-3">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-border/50">
         <div className="flex items-center gap-2 text-[10px] font-mono font-bold uppercase tracking-[0.1em] text-text-muted">
