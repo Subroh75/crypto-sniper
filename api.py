@@ -4,7 +4,7 @@ Endpoints: /analyse /kronos /deep-research /market /trending /gainers /news /mac
 """
 import os, time, logging
 from typing import Optional
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
