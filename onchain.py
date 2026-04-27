@@ -2,10 +2,10 @@
 onchain.py — On-Chain Intelligence Module for Crypto Sniper V2
 
 Data sources (all free-tier capable):
-  - CoinGecko       : holder count, market/circulating supply, price metrics
-  - DeFiLlama       : TVL, protocol breakdown, token unlock schedule (emissions)
-  - Etherscan       : top-holder concentration for EVM tokens (free, 5 calls/sec)
-  - Derived metrics : NVT proxy, holder risk score, supply concentration
+  - CoinGecko /coins/markets  : supply, FDV, volume, market cap (batch-friendly, not rate-limited)
+  - DeFiLlama                 : TVL for DeFi protocols + token unlock schedule
+  - Etherscan                 : top-holder concentration for EVM tokens (needs key)
+  - Derived metrics           : NVT proxy, MC/FDV ratio, risk score
 """
 
 import os, time, logging, requests
@@ -15,28 +15,45 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 # ── API keys ─────────────────────────────────────────────────────────────────
-CG_KEY       = os.getenv("COINGECKO_API_KEY", "")
-ETHSCAN_KEY  = os.getenv("ETHERSCAN_API_KEY", "")
+CG_KEY      = os.getenv("COINGECKO_API_KEY", "")
+ETHSCAN_KEY = os.getenv("ETHERSCAN_API_KEY", "")
 
 # ── CoinGecko IDs ─────────────────────────────────────────────────────────────
-CG_ID = {
-    "BTC": "bitcoin",       "ETH": "ethereum",     "SOL": "solana",
-    "BNB": "binancecoin",   "XRP": "ripple",        "ADA": "cardano",
-    "DOGE": "dogecoin",     "DOT": "polkadot",      "AVAX": "avalanche-2",
-    "LINK": "chainlink",    "UNI": "uniswap",       "ATOM": "cosmos",
-    "LTC": "litecoin",      "MATIC": "matic-network","PEPE": "pepe",
-    "WIF": "dogwifhat",     "HYPE": "hyperliquid",  "RENDER": "render-token",
-    "KAVA": "kava",         "SEI": "sei-network",   "SUI": "sui",
-    "APT": "aptos",         "ARB": "arbitrum",      "OP": "optimism",
-    "INJ": "injective-protocol", "TIA": "celestia", "BONK": "bonk",
-    "FET": "fetch-ai",      "NEAR": "near",         "ALGO": "algorand",
-    "ICP": "internet-computer", "FIL": "filecoin",  "HBAR": "hedera-hashgraph",
-    "PENGU": "pudgy-penguins",
+CG_ID: dict[str, str] = {
+    "BTC":   "bitcoin",            "ETH":  "ethereum",
+    "SOL":   "solana",             "BNB":  "binancecoin",
+    "XRP":   "ripple",             "ADA":  "cardano",
+    "DOGE":  "dogecoin",           "DOT":  "polkadot",
+    "AVAX":  "avalanche-2",        "LINK": "chainlink",
+    "UNI":   "uniswap",            "ATOM": "cosmos",
+    "LTC":   "litecoin",           "MATIC":"matic-network",
+    "PEPE":  "pepe",               "WIF":  "dogwifhat",
+    "HYPE":  "hyperliquid",        "RENDER":"render-token",
+    "KAVA":  "kava",               "SEI":  "sei-network",
+    "SUI":   "sui",                "APT":  "aptos",
+    "ARB":   "arbitrum",           "OP":   "optimism",
+    "INJ":   "injective-protocol", "TIA":  "celestia",
+    "BONK":  "bonk",               "FET":  "fetch-ai",
+    "NEAR":  "near",               "ALGO": "algorand",
+    "ICP":   "internet-computer",  "FIL":  "filecoin",
+    "HBAR":  "hedera-hashgraph",   "PENGU":"pudgy-penguins",
+    "TON":   "the-open-network",   "SHIB": "shiba-inu",
+    "NOT":   "notcoin",            "DOGS": "dogs-2",
+    "STRK":  "starknet",           "BLUR": "blur",
+    "LDO":   "lido-dao",           "MKR":  "maker",
+    "AAVE":  "aave",               "SNX":  "havven",
+    "CRV":   "curve-dao-token",    "GMX":  "gmx",
+    "JUP":   "jupiter-exchange-solana",
+    "PYTH":  "pyth-network",
+    "WLD":   "worldcoin-wld",
+    "ORDI":  "ordinals",
+    "TAO":   "bittensor",
+    "ENA":   "ethena",
+    "EIGEN": "eigenlayer",
 }
 
-# ── EVM contract addresses for top-holder lookup ──────────────────────────────
-# Token contract addresses on Ethereum mainnet
-EVM_CONTRACT = {
+# ── EVM contract addresses for Etherscan top-holder lookup ───────────────────
+EVM_CONTRACT: dict[str, str] = {
     "LINK":   "0x514910771af9ca656af840dff83e8264ecf986ca",
     "UNI":    "0x1f9840a85d5af5bf1d1762f925bdaddc4201f984",
     "MATIC":  "0x7d1afa7b718fb893db30a3abc0cfc608aacfebb0",
@@ -45,23 +62,35 @@ EVM_CONTRACT = {
     "OP":     "0x4200000000000000000000000000000000000042",
     "INJ":    "0xe28b3b32b6c345a34ff64674606124dd5aceca30",
     "FET":    "0xaea46a60368a7bd060eec7df8cba43b7ef41ad85",
+    "LDO":    "0x5a98fcbea516cf06857215779fd812ca3bef1b32",
+    "AAVE":   "0x7fc66500c84a76ad7e9c93437bfc5ac33e2ddae9",
+    "MKR":    "0x9f8f72aa9304c8b593d555f12ef6589cc3a579a2",
+    "CRV":    "0xd533a949740bb3306d119cc777fa900ba034cd52",
+    "BLUR":   "0x5283d291dbcf85356a21ba090e6db59121208b44",
+    "LDO":    "0x5a98fcbea516cf06857215779fd812ca3bef1b32",
 }
 
-# ── DeFiLlama slug map ────────────────────────────────────────────────────────
-DEFILLAMA_SLUG = {
-    "AAVE": "aave",   "UNI": "uniswap",     "COMP": "compound",
-    "MKR":  "maker",  "CRV": "curve",        "SUSHI": "sushi",
-    "YFI":  "yearn",  "SNX": "synthetix",    "BAL": "balancer",
-    "1INCH": "1inch", "LDO": "lido",         "DYDX": "dydx",
-    "GMX":  "gmx",    "ARB": "arbitrum",     "OP": "optimism",
-    "INJ":  "injective", "KAVA": "kava",
+# ── DeFiLlama slugs for TVL lookup ────────────────────────────────────────────
+DEFILLAMA_SLUG: dict[str, str] = {
+    "AAVE":  "aave",     "UNI":   "uniswap",   "COMP":  "compound",
+    "MKR":   "maker",    "CRV":   "curve",      "SUSHI": "sushi",
+    "YFI":   "yearn",    "SNX":   "synthetix",  "BAL":   "balancer",
+    "1INCH": "1inch",    "LDO":   "lido",       "DYDX":  "dydx",
+    "GMX":   "gmx",      "ARB":   "arbitrum",   "OP":    "optimism",
+    "INJ":   "injective","KAVA":  "kava",       "JUP":   "jupiter",
+    "ENA":   "ethena",
 }
 
-_ONCHAIN_TTL = 300  # 5-minute cache per symbol
+_ONCHAIN_TTL   = 300   # 5-min cache
+_MARKET_TTL    = 300   # 5-min cache for batch market data
+_UNLOCKS_TTL   = 3600  # 1-hour cache for unlock schedule
 
 
-def _get(url: str, params: dict = None, timeout: int = 10) -> Optional[dict]:
-    """Safe GET with timeout and error swallow."""
+# ─────────────────────────────────────────────────────────────────────────────
+# Helpers
+# ─────────────────────────────────────────────────────────────────────────────
+def _get(url: str, params: dict = None, timeout: int = 10) -> Optional[dict | list]:
+    """Safe GET — returns None on any failure, never raises."""
     try:
         r = requests.get(url, params=params, timeout=timeout)
         r.raise_for_status()
@@ -76,47 +105,67 @@ def _get(url: str, params: dict = None, timeout: int = 10) -> Optional[dict]:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 1. CoinGecko coin detail  — holder count + supply metrics
+# 1.  CoinGecko /coins/markets  — batched, NOT per-symbol
+#     Returns a dict keyed by CoinGecko id for quick lookup.
 # ─────────────────────────────────────────────────────────────────────────────
-@lru_cache(maxsize=64)
-def _cg_coin_cached(cg_id: str, ts: int) -> Optional[dict]:
-    params = {
-        "localization": "false",
-        "tickers":      "false",
-        "market_data":  "true",
-        "community_data": "true",
-        "developer_data": "false",
+@lru_cache(maxsize=4)
+def _cg_markets_cached(ids_key: str, ts: int) -> dict[str, dict]:
+    """Fetch market data for a comma-separated list of CoinGecko IDs."""
+    params: dict = {
+        "vs_currency":            "usd",
+        "ids":                    ids_key,
+        "order":                  "market_cap_desc",
+        "per_page":               "250",
+        "page":                   "1",
+        "sparkline":              "false",
+        "price_change_percentage":"24h",
     }
     if CG_KEY:
         params["x_cg_demo_api_key"] = CG_KEY
-    return _get(
-        f"https://api.coingecko.com/api/v3/coins/{cg_id}",
-        params, timeout=12,
+
+    data = _get(
+        "https://api.coingecko.com/api/v3/coins/markets",
+        params, timeout=15,
     )
+    if not isinstance(data, list):
+        return {}
+    return {item["id"]: item for item in data if "id" in item}
 
 
-def _get_cg_coin(symbol: str) -> Optional[dict]:
+# Pre-built sorted key of all known CG IDs (stable → good cache key)
+_ALL_CG_IDS_KEY = ",".join(sorted(set(CG_ID.values())))
+
+
+def _get_cg_market(symbol: str) -> Optional[dict]:
+    """Return the CoinGecko market row for a symbol (from batch cache)."""
     cg_id = CG_ID.get(symbol.upper())
     if not cg_id:
         return None
-    ts = int(time.time() // _ONCHAIN_TTL)
-    return _cg_coin_cached(cg_id, ts)
+    ts = int(time.time() // _MARKET_TTL)
+    market_map = _cg_markets_cached(_ALL_CG_IDS_KEY, ts)
+    return market_map.get(cg_id)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 2. DeFiLlama  — TVL + unlocks
+# 2.  DeFiLlama — TVL + unlock schedule
 # ─────────────────────────────────────────────────────────────────────────────
 @lru_cache(maxsize=64)
-def _defillama_tvl_cached(slug: str, ts: int) -> Optional[dict]:
-    return _get(f"https://api.llama.fi/protocol/{slug}", timeout=10)
+def _defillama_tvl_cached(slug: str, ts: int) -> Optional[float]:
+    data = _get(f"https://api.llama.fi/protocol/{slug}", timeout=10)
+    if isinstance(data, dict):
+        tvl = data.get("tvl")
+        if isinstance(tvl, (int, float)):
+            return float(tvl)
+        # tvl can also be a list of {date, totalLiquidityUSD}
+        if isinstance(tvl, list) and tvl:
+            return float(tvl[-1].get("totalLiquidityUSD", 0))
+    return None
 
 
 @lru_cache(maxsize=1)
-def _defillama_unlocks_cached(ts: int) -> Optional[list]:
-    data = _get("https://api.llama.fi/unlocks", timeout=10)
-    if isinstance(data, list):
-        return data
-    return None
+def _defillama_unlocks_cached(ts: int) -> list:
+    data = _get("https://api.llama.fi/unlocks", timeout=12)
+    return data if isinstance(data, list) else []
 
 
 def _get_defillama_tvl(symbol: str) -> Optional[float]:
@@ -124,49 +173,47 @@ def _get_defillama_tvl(symbol: str) -> Optional[float]:
     if not slug:
         return None
     ts = int(time.time() // _ONCHAIN_TTL)
-    data = _defillama_tvl_cached(slug, ts)
-    if data:
-        return data.get("tvl")
-    return None
+    return _defillama_tvl_cached(slug, ts)
 
 
 def _get_upcoming_unlocks(symbol: str) -> Optional[dict]:
-    """Return next scheduled unlock event from DeFiLlama."""
-    ts = int(time.time() // 3600)  # 1-hour cache for unlocks
-    data = _defillama_unlocks_cached(ts)
-    if not data:
+    ts = int(time.time() // _UNLOCKS_TTL)
+    items = _defillama_unlocks_cached(ts)
+    if not items:
         return None
-    cg_id = CG_ID.get(symbol.upper(), "").lower()
-    name_lc = symbol.lower()
-    for item in data:
-        item_id = (item.get("coingeckoId") or "").lower()
-        item_sym = (item.get("tickers") or [{}])[0].get("ticker", "").lower() if item.get("tickers") else ""
-        if item_id == cg_id or item_sym == name_lc:
+    cg_id   = CG_ID.get(symbol.upper(), "").lower()
+    sym_lc  = symbol.lower()
+    for item in items:
+        item_cg  = (item.get("coingeckoId") or "").lower()
+        tickers  = item.get("tickers") or []
+        item_sym = tickers[0].get("ticker", "").lower() if tickers else ""
+        if item_cg == cg_id or item_sym == sym_lc:
+            events   = item.get("events") or []
+            now      = time.time()
+            future   = sorted(
+                [e for e in events if e.get("timestamp", 0) > now],
+                key=lambda e: e["timestamp"],
+            )
             next_event = None
-            events = item.get("events") or []
-            now = time.time()
-            future = [e for e in events if e.get("timestamp", 0) > now]
             if future:
-                future.sort(key=lambda e: e["timestamp"])
                 ne = future[0]
                 next_event = {
-                    "date": ne.get("timestamp"),
+                    "date":       ne.get("timestamp"),
                     "amount_usd": ne.get("totalNotional"),
-                    "label": ne.get("description", "Unlock"),
+                    "label":      ne.get("description", "Token Unlock"),
                 }
             return {
                 "total_locked_usd": item.get("totalNotional"),
-                "next_unlock": next_event,
+                "next_unlock":      next_event,
             }
     return None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 3. Etherscan  — Top-holder concentration for EVM tokens
+# 3.  Etherscan — top holder concentration (EVM tokens only)
 # ─────────────────────────────────────────────────────────────────────────────
 @lru_cache(maxsize=32)
 def _ethscan_holders_cached(contract: str, ts: int) -> Optional[list]:
-    """Fetch top token holders from Etherscan (free plan, 5/sec)."""
     if not ETHSCAN_KEY:
         return None
     data = _get(
@@ -181,29 +228,28 @@ def _ethscan_holders_cached(contract: str, ts: int) -> Optional[list]:
         },
         timeout=10,
     )
-    if data and data.get("status") == "1":
-        return data.get("result", [])
+    if isinstance(data, dict) and data.get("status") == "1":
+        return data.get("result") or []
     return None
 
 
 def _get_holder_concentration(symbol: str) -> Optional[dict]:
-    """Return top-10 holder %, top-20 holder % for EVM tokens."""
     contract = EVM_CONTRACT.get(symbol.upper())
     if not contract:
         return None
-    ts = int(time.time() // 600)  # 10-min cache
+    ts      = int(time.time() // 600)
     holders = _ethscan_holders_cached(contract, ts)
     if not holders:
         return None
-    # Etherscan returns TokenHolderAddress + TokenHolderQuantity
     try:
-        quantities = [int(h.get("TokenHolderQuantity", "0").replace(",", "")) for h in holders]
-        total_top10 = sum(quantities)
-        # We don't have total supply from this endpoint — mark as top-10 relative
+        quantities = [
+            int(h.get("TokenHolderQuantity", "0").replace(",", ""))
+            for h in holders
+        ]
         return {
-            "top10_holders": len(quantities),
-            "top10_quantity": total_top10,
-            "source": "etherscan",
+            "top10_holders":  len(quantities),
+            "top10_quantity": sum(quantities),
+            "source":         "etherscan",
         }
     except Exception as e:
         logger.warning(f"Holder concentration parse error: {e}")
@@ -211,74 +257,61 @@ def _get_holder_concentration(symbol: str) -> Optional[dict]:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 4. Main orchestrator
+# 4.  Main orchestrator
 # ─────────────────────────────────────────────────────────────────────────────
-@lru_cache(maxsize=64)
+@lru_cache(maxsize=128)
 def _onchain_cached(symbol: str, ts: int) -> dict:
     symbol = symbol.upper()
     result: dict = {
-        "symbol":       symbol,
-        "source":       [],
-        # Supply
-        "circulating_supply":  None,
-        "total_supply":        None,
-        "max_supply":          None,
-        "supply_pct":          None,   # circulating / max * 100
-        # Holders (from CoinGecko community data)
-        "holder_count":        None,
-        "holder_count_change": None,   # placeholder — CoinGecko free doesn't provide 24h delta
-        # Market cap vs fully diluted
-        "market_cap_usd":      None,
-        "fdv_usd":             None,
-        "mc_fdv_ratio":        None,   # market_cap / fdv — high = dilution risk
-        # Volume / NVT proxy
-        "volume_24h":          None,
-        "nvt_proxy":           None,   # market_cap / volume_24h
-        # TVL (DeFi protocols only)
-        "tvl_usd":             None,
-        "tvl_mc_ratio":        None,   # tvl / market_cap
-        # Unlocks
-        "unlock":              None,
-        # Concentration (EVM tokens only)
-        "concentration":       None,
-        # Signals
-        "signals":             [],
-        "risk_score":          None,   # 0 = low risk, 100 = high risk
+        "symbol":             symbol,
+        "source":             [],
+        "circulating_supply": None,
+        "total_supply":       None,
+        "max_supply":         None,
+        "supply_pct":         None,
+        "holder_count":       None,
+        "holder_count_change":None,
+        "market_cap_usd":     None,
+        "fdv_usd":            None,
+        "mc_fdv_ratio":       None,
+        "volume_24h":         None,
+        "nvt_proxy":          None,
+        "tvl_usd":            None,
+        "tvl_mc_ratio":       None,
+        "unlock":             None,
+        "concentration":      None,
+        "signals":            [],
+        "risk_score":         None,
     }
 
-    # ── CoinGecko core data ─────────────────────────────────────────────────
-    cg = _get_cg_coin(symbol)
+    # ── CoinGecko markets batch ─────────────────────────────────────────────
+    cg = _get_cg_market(symbol)
     if cg:
         result["source"].append("CoinGecko")
-        md = cg.get("market_data", {})
 
-        circ = md.get("circulating_supply")
-        total = md.get("total_supply")
-        maxs = md.get("max_supply")
+        circ  = cg.get("circulating_supply")
+        total = cg.get("total_supply")
+        maxs  = cg.get("max_supply")
         result["circulating_supply"] = circ
-        result["total_supply"] = total
-        result["max_supply"] = maxs
+        result["total_supply"]       = total
+        result["max_supply"]         = maxs
 
         if circ and maxs and maxs > 0:
             result["supply_pct"] = round((circ / maxs) * 100, 1)
         elif circ and total and total > 0:
             result["supply_pct"] = round((circ / total) * 100, 1)
 
-        mc  = md.get("market_cap", {}).get("usd")
-        fdv = md.get("fully_diluted_valuation", {}).get("usd")
+        mc  = cg.get("market_cap")
+        fdv = cg.get("fully_diluted_valuation")
         result["market_cap_usd"] = mc
         result["fdv_usd"]        = fdv
         if mc and fdv and fdv > 0:
             result["mc_fdv_ratio"] = round(mc / fdv, 3)
 
-        vol = md.get("total_volume", {}).get("usd")
+        vol = cg.get("total_volume")
         result["volume_24h"] = vol
         if mc and vol and vol > 0:
             result["nvt_proxy"] = round(mc / vol, 1)
-
-        # Holder count — community_data.reddit_accounts_active_in_24h is not holders
-        # CoinGecko free doesn't expose holder_count directly outside on-chain endpoint
-        # We use the coin's "public_interest_stats" as a proxy indicator
 
     # ── DeFiLlama TVL ───────────────────────────────────────────────────────
     tvl = _get_defillama_tvl(symbol)
@@ -289,14 +322,14 @@ def _onchain_cached(symbol: str, ts: int) -> dict:
         if mc and mc > 0 and tvl > 0:
             result["tvl_mc_ratio"] = round(tvl / mc, 3)
 
-    # ── DeFiLlama unlock schedule ───────────────────────────────────────────
+    # ── Unlock schedule ─────────────────────────────────────────────────────
     unlock = _get_upcoming_unlocks(symbol)
     if unlock:
         if "DeFiLlama" not in result["source"]:
             result["source"].append("DeFiLlama")
         result["unlock"] = unlock
 
-    # ── Etherscan concentration (EVM tokens) ────────────────────────────────
+    # ── Etherscan concentration ─────────────────────────────────────────────
     concentration = _get_holder_concentration(symbol)
     if concentration:
         if "Etherscan" not in result["source"]:
@@ -304,66 +337,61 @@ def _onchain_cached(symbol: str, ts: int) -> dict:
         result["concentration"] = concentration
 
     # ── Derived signals ─────────────────────────────────────────────────────
-    signals = []
-    risk_factors = 0
+    signals:   list[dict] = []
+    risk_pts:  int        = 0
 
-    # MC/FDV: ratio < 0.3 = high dilution risk
     mc_fdv = result.get("mc_fdv_ratio")
     if mc_fdv is not None:
         if mc_fdv < 0.3:
-            signals.append({"type": "risk", "label": "High dilution risk", "detail": f"MC/FDV = {mc_fdv:.2f}"})
-            risk_factors += 2
+            signals.append({"type": "risk",     "label": "High dilution risk",    "detail": f"MC/FDV = {mc_fdv:.0%}"})
+            risk_pts += 2
         elif mc_fdv < 0.6:
-            signals.append({"type": "caution", "label": "Moderate dilution", "detail": f"MC/FDV = {mc_fdv:.2f}"})
-            risk_factors += 1
+            signals.append({"type": "caution",  "label": "Moderate dilution",     "detail": f"MC/FDV = {mc_fdv:.0%}"})
+            risk_pts += 1
         else:
-            signals.append({"type": "positive", "label": "Low dilution risk", "detail": f"MC/FDV = {mc_fdv:.2f}"})
+            signals.append({"type": "positive", "label": "Low dilution risk",     "detail": f"MC/FDV = {mc_fdv:.0%}"})
 
-    # Supply: high % circulating = less future sell pressure
     supply_pct = result.get("supply_pct")
     if supply_pct is not None:
         if supply_pct > 90:
             signals.append({"type": "positive", "label": "Supply mostly circulating", "detail": f"{supply_pct:.1f}% in circulation"})
         elif supply_pct < 40:
-            signals.append({"type": "risk", "label": "Large unreleased supply", "detail": f"Only {supply_pct:.1f}% circulating"})
-            risk_factors += 2
+            signals.append({"type": "risk",     "label": "Large unreleased supply",   "detail": f"Only {supply_pct:.1f}% circulating"})
+            risk_pts += 2
 
-    # NVT: high NVT = overvalued relative to usage
     nvt = result.get("nvt_proxy")
     if nvt is not None:
         if nvt > 200:
-            signals.append({"type": "caution", "label": "High NVT proxy", "detail": f"MC/Volume = {nvt:.0f}x — low on-chain utilisation"})
-            risk_factors += 1
-        elif nvt < 20:
-            signals.append({"type": "positive", "label": "Strong on-chain activity", "detail": f"MC/Volume = {nvt:.0f}x"})
+            signals.append({"type": "caution",  "label": "Low on-chain activity",  "detail": f"NVT = {nvt:.0f}x (high = dormant chain)"})
+            risk_pts += 1
+        elif nvt < 30:
+            signals.append({"type": "positive", "label": "High on-chain activity", "detail": f"NVT = {nvt:.0f}x (capital utilisation)"})
 
-    # TVL ratio
     tvl_ratio = result.get("tvl_mc_ratio")
     if tvl_ratio is not None:
-        if tvl_ratio > 1.0:
-            signals.append({"type": "positive", "label": "TVL > Market cap", "detail": f"TVL/MC = {tvl_ratio:.2f}x — fundamentally undervalued"})
-        elif tvl_ratio > 0.3:
-            signals.append({"type": "positive", "label": "Strong TVL backing", "detail": f"TVL/MC = {tvl_ratio:.2f}x"})
+        if tvl_ratio >= 1.0:
+            signals.append({"type": "positive", "label": "TVL exceeds market cap", "detail": f"TVL/MC = {tvl_ratio:.2f}x — fundamentally undervalued"})
+        elif tvl_ratio >= 0.3:
+            signals.append({"type": "positive", "label": "Strong TVL backing",     "detail": f"TVL/MC = {tvl_ratio:.2f}x"})
 
-    # Upcoming unlock warning
     if unlock and unlock.get("next_unlock"):
-        nu = unlock["next_unlock"]
-        days_away = (nu["date"] - time.time()) / 86400 if nu.get("date") else 999
+        nu         = unlock["next_unlock"]
+        days_away  = (nu["date"] - time.time()) / 86400 if nu.get("date") else 999
+        label_days = f"in {int(days_away)}d" if days_away < 365 else "scheduled"
         if days_away < 14:
-            signals.append({"type": "risk", "label": f"Unlock in {int(days_away)}d", "detail": nu.get("label", "Token unlock scheduled")})
-            risk_factors += 2
+            signals.append({"type": "risk",    "label": f"Unlock {label_days}", "detail": nu.get("label", "Token unlock event")})
+            risk_pts += 2
         elif days_away < 30:
-            signals.append({"type": "caution", "label": f"Unlock in {int(days_away)}d", "detail": nu.get("label", "Token unlock scheduled")})
-            risk_factors += 1
+            signals.append({"type": "caution", "label": f"Unlock {label_days}", "detail": nu.get("label", "Token unlock event")})
+            risk_pts += 1
 
-    result["signals"] = signals
-    # Risk score: 0–100, where each risk_factor ≈ 20 pts
-    result["risk_score"] = min(100, risk_factors * 20)
+    result["signals"]    = signals
+    result["risk_score"] = min(100, risk_pts * 20) if signals else 0
 
     return result
 
 
 def get_onchain(symbol: str) -> dict:
-    """Public entry point — returns on-chain data for a symbol, cached 5 min."""
+    """Public entry point — on-chain data for a symbol, 5-min LRU cache."""
     ts = int(time.time() // _ONCHAIN_TTL)
     return _onchain_cached(symbol.upper(), ts)
