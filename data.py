@@ -594,20 +594,29 @@ def _map_sentiment(entities: list) -> str:
     return "bullish" if avg > 0.1 else "bearish" if avg < -0.1 else "neutral"
 
 def _rss_news_fallback(symbol: str) -> list:
-    """RSS fallback ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ CoinDesk for BTC/ETH, CoinTelegraph for others."""
-    import feedparser
-    feeds = {
-        "BTC": "https://feeds.feedburner.com/CoinDesk",
-        "ETH": "https://feeds.feedburner.com/CoinDesk",
-    }
-    url = feeds.get(symbol.upper(), "https://cointelegraph.com/rss")
+    """Fallback: CryptoPanic free API (no key needed)."""
     try:
-        feed = feedparser.parse(url)
-        return [
-            {"title": e.title, "source": "RSS", "url": e.link,
-             "published": e.get("published",""), "sentiment": "neutral"}
-            for e in feed.entries[:5]
-        ]
+        r = requests.get(
+            f"{CPANIC_BASE}/posts/",
+            params={"currencies": symbol.upper(), "kind": "news", "public": "true"},
+            timeout=8,
+        )
+        r.raise_for_status()
+        results = r.json().get("results", [])
+        articles = []
+        for item in results[:5]:
+            votes = item.get("votes", {})
+            bull = votes.get("positive", 0)
+            bear = votes.get("negative", 0)
+            sentiment = "bullish" if bull > bear else "bearish" if bear > bull else "neutral"
+            articles.append({
+                "title":     item.get("title", ""),
+                "source":    item.get("source", {}).get("title", "CryptoPanic"),
+                "url":       item.get("url", ""),
+                "published": item.get("published_at", ""),
+                "sentiment": sentiment,
+            })
+        return articles
     except Exception:
         return []
 

@@ -83,19 +83,19 @@ const SENTIMENT_STYLE = {
 } as const;
 
 export function NewsSection({ symbol }: { symbol: string }) {
-  const { data } = useNews(symbol);
+  const { data, loading, error } = useNews(symbol);
   const articles = data?.articles ?? [];
 
   return (
     <div className="card mb-3">
-      <SectionHeader icon="📰" title="LIVE NEWS" badge="NEW" src="MarketAux · Perplexity" />
+      <SectionHeader icon="📰" title="LIVE NEWS" badge="NEW" src="MarketAux · CryptoPanic" />
       <div className="p-4">
         <div className="grid grid-cols-2 gap-2">
-          {articles.length === 0 ? (
+          {loading ? (
             Array.from({ length: 4 }).map((_, i) => (
               <div key={i} className="h-20 bg-surface-2 rounded-lg animate-pulse border border-border/30" />
             ))
-          ) : (
+          ) : articles.length > 0 ? (
             articles.slice(0, 4).map((article, i) => {
               const style = SENTIMENT_STYLE[article.sentiment] ?? SENTIMENT_STYLE.neutral;
               return (
@@ -121,6 +121,10 @@ export function NewsSection({ symbol }: { symbol: string }) {
                 </a>
               );
             })
+          ) : (
+            <div className="col-span-2 py-8 text-center text-[11px] font-mono text-text-muted/50">
+              {error ? `News unavailable — ${error}` : `No news found for ${symbol}`}
+            </div>
           )}
         </div>
       </div>
