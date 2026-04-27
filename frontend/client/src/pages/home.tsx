@@ -23,7 +23,7 @@ import {
 } from "@/hooks/useApi";
 import { fmtPrice, fmtPct } from "@/lib/api";
 import type { AnalyseResponse, KronosResponse } from "@/types/api";
-import { ComposedChart, Bar, Line, ResponsiveContainer, YAxis, XAxis } from "recharts";
+import { ComposedChart, Bar, Line, ResponsiveContainer, YAxis, XAxis, CartesianGrid, ReferenceLine } from "recharts";
 
 //  Constants 
 const INTERVALS = ["1m","5m","15m","30m","1H","4H","1D"] as const;
@@ -432,29 +432,81 @@ export default function Home() {
                   )}
                   {kron && !kronosHk.loading && (
                     <>
-                      <div className="grid grid-cols-3 gap-2 mb-3">
+                      {/* Row 1: direction / move / trade quality */}
+                      <div className="grid grid-cols-3 gap-2 mb-2">
                         {[
-                          { label: "AI Forecast",    value: kron.forecast.direction,        color: kron.forecast.direction === "Falling" ? "text-red" : kron.forecast.direction === "Rising" ? "text-teal" : "text-text" },
-                          { label: "Expected Move",  value: `${(kron.forecast?.expected_move_pct ?? 0) >= 0 ? "^" : "v"} ${Math.abs(kron.forecast.expected_move_pct).toFixed(2)}%`, color: (kron.forecast?.expected_move_pct ?? 0) >= 0 ? "text-teal" : "text-red" },
-                          { label: "Trade Quality",  value: kron.forecast.trade_quality,    color: kron.forecast.trade_quality.includes("Avoid") ? "text-red" : "text-teal" },
-                          { label: "Target Price",   value: fmtPrice(kron.forecast.target_price), color: "text-text" },
-                          { label: "Bull Case",      value: kron.forecast.bull_case,        color: kron.forecast.bull_case === "TAKE" ? "text-teal" : "text-text-muted" },
-                          { label: "Bear Case",      value: kron.forecast.bear_case,        color: kron.forecast.bear_case === "SHORT" ? "text-red" : "text-text-muted" },
+                          { label: "AI Forecast",   value: kron.forecast.direction,
+                            color: kron.forecast.direction === "Falling" ? "text-red" : kron.forecast.direction === "Rising" ? "text-teal" : "text-amber" },
+                          { label: "Expected Move", value: `${(kron.forecast?.expected_move_pct ?? 0) >= 0 ? "^" : "v"} ${Math.abs(kron.forecast.expected_move_pct).toFixed(2)}%`,
+                            color: (kron.forecast?.expected_move_pct ?? 0) >= 0 ? "text-teal" : "text-red" },
+                          { label: "Trade Quality", value: kron.forecast.trade_quality,
+                            color: kron.forecast.trade_quality.includes("Avoid") ? "text-red" : kron.forecast.trade_quality.includes("Moderate") ? "text-amber" : "text-teal" },
                         ].map(({ label, value, color }) => (
                           <div key={label} className="bg-surface-2 rounded-lg border border-border/40 p-3">
                             <div className="text-[9px] font-mono text-text-muted/70 uppercase tracking-wide mb-1">{label}</div>
-                            <div className={`text-[16px] font-mono font-black ${color}`}>{value}</div>
+                            <div className={`text-[14px] font-mono font-black leading-tight ${color}`}>{value}</div>
                           </div>
                         ))}
                       </div>
-                      {/* Forecast mini chart */}
-                      <div className="bg-surface-2 rounded-lg border border-border/40 p-3" style={{ height: 130 }}>
-                        <div className="text-[9px] font-mono text-text-muted/70 uppercase tracking-wide mb-2">
-                          PREDICTED OHLCV - NEXT 24 CANDLES
+                      {/* Row 2: target / bull / bear + conviction badges */}
+                      <div className="grid grid-cols-3 gap-2 mb-2">
+                        <div className="bg-surface-2 rounded-lg border border-border/40 p-3">
+                          <div className="text-[9px] font-mono text-text-muted/70 uppercase tracking-wide mb-1">Target Price</div>
+                          <div className="text-[14px] font-mono font-black text-text">{fmtPrice(kron.forecast.target_price)}</div>
+                          <div className="text-[9px] font-mono text-text-muted/60 mt-0.5">
+                            H {fmtPrice(kron.forecast.high_24h)} / L {fmtPrice(kron.forecast.low_24h)}
+                          </div>
                         </div>
-                        <ResponsiveContainer width="100%" height={180}>
+                        <div className="bg-surface-2 rounded-lg border border-border/40 p-3">
+                          <div className="text-[9px] font-mono text-text-muted/70 uppercase tracking-wide mb-1">Bull Case</div>
+                          <div className={`text-[14px] font-mono font-black ${kron.forecast.bull_case === "TAKE" ? "text-teal" : "text-text-muted"}`}>
+                            {kron.forecast.bull_case}
+                          </div>
+                          <div className="text-[9px] font-mono text-text-muted/60 mt-0.5">{kron.forecast.bull_conviction} conviction</div>
+                        </div>
+                        <div className="bg-surface-2 rounded-lg border border-border/40 p-3">
+                          <div className="text-[9px] font-mono text-text-muted/70 uppercase tracking-wide mb-1">Bear Case</div>
+                          <div className={`text-[14px] font-mono font-black ${kron.forecast.bear_case === "SHORT" ? "text-red" : "text-text-muted"}`}>
+                            {kron.forecast.bear_case}
+                          </div>
+                          <div className="text-[9px] font-mono text-text-muted/60 mt-0.5">{kron.forecast.bear_conviction} conviction</div>
+                        </div>
+                      </div>
+                      {/* Row 3: momentum strip */}
+                      <div className="flex items-center gap-3 mb-3 px-1">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[9px] font-mono text-text-muted/60 uppercase tracking-wide">Momentum</span>
+                          <span className={`text-[10px] font-mono font-bold ${
+                            kron.forecast.momentum.includes("bullish") ? "text-teal" :
+                            kron.forecast.momentum.includes("bearish") ? "text-red" : "text-amber"
+                          }`}>{kron.forecast.momentum}</span>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[9px] font-mono text-text-muted/60 uppercase tracking-wide">Green Candles</span>
+                          <span className={`text-[10px] font-mono font-bold ${
+                            kron.forecast.green_candle_pct >= 55 ? "text-teal" :
+                            kron.forecast.green_candle_pct <= 45 ? "text-red" : "text-amber"
+                          }`}>{kron.forecast.green_candle_pct}%</span>
+                        </div>
+                        {/* mini progress bar */}
+                        <div className="flex-1 h-[3px] bg-surface-2 rounded-full overflow-hidden">
+                          <div className="h-full rounded-full transition-all duration-700"
+                            style={{
+                              width: `${kron.forecast.green_candle_pct}%`,
+                              background: kron.forecast.green_candle_pct >= 55 ? "#22c55e" :
+                                          kron.forecast.green_candle_pct <= 45 ? "#ef4444" : "#f59e0b"
+                            }}
+                          />
+                        </div>
+                      </div>
+                      {/* Forecast chart */}
+                      <div className="bg-surface-2 rounded-lg border border-border/40 p-3">
+                        <div className="text-[9px] font-mono text-text-muted/70 uppercase tracking-wide mb-2">
+                          PREDICTED OHLCV — NEXT 24 CANDLES
+                        </div>
+                        <ResponsiveContainer width="100%" height={190}>
                           <ComposedChart
-                            margin={{ top: 8, right: 60, left: 0, bottom: 20 }}
+                            margin={{ top: 4, right: 56, left: 0, bottom: 4 }}
                             data={(() => {
                               const candles = kron.forecast.predicted_ohlcv;
                               const allP = candles.flatMap((c: any) => [c.open, c.high, c.low, c.close]);
@@ -465,35 +517,46 @@ export default function Home() {
                               }));
                             })()}
                           >
+                            <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
                             <XAxis dataKey="i"
-                              tickFormatter={(_, i) => i % 6 === 0 ? `+${i}h` : ""}
+                              tickFormatter={(v) => v % 6 === 0 ? `+${v}h` : ""}
                               tick={{ fontSize: 8, fill: "#475569" }} tickLine={false} axisLine={false}
                             />
                             <YAxis
-                              domain={[kron.forecast.predicted_ohlcv.reduce((m,c)=>Math.min(m,c.low,c.open,c.close),Infinity)*0.9985, kron.forecast.predicted_ohlcv.reduce((m,c)=>Math.max(m,c.high,c.open,c.close),0)*1.0015]}
-                              tickFormatter={(v) => v >= 1000 ? "$"+(v/1000).toFixed(1)+"k" : "$"+v.toFixed(2)}
+                              domain={[
+                                kron.forecast.predicted_ohlcv.reduce((m,c)=>Math.min(m,c.low,c.open,c.close),Infinity)*0.999,
+                                kron.forecast.predicted_ohlcv.reduce((m,c)=>Math.max(m,c.high,c.open,c.close),0)*1.001
+                              ]}
+                              tickFormatter={(v) => v >= 1000 ? `$${(v/1000).toFixed(1)}k` : `$${v.toFixed(2)}`}
                               tick={{ fontSize: 8, fill: "#475569" }} tickLine={false} axisLine={false}
-                              width={56} orientation="right"
+                              width={60} orientation="right"
+                            />
+                            {/* Target price reference line */}
+                            <ReferenceLine
+                              y={kron.forecast.target_price}
+                              stroke="#7c3aed" strokeDasharray="4 4" strokeWidth={1}
+                              label={{ value: "Target", position: "right", fontSize: 8, fill: "#7c3aed" }}
                             />
                             <Bar dataKey="close" fill="transparent" stroke="none"
                               isAnimationActive={false}
                               background={{ fill: "transparent" }}
                               shape={(props: any) => {
-                                const { x, y, width: w, background: bg, payload: pl } = props as any;
+                                const { x, width: w, background: bg, payload: pl } = props as any;
                                 if (!pl || !bg || bg.height <= 0) return null;
-                                const { open, high, low, close, isGreen, pMin, pMax } = pl;
-                                const pad = (pMax-pMin)*0.12||pMin*0.01;
-                                const dMin=pMin-pad, dMax=pMax+pad, range=dMax-dMin||1;
+                                const { open, high, low, close: c, isGreen, pMin, pMax } = pl;
+                                const pd = (pMax-pMin)*0.1||pMin*0.01;
+                                const dMin=pMin-pd, dMax=pMax+pd, range=dMax-dMin||1;
                                 const py = (p: number) => bg.y + bg.height - ((p-dMin)/range)*bg.height;
-                                const yH=py(high),yL=py(low),yO=py(open),yC=py(close);
+                                const yH=py(high),yL=py(low),yO=py(open),yC=py(c);
                                 const top=Math.min(yO,yC), bot=Math.max(yO,yC);
                                 const col=isGreen?"#22c55e":"#ef4444";
-                                const cx=x+w/2, bW=Math.max(w-1,2), bH=Math.max(bot-top,1.5);
+                                const cx2=x+w/2, bW=Math.max(w-1.5,1.5), bH=Math.max(bot-top,1.5);
                                 return (
                                   <g>
-                                    <line x1={cx} y1={yH} x2={cx} y2={top} stroke={col} strokeWidth={1}/>
-                                    <line x1={cx} y1={bot} x2={cx} y2={yL} stroke={col} strokeWidth={1}/>
-                                    <rect x={x+0.5} y={top} width={bW} height={bH} fill={col} fillOpacity={0.85}/>
+                                    <line x1={cx2} y1={yH} x2={cx2} y2={top} stroke={col} strokeWidth={1}/>
+                                    <line x1={cx2} y1={bot} x2={cx2} y2={yL} stroke={col} strokeWidth={1}/>
+                                    <rect x={x+0.75} y={top} width={bW} height={bH} fill={col} fillOpacity={isGreen ? 0.85 : 0.75}
+                                      rx={0.5}/>
                                   </g>
                                 );
                               }}

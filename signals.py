@@ -193,6 +193,10 @@ def calculate_signals(
     if adx >= 25:
         t_score = min(t_score + 1, 3)
 
+    # ── Bull / Bear Signal Lists (initialise early — S-score appends to them) ─
+    bull_signals = []
+    bear_signals = []
+
     # ── S: Social Score (0–3) ──────────────────────────────────────────────
     # S score: Fear & Greed + CryptoPanic + social delta
     s_score = 0
@@ -243,10 +247,6 @@ def calculate_signals(
         risk   = entry - stop
         reward = target - entry
         rr     = round(reward / risk, 2) if risk > 0 else None
-
-    # ── Bull / Bear Signal Lists ────────────────────────────────────────────
-    bull_signals = []
-    bear_signals = []
 
     # Bull signals - price action
     if ema_stack:

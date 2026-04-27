@@ -1,7 +1,7 @@
 // PriceChart.tsx
 import {
   ComposedChart, XAxis, YAxis, CartesianGrid, Tooltip,
-  Line, Bar, ResponsiveContainer, ReferenceLine,
+  Line, Bar, ResponsiveContainer, ReferenceLine, Cell,
 } from "recharts";
 import type { OHLCVBar, MarketStructure } from "@/types/api";
 import { fmtPrice } from "@/lib/api";
@@ -51,6 +51,13 @@ function calcVWAP(raw: number[][]): (number | null)[] {
   });
 }
 
+// Normalise body size as a proxy volume for visual volume bars
+function calcBodyVolume(raw: number[][]): number[] {
+  const sizes = raw.map(([, o, , , c]) => Math.abs(c - o));
+  const maxSize = Math.max(...sizes, 0.0001);
+  return sizes.map(s => (s / maxSize) * 100); // 0–100 percentage
+}
+
 function Candle(props: any) {
   const { x, y, width, background, payload } = props;
   if (!payload || !background || background.height <= 0) return null;
@@ -91,12 +98,15 @@ export function PriceChart({ ohlcv, structure, interval, symbol, onTfChange }: P
   const bb    = calcBB(closes, 20, 2);
   const vwap  = calcVWAP(raw);
 
+  const bodyVol = calcBodyVolume(raw);
+
   const data = raw.map(([ts, o, h, l, c], i) => ({
     ts, open: o, high: h, low: l, close: c,
     isGreen: c >= o, pMin, pMax,
     ema20: ema20[i], ema50: ema50[i],
     bbU: bb.upper[i], bbL: bb.lower[i],
     vwap: vwap[i],
+    vol: bodyVol[i],
   }));
 
   const last      = data[data.length - 1];
@@ -112,31 +122,36 @@ export function PriceChart({ ohlcv, structure, interval, symbol, onTfChange }: P
 
   return (
     <div className="w-full">
+      {/* Timeframe selector */}
       <div className="flex items-center gap-1 mb-2 px-1">
         {TF.map(tf => (
           <button key={tf} onClick={() => onTfChange(tf)}
-            className={`text-[11px] font-mono px-2 py-0.5 rounded ${
-              interval === tf ? "text-violet bg-violet/10 font-bold" : "text-text-muted"
+            className={`text-[11px] font-mono px-2 py-0.5 rounded transition-all ${
+              interval === tf
+                ? "text-purple bg-purple/10 font-bold border border-purple/30"
+                : "text-text-muted hover:text-text"
             }`}>
             {tf}
           </button>
         ))}
       </div>
+      {/* Indicator legend */}
       {inds.length > 0 && (
-        <div className="flex gap-3 px-2 mb-1 flex-wrap">
+        <div className="flex gap-3 px-2 mb-2 flex-wrap">
           {inds.map(i => (
-            <div key={i.key} className="flex items-center gap-1">
-              <div className="w-5 h-[1.5px]" style={{ background: i.color }} />
+            <div key={i.key} className="flex items-center gap-1.5">
+              <div className="w-6 h-[2px] rounded-full" style={{ background: i.color }} />
               <span className="text-[10px] font-mono text-text-muted">
-                {i.label}: {fmtPrice(i.value ?? 0)}
+                {i.label} <span className="text-text font-medium">{fmtPrice(i.value ?? 0)}</span>
               </span>
             </div>
           ))}
         </div>
       )}
-      <ResponsiveContainer width="100%" height={240}>
-        <ComposedChart data={data} margin={{ top: 4, right: 56, left: 0, bottom: 4 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
+      {/* Main candle chart */}
+      <ResponsiveContainer width="100%" height={230}>
+        <ComposedChart data={data} margin={{ top: 4, right: 64, left: 0, bottom: 2 }}>
+          <CartesianGrid strokeDasharray="2 4" stroke="#1e293b" vertical={false} />
           <XAxis dataKey="ts"
             tickFormatter={v => {
               const d = new Date(v);
@@ -144,7 +159,7 @@ export function PriceChart({ ohlcv, structure, interval, symbol, onTfChange }: P
                 ? d.toLocaleDateString("en-GB", { day: "2-digit", month: "2-digit" })
                 : d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
             }}
-            tick={{ fontSize: 9, fill: "#475569" }} tickLine={false} axisLine={false} minTickGap={40}
+            tick={{ fontSize: 9, fill: "#475569" }} tickLine={false} axisLine={false} minTickGap={48}
           />
           <YAxis
             domain={[pMin - pad, pMax + pad]}
@@ -153,30 +168,48 @@ export function PriceChart({ ohlcv, structure, interval, symbol, onTfChange }: P
             width={72} orientation="right"
           />
           <Tooltip
-            contentStyle={{ background: "#0f172a", border: "1px solid #1e293b", borderRadius: 8, fontSize: 11 }}
-            formatter={(v: any, n: string) => v != null ? [fmtPrice(v), n] : [null, n]}
+            contentStyle={{ background: "#0f172a", border: "1px solid #1e293b", borderRadius: 8, fontSize: 11, padding: "6px 10px" }}
+            formatter={(v: any, n: string) => {
+              if (n === "vol") return null as any;
+              return v != null ? [fmtPrice(v), n.toUpperCase()] : [null, n];
+            }}
             labelFormatter={ts => new Date(ts as number).toLocaleString()}
+            cursor={{ stroke: "#334155", strokeWidth: 1 }}
           />
+          {/* Candle bars */}
           <Bar dataKey="close" fill="transparent" stroke="none"
             isAnimationActive={false}
             background={{ fill: "transparent" }}
             shape={(props: any) => <Candle {...props} />}
           />
-          <Line type="monotone" dataKey="ema20" stroke="#22c55e"
+          {/* EMA + VWAP + BB lines */}
+          <Line type="monotone" dataKey="ema20" stroke="#22c55e" name="ema20"
             strokeWidth={1.5} dot={false} isAnimationActive={false} connectNulls={false} />
-          <Line type="monotone" dataKey="ema50" stroke="#f59e0b"
+          <Line type="monotone" dataKey="ema50" stroke="#f59e0b" name="ema50"
             strokeWidth={1.5} dot={false} isAnimationActive={false} connectNulls={false} />
-          <Line type="monotone" dataKey="vwap" stroke="#f97316"
+          <Line type="monotone" dataKey="vwap" stroke="#f97316" name="vwap"
             strokeWidth={1.5} dot={false} isAnimationActive={false} connectNulls={false} />
-          <Line type="monotone" dataKey="bbU" stroke="#818cf8"
-            strokeWidth={1} dot={false} isAnimationActive={false} strokeDasharray="3 3" connectNulls={false} />
-          <Line type="monotone" dataKey="bbL" stroke="#818cf8"
-            strokeWidth={1} dot={false} isAnimationActive={false} strokeDasharray="3 3" connectNulls={false} />
+          <Line type="monotone" dataKey="bbU" stroke="#818cf8" name="bbU"
+            strokeWidth={1} dot={false} isAnimationActive={false} strokeDasharray="3 4" connectNulls={false} />
+          <Line type="monotone" dataKey="bbL" stroke="#818cf8" name="bbL"
+            strokeWidth={1} dot={false} isAnimationActive={false} strokeDasharray="3 4" connectNulls={false} />
+          {/* Last price line */}
           {lastClose > 0 && (
             <ReferenceLine y={lastClose} stroke="#7c3aed" strokeDasharray="4 4" strokeWidth={1}
-              label={{ value: fmtPrice(lastClose), position: "right", fontSize: 10, fill: "#7c3aed" }}
+              label={{ value: fmtPrice(lastClose), position: "insideRight", fontSize: 9, fill: "#7c3aed", offset: 4 }}
             />
           )}
+        </ComposedChart>
+      </ResponsiveContainer>
+      {/* Volume bars */}
+      <ResponsiveContainer width="100%" height={40}>
+        <ComposedChart data={data} margin={{ top: 0, right: 64, left: 0, bottom: 0 }}>
+          <YAxis hide domain={[0, 100]} />
+          <Bar dataKey="vol" isAnimationActive={false} maxBarSize={12}>
+            {data.map((d, i) => (
+              <Cell key={i} fill={d.isGreen ? "#22c55e" : "#ef4444"} fillOpacity={0.35} />
+            ))}
+          </Bar>
         </ComposedChart>
       </ResponsiveContainer>
     </div>
