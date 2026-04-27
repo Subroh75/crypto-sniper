@@ -3,7 +3,7 @@
 // Left: 10 analysis sections. Right: sidebar (Trade Setup, Conviction,
 // Key Levels, Watchlist, Subscribe, Export).
 
-import { useState, useCallback, useId, useRef } from "react";
+import { useState, useCallback, useRef } from "react";
 import { Logo } from "@/components/Logo";
 import { LiveTicker } from "@/components/LiveTicker";
 import { MarketBar } from "@/components/MarketBar";
@@ -20,9 +20,11 @@ import {
 import { DeepResearchSection } from "@/components/DeepResearch";
 import {
   useAnalyse, useKronos, useWatchlist, usePdfExport,
+  useHitRate, useScannerPerformance, useAlerts,
 } from "@/hooks/useApi";
 import { fmtPrice, fmtPct } from "@/lib/api";
-import type { AnalyseResponse, KronosResponse } from "@/types/api";
+import { MetricTooltip } from "@/components/Tooltip";
+import type { AnalyseResponse, KronosResponse, DerivativesData } from "@/types/api";
 import { ComposedChart, Bar, Line, ResponsiveContainer, YAxis, XAxis, CartesianGrid, ReferenceLine } from "recharts";
 
 //  Constants 
@@ -121,10 +123,20 @@ export default function Home() {
   const [input,    setInput]    = useState("");
   const [interval, setInterval] = useState("1H");
 
+  const [alertEmail,   setAlertEmail]   = useState("");
+  const [alertOpen,    setAlertOpen]    = useState(false);
+  const [alertType,    setAlertType]    = useState<"score"|"price">("score");
+  const [alertThreshold, setAlertThreshold] = useState(9);
+  const [alertDirection, setAlertDirection] = useState<"above"|"below">("above");
+  const [alertMsg,     setAlertMsg]     = useState("");
+
   const analyse  = useAnalyse();
   const kronosHk = useKronos();
   const { scores: wlScores, loading: wlLoading } = useWatchlist([...WATCHLIST_SYMS]);
   const { exporting, exportPdf } = usePdfExport();
+  const hitRate = useHitRate(null, 30);
+  const scanPerf = useScannerPerformance(7);
+  const alertsHk = useAlerts(alertEmail || null);
 
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -287,7 +299,26 @@ export default function Home() {
 
               {/* 01: Signal Output */}
               <Card>
-                <CardHeader num="01" icon="!" title="SIGNAL OUTPUT" src="CoinGecko  ·  Twelve Data" />
+                <CardHeader num="01" icon="!" title="SIGNAL OUTPUT" src="CoinGecko  ·  Twelve Data"
+                  right={
+                    hitRate.data?.hit_rate_pct != null ? (
+                      <button
+                        onClick={() => setAlertOpen(true)}
+                        className="flex items-center gap-1.5 text-[9px] font-mono font-bold px-2 py-1 rounded border border-teal/30 bg-teal/5 text-teal hover:bg-teal/10 transition-all"
+                      >
+                        <span className="text-teal">&#9670;</span>
+                        {hitRate.data.hit_rate_pct}% hit rate
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => setAlertOpen(true)}
+                        className="flex items-center gap-1 text-[9px] font-mono font-bold px-2 py-1 rounded border border-purple/30 bg-purple/5 text-purple hover:bg-purple/10 transition-all"
+                      >
+                        &#43; Set Alert
+                      </button>
+                    )
+                  }
+                />
                 <div className="p-4">
                   <div className="bg-surface-2 rounded-xl border border-border/50 p-5 text-center">
                     <div className="text-[10px] font-mono text-text-muted/70 mb-2 tracking-wide">
@@ -327,7 +358,7 @@ export default function Home() {
                         <div key={key} className={`bg-surface-2 rounded-lg border p-3 ${key === "S" ? "border-orange/20" : "border-border/50"}`}>
                           <div className="text-[22px] font-black mb-0.5" style={{ color }}>{key}</div>
                           <div className="text-[9px] font-mono text-text-muted/70 uppercase tracking-wide mb-2">
-                            {comp.label}
+                            <MetricTooltip id={key}>{comp.label}</MetricTooltip>
                             {key === "S" && <span className="ml-1 text-[7px] bg-orange/10 text-orange px-1 py-0.5 rounded">NEW</span>}
                           </div>
                           <div className="text-[16px] font-mono font-bold mb-0.5" style={{ color }}>
@@ -365,7 +396,9 @@ export default function Home() {
                       ["BB Upper",   sig.structure.bb_upper, sig.quote.price < sig.structure.bb_upper ? "warn" : "dn"],
                     ].map(([label, price, dir]) => (
                       <div key={label as string} className="flex justify-between items-center border-b border-border/30 pb-1.5 last:border-none last:pb-0">
-                        <span className="text-[10px] font-mono text-text-muted/70 uppercase tracking-wide">{label as string}</span>
+                        <span className="text-[10px] font-mono text-text-muted/70 uppercase tracking-wide">
+                          <MetricTooltip id={label as string}>{label as string}</MetricTooltip>
+                        </span>
                         <span className={`text-[12px] font-mono font-bold flex items-center gap-1 ${
                           dir === "up" ? "text-teal" : dir === "warn" ? "text-red" : "text-text"
                         }`}>
@@ -387,7 +420,9 @@ export default function Home() {
                         { label: "Rel Vol", value: `${(sig.timing?.rel_volume ?? 0).toFixed(2)}x`, sub: (sig.timing?.rel_volume ?? 0) >= 2 ? "HIGH" : "NORMAL", color: (sig.timing?.rel_volume ?? 0) >= 2 ? "text-teal" : "text-text" },
                       ].map(({ label, value, sub, color }) => (
                         <div key={label} className="bg-surface-2 rounded-lg border border-border/40 p-3">
-                          <div className="text-[9px] font-mono text-text-muted/70 uppercase tracking-wide mb-1">{label}</div>
+                          <div className="text-[9px] font-mono text-text-muted/70 uppercase tracking-wide mb-1">
+                            <MetricTooltip id={label}>{label}</MetricTooltip>
+                          </div>
                           <div className={`text-[20px] font-mono font-black ${color}`}>{value}</div>
                           <div className={`text-[9px] font-mono mt-0.5 ${color} opacity-70`}>{sub}</div>
                         </div>
@@ -397,26 +432,100 @@ export default function Home() {
                 </Card>
               </div>
 
-              {/* 05: On-Chain Signals */}
-              <Card>
-                <CardHeader num="05" title="ON-CHAIN SIGNALS" badge="NEW" src="Etherscan  ·  Covalent  ·  Mempool" />
-                <div className="p-4">
-                  <div className="grid grid-cols-4 gap-2">
-                    {[
-                      { label: "Whale Transfers 24H", value: "$2.4B",    sub: " vs avg", color: "text-teal" },
-                      { label: "Exchange Netflow",     value: "-12,400",  sub: "Outflow  bullish", color: "text-teal" },
-                      { label: "Mempool Fees",         value: "45 sat/vB",sub: "High activity", color: "text-teal" },
-                      { label: "Active Addresses",     value: "982K",     sub: " Stable", color: "text-text" },
-                    ].map(({ label, value, sub, color }) => (
-                      <div key={label} className="bg-surface-2 rounded-lg border border-border/40 p-3">
-                        <div className="text-[9px] font-mono text-text-muted/70 uppercase tracking-wide mb-1.5">{label}</div>
-                        <div className={`text-[18px] font-mono font-black ${color}`}>{value}</div>
-                        <div className={`text-[9px] font-mono mt-0.5 ${color} opacity-80`}>{sub}</div>
+              {/* 05: Perp Derivatives — real data from Bybit */}
+              {(() => {
+                const d = sig.derivatives;
+                if (!d || !d.has_perp) {
+                  // Spot-only coin — show mempool + fear/greed instead
+                  return (
+                    <Card>
+                      <CardHeader num="05" title="MARKET CONTEXT" src="CoinGecko" />
+                      <div className="p-4">
+                        <div className="grid grid-cols-2 gap-2">
+                          <div className="bg-surface-2 rounded-lg border border-border/40 p-3">
+                            <div className="text-[9px] font-mono text-text-muted/70 uppercase tracking-wide mb-1">
+                              <MetricTooltip id="RSI">Fear/Greed Index</MetricTooltip>
+                            </div>
+                            <div className={`text-[20px] font-mono font-black ${
+                              (sig.fear_greed?.value ?? 50) >= 70 ? "text-red" :
+                              (sig.fear_greed?.value ?? 50) <= 30 ? "text-teal" : "text-amber"
+                            }`}>{sig.fear_greed?.value ?? "--"}</div>
+                            <div className="text-[9px] font-mono text-text-muted/60 mt-0.5">{sig.fear_greed?.label ?? "--"}</div>
+                          </div>
+                          <div className="bg-surface-2 rounded-lg border border-border/40 p-3">
+                            <div className="text-[9px] font-mono text-text-muted/70 uppercase tracking-wide mb-1">No Perp Data</div>
+                            <div className="text-[13px] font-mono text-text-muted">Spot-only coin</div>
+                            <div className="text-[9px] font-mono text-text-muted/60 mt-0.5">Bybit / OKX not available</div>
+                          </div>
+                        </div>
                       </div>
-                    ))}
-                  </div>
-                </div>
-              </Card>
+                    </Card>
+                  );
+                }
+
+                const fr = d.funding;
+                const oi = d.open_interest;
+                const ls = d.long_short;
+                const frColor = fr.sentiment === "bullish" ? "text-teal" : fr.sentiment === "bearish" ? "text-red" : "text-amber";
+                const oiColor = oi.trend === "rising" ? "text-teal" : oi.trend === "falling" ? "text-red" : "text-text";
+                const lsColor = ls.sentiment === "bullish" ? "text-teal" : ls.sentiment === "bearish" ? "text-red" : "text-amber";
+
+                return (
+                  <Card>
+                    <CardHeader num="05" title="PERP DERIVATIVES" badge="LIVE" src={`${fr.source} · ${oi.source}`} />
+                    <div className="p-4">
+                      <div className="grid grid-cols-3 gap-2">
+                        {/* Funding Rate */}
+                        <div className="bg-surface-2 rounded-lg border border-border/40 p-3">
+                          <div className="text-[9px] font-mono text-text-muted/70 uppercase tracking-wide mb-1">
+                            <MetricTooltip id="Funding Rate">Funding Rate</MetricTooltip>
+                          </div>
+                          <div className={`text-[18px] font-mono font-black ${frColor}`}>
+                            {fr.rate >= 0 ? "+" : ""}{fr.rate.toFixed(4)}%
+                          </div>
+                          <div className={`text-[9px] font-mono mt-0.5 ${frColor} opacity-90`}>
+                            {fr.sentiment} · {fr.rate_annualised.toFixed(0)}% p.a.
+                          </div>
+                          {fr.next_funding_ts > 0 && (
+                            <div className="text-[8px] font-mono text-text-muted/40 mt-1">
+                              Next: {new Date(fr.next_funding_ts * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Open Interest */}
+                        <div className="bg-surface-2 rounded-lg border border-border/40 p-3">
+                          <div className="text-[9px] font-mono text-text-muted/70 uppercase tracking-wide mb-1">
+                            <MetricTooltip id="Open Interest">Open Interest</MetricTooltip>
+                          </div>
+                          <div className={`text-[18px] font-mono font-black ${oiColor}`}>{oi.oi_usd_fmt}</div>
+                          <div className={`text-[9px] font-mono mt-0.5 ${oiColor} opacity-90`}>
+                            {oi.change_24h >= 0 ? "+" : ""}{oi.change_24h.toFixed(1)}% 24H · {oi.trend}
+                          </div>
+                        </div>
+
+                        {/* L/S Ratio */}
+                        <div className="bg-surface-2 rounded-lg border border-border/40 p-3">
+                          <div className="text-[9px] font-mono text-text-muted/70 uppercase tracking-wide mb-1">
+                            <MetricTooltip id="L/S Ratio">L/S Ratio</MetricTooltip>
+                          </div>
+                          <div className={`text-[18px] font-mono font-black ${lsColor}`}>
+                            {ls.long_pct.toFixed(0)}% / {ls.short_pct.toFixed(0)}%
+                          </div>
+                          <div className={`text-[9px] font-mono mt-0.5 ${lsColor} opacity-90`}>{ls.note}</div>
+                          {/* Mini bar */}
+                          <div className="mt-2 h-[3px] rounded-full bg-red/30 overflow-hidden">
+                            <div className="h-full rounded-full bg-teal transition-all" style={{ width: `${ls.long_pct}%` }} />
+                          </div>
+                          <div className="flex justify-between text-[7px] font-mono text-text-muted/40 mt-0.5">
+                            <span>Long</span><span>Short</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </Card>
+                );
+              })()}
 
               {/* 06: Kronos AI Forecast */}
               <Card>
@@ -637,6 +746,66 @@ export default function Home() {
               {/* 09: Perplexity Deep Research */}
               <DeepResearchSection symbol={symbol} analyseData={sig} />
 
+              {/* 10: Scanner Performance */}
+              {scanPerf.data && (
+                <Card>
+                  <CardHeader num="10" title="SCANNER PERFORMANCE" badge="HISTORY"
+                    src={`Last ${scanPerf.data.summary.days}d`}
+                    right={
+                      scanPerf.data.summary.win_rate_pct != null ? (
+                        <span className="text-[9px] font-mono font-bold text-teal px-2 py-0.5 rounded bg-teal/5 border border-teal/20">
+                          {scanPerf.data.summary.win_rate_pct}% win rate
+                        </span>
+                      ) : undefined
+                    }
+                  />
+                  <div className="p-4">
+                    {scanPerf.data.picks.length === 0 ? (
+                      <div className="text-center py-6 text-[11px] font-mono text-text-muted/60">
+                        No scanner picks yet — the daily cron will populate this after the first scan.
+                      </div>
+                    ) : (
+                      <>
+                        {/* Summary row */}
+                        {scanPerf.data.summary.avg_return_pct != null && (
+                          <div className="flex gap-4 mb-3 px-1 text-[11px] font-mono">
+                            <span className="text-text-muted/60">Avg return</span>
+                            <span className={scanPerf.data.summary.avg_return_pct >= 0 ? "text-teal font-bold" : "text-red font-bold"}>
+                              {scanPerf.data.summary.avg_return_pct >= 0 ? "+" : ""}{scanPerf.data.summary.avg_return_pct.toFixed(2)}%
+                            </span>
+                            <span className="text-text-muted/60">{scanPerf.data.summary.checked} picks checked</span>
+                          </div>
+                        )}
+                        {/* Table */}
+                        <div className="space-y-1">
+                          {scanPerf.data.picks.slice(0, 10).map((pick, i) => (
+                            <div key={`${pick.symbol}-${pick.scan_date}-${i}`}
+                              className="flex items-center gap-2 py-1.5 border-b border-border/20 last:border-none">
+                              <span className="text-[10px] font-mono text-text-muted/50 w-8">{i + 1}.</span>
+                              <button
+                                onClick={() => runAnalysis(pick.symbol)}
+                                className="text-[11px] font-mono font-bold text-purple hover:text-teal transition-colors w-14"
+                              >{pick.symbol}</button>
+                              <span className="text-[10px] font-mono text-text-muted/60 flex-1">{pick.scan_date}</span>
+                              <span className="text-[10px] font-mono text-teal/80">{pick.score}/16</span>
+                              {pick.outcome_pct != null ? (
+                                <span className={`text-[11px] font-mono font-bold ${
+                                  pick.outcome_pct >= 2 ? "text-teal" : pick.outcome_pct <= -2 ? "text-red" : "text-text-muted"
+                                }`}>
+                                  {pick.outcome_pct >= 0 ? "+" : ""}{pick.outcome_pct.toFixed(2)}%
+                                </span>
+                              ) : (
+                                <span className="text-[10px] font-mono text-text-muted/40">pending</span>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </Card>
+              )}
+
             </div>
             {/*  end LEFT column  */}
 
@@ -667,6 +836,85 @@ export default function Home() {
           </div>
         )}
       </div>
+
+      {/* ALERTS MODAL */}
+      {alertOpen && (
+        <div
+          className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/70 backdrop-blur-sm"
+          onClick={(e) => { if (e.target === e.currentTarget) setAlertOpen(false); }}
+        >
+          <div className="w-full max-w-sm mx-4 bg-[#0c1225] border border-border/60 rounded-2xl shadow-2xl overflow-hidden">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-border/50">
+              <div>
+                <div className="text-[10px] font-mono font-bold uppercase tracking-[0.12em] text-purple mb-0.5">Price Alerts</div>
+                <div className="text-[13px] font-bold text-text">Notify me when {symbol} triggers</div>
+              </div>
+              <button onClick={() => { setAlertOpen(false); setAlertMsg(""); }} className="text-text-muted hover:text-text text-xl leading-none">&times;</button>
+            </div>
+            <div className="p-5 space-y-4">
+              <div>
+                <label className="text-[10px] font-mono text-text-muted/70 uppercase tracking-wide mb-1 block">Your email</label>
+                <input type="email" value={alertEmail} onChange={e => setAlertEmail(e.target.value)}
+                  placeholder="you@example.com"
+                  className="w-full h-[38px] rounded-lg border border-border/60 bg-surface px-3 text-[13px] font-sans text-text placeholder:text-text-muted/50 outline-none focus:border-purple transition-all"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] font-mono text-text-muted/70 uppercase tracking-wide mb-1 block">Alert type</label>
+                <div className="flex gap-2">
+                  {(["score", "price"] as const).map(t => (
+                    <button key={t} onClick={() => setAlertType(t)}
+                      className={`flex-1 py-2 rounded-lg text-[11px] font-mono font-bold border transition-all ${
+                        alertType === t ? "border-purple bg-purple/10 text-purple" : "border-border/50 text-text-muted hover:border-text-muted"
+                      }`}>{t === "score" ? "Score threshold" : "Price level"}</button>
+                  ))}
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <div className="flex-1">
+                  <label className="text-[10px] font-mono text-text-muted/70 uppercase tracking-wide mb-1 block">
+                    {alertType === "score" ? "Min score (1-16)" : "Price ($)"}
+                  </label>
+                  <input type="number" value={alertThreshold} onChange={e => setAlertThreshold(Number(e.target.value))}
+                    min={alertType === "score" ? 1 : 0} max={alertType === "score" ? 16 : undefined}
+                    step={alertType === "score" ? 1 : "any"}
+                    className="w-full h-[38px] rounded-lg border border-border/60 bg-surface px-3 text-[13px] font-mono text-text outline-none focus:border-purple transition-all"
+                  />
+                </div>
+                <div className="flex-1">
+                  <label className="text-[10px] font-mono text-text-muted/70 uppercase tracking-wide mb-1 block">Direction</label>
+                  <select value={alertDirection} onChange={e => setAlertDirection(e.target.value as "above"|"below")}
+                    className="w-full h-[38px] rounded-lg border border-border/60 bg-surface px-3 text-[13px] font-mono text-text outline-none focus:border-purple transition-all">
+                    <option value="above">Above / &gt;=</option>
+                    <option value="below">Below / &lt;=</option>
+                  </select>
+                </div>
+              </div>
+              <button
+                onClick={async () => {
+                  if (!alertEmail.includes("@")) { setAlertMsg("Please enter a valid email."); return; }
+                  const res = await alertsHk.create({ symbol, alert_type: alertType, threshold: alertThreshold, direction: alertDirection });
+                  setAlertMsg((res as any)?.message ?? (res as any)?.error ?? "Alert saved!");
+                }}
+                className="w-full py-2.5 rounded-lg font-bold text-[13px] text-white transition-all"
+                style={{ background: "#7c3aed" }}
+              >Set Alert for {symbol}</button>
+              {alertMsg && <div className="text-[11px] font-mono text-teal text-center">{alertMsg}</div>}
+              {alertsHk.alerts.length > 0 && (
+                <div className="border-t border-border/40 pt-3">
+                  <div className="text-[9px] font-mono text-text-muted/60 uppercase tracking-wide mb-2">Active alerts</div>
+                  {alertsHk.alerts.map(a => (
+                    <div key={a.id} className="flex items-center justify-between py-1.5 border-b border-border/20 last:border-none">
+                      <span className="text-[11px] font-mono text-text">{a.symbol} {a.alert_type} {a.direction} {a.threshold}</span>
+                      <button onClick={() => alertsHk.remove(a.id)} className="text-[9px] text-red hover:opacity-70 font-mono">remove</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

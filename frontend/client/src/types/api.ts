@@ -102,9 +102,10 @@ export interface AnalyseResponse {
   conviction: Conviction;
   key_levels:  KeyLevel[];
   ohlcv:       OHLCVBar[];
-  fear_greed?: { value: number; label: string } | null;
-  cp_news?:    unknown;
-  error?:      string;
+  fear_greed?:  { value: number; label: string } | null;
+  cp_news?:     unknown;
+  derivatives?: DerivativesData;
+  error?:       string;
 }
 
 // ── Kronos Forecast ───────────────────────────────────────────────────────────
@@ -234,4 +235,96 @@ export interface HealthStatus {
   version:    string;
   latency_ms: number;
   sources:    Record<string, string>;
+}
+
+// ── Derivatives (perp data) ───────────────────────────────────────────────────
+export interface FundingRate {
+  rate:             number;   // % e.g. 0.01
+  rate_8h:          number;
+  rate_annualised:  number;
+  next_funding_ts:  number;
+  sentiment:        "bullish" | "bearish" | "neutral";
+  source:           string;
+}
+
+export interface OpenInterest {
+  oi_usd:     number;
+  oi_usd_fmt: string;
+  change_24h: number;
+  trend:      "rising" | "falling" | "flat";
+  source:     string;
+}
+
+export interface LongShortRatio {
+  long_pct:  number;
+  short_pct: number;
+  sentiment: "bullish" | "bearish" | "neutral";
+  note:      string;
+  source:    string;
+}
+
+export interface DerivativesData {
+  funding:       FundingRate;
+  open_interest: OpenInterest;
+  long_short:    LongShortRatio;
+  has_perp:      boolean;
+}
+
+// ── Signal History ───────────────────────────────────────────────────────────
+export interface SignalHistoryRow {
+  symbol:       string;
+  interval:     string;
+  score:        number;
+  signal_label: string;
+  close_price:  number;
+  ts:           number;
+  outcome_pct:  number | null;
+}
+
+// ── Hit Rate ─────────────────────────────────────────────────────────────────
+export interface HitRateData {
+  hit_rate_pct:   number | null;
+  total_signals:  number;
+  hits:           number;
+  threshold_pct:  number;
+  days:           number;
+  symbol:         string | null;
+  message:        string;
+  timestamp:      number;
+}
+
+// ── Scanner Performance ──────────────────────────────────────────────────────
+export interface ScannerPick {
+  symbol:       string;
+  score:        number;
+  signal_label: string;
+  close_price:  number;
+  scan_date:    string;
+  outcome_pct:  number | null;
+}
+
+export interface ScannerPerformance {
+  picks:   ScannerPick[];
+  summary: {
+    total_picks:    number;
+    checked:        number;
+    avg_return_pct: number | null;
+    win_rate_pct:   number | null;
+    days:           number;
+  };
+  timestamp: number;
+}
+
+// ── Alert ────────────────────────────────────────────────────────────────────
+export interface AlertItem {
+  id:         number;
+  email:      string;
+  symbol:     string;
+  alert_type: "price" | "score";
+  threshold:  number;
+  direction:  "above" | "below";
+  active:     boolean;
+  created_ts: number;
+  fired_ts:   number | null;
+  fire_count: number;
 }

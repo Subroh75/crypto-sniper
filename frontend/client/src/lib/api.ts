@@ -6,6 +6,7 @@ import type {
   KronosResponse, DeepResearchResponse,
   MarketOverview, TrendingCoin, NewsArticle,
   MacroData, WatchlistScore, HealthStatus,
+  HitRateData, ScannerPerformance, AlertItem,
 } from "@/types/api";
 
 const BASE_URL =
@@ -114,6 +115,36 @@ export function getWatchlistScores(
 /** Health check */
 export function healthCheck(): Promise<HealthStatus> {
   return get<HealthStatus>("/health", 0);
+}
+
+/** STRONG BUY hit rate from signal history */
+export function getHitRate(symbol?: string, days = 30): Promise<HitRateData> {
+  const qs = new URLSearchParams({ days: String(days) });
+  if (symbol) qs.set("symbol", symbol);
+  return get<HitRateData>(`/hit-rate?${qs}`, 1);
+}
+
+/** Scanner performance (yesterday's picks + % return) */
+export function getScannerPerformance(days = 7): Promise<ScannerPerformance> {
+  return get<ScannerPerformance>(`/scanner-performance?days=${days}`, 1);
+}
+
+/** Create a price/score alert */
+export function createAlert(payload: {
+  email: string; symbol: string; alert_type: "score" | "price";
+  threshold: number; direction: "above" | "below";
+}): Promise<{ alert_id: number; message: string; error?: string }> {
+  return post("/alerts", payload, 0);
+}
+
+/** List active alerts for an email */
+export function getAlerts(email: string): Promise<{ alerts: AlertItem[] }> {
+  return get(`/alerts?email=${encodeURIComponent(email)}`, 0);
+}
+
+/** Delete an alert */
+export async function deleteAlert(id: number): Promise<void> {
+  await apiFetch(`/alerts/${id}`, { method: "DELETE" }, 0);
 }
 
 // ââ Utility: format numbers âââââââââââââââââââââââââââââââââââââââââââââââââââ

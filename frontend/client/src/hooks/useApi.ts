@@ -4,11 +4,12 @@ import {
   analyse, kronos, deepResearch,
   getMarketOverview, getTrending, getGainers,
   getNews, getMacro, getWatchlistScores,
+  getHitRate, getScannerPerformance, createAlert, getAlerts, deleteAlert,
 } from "@/lib/api";
 import type {
   AnalyseResponse, KronosResponse, DeepResearchResponse,
   MarketOverview, TrendingCoin, NewsArticle,
-  MacroData, WatchlistScore,
+  MacroData, WatchlistScore, HitRateData, ScannerPerformance, AlertItem,
 } from "@/types/api";
 
 // ââ Generic async hook ââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
@@ -331,6 +332,63 @@ export function useLivePrices() {
   return prices;
 }
 
+
+// ─────────────────────────────────────────────────────────────────────────────
+// NEW HOOKS — Hit Rate, Scanner Performance, Alerts
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** STRONG BUY hit rate from history DB */
+export function useHitRate(symbol?: string | null, days = 30) {
+  return useAsync<HitRateData>(
+    () => getHitRate(symbol ?? undefined, days),
+    [symbol, days],
+    true,
+  );
+}
+
+/** Scanner picks + % return over last N days */
+export function useScannerPerformance(days = 7) {
+  return useAsync<ScannerPerformance>(
+    () => getScannerPerformance(days),
+    [days],
+    true,
+  );
+}
+
+/** Alerts for a given email */
+export function useAlerts(email: string | null) {
+  const [alerts, setAlerts]   = useState<AlertItem[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  const refresh = useCallback(async () => {
+    if (!email) return;
+    setLoading(true);
+    try {
+      const res = await getAlerts(email);
+      setAlerts(res.alerts ?? []);
+    } catch { /* silent */ }
+    finally { setLoading(false); }
+  }, [email]);
+
+  useEffect(() => { refresh(); }, [refresh]);
+
+  const create = useCallback(async (payload: {
+    symbol: string; alert_type: "score" | "price";
+    threshold: number; direction: "above" | "below";
+  }) => {
+    if (!email) return null;
+    const res = await createAlert({ email, ...payload });
+    refresh();
+    return res;
+  }, [email, refresh]);
+
+  const remove = useCallback(async (id: number) => {
+    await deleteAlert(id);
+    refresh();
+  }, [refresh]);
+
+  return { alerts, loading, refresh, create, remove };
+}
 
 export function usePdfExport() {
   const [exporting, setExporting] = useState(false);

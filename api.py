@@ -17,6 +17,15 @@ from signals import calculate_signals, get_key_levels
 from agents import run_agent_council
 from kronos import run_kronos_forecast
 from perplexity_research import run_deep_research
+from derivatives import get_derivatives
+from history import (
+    record_signal, get_symbol_history, get_hit_rate,
+    get_scanner_performance, record_scan_result,
+)
+from alerts import (
+    AlertRequest, register_alert, get_alerts, delete_alert,
+    check_and_fire_alerts,
+)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -85,6 +94,10 @@ async def analyse(req: AnalyseRequest):
         raise HTTPException(status_code=404, detail=f"No data for {symbol}")
     sig = calculate_signals(ohlcv, quote, indicators, fear_greed=fear_greed, cp_news=cp_news)
     levels = get_key_levels(sig)
+    # Background: record signal + check price alerts
+    import asyncio, threading
+    threading.Thread(target=record_signal, args=(symbol, req.interval, sig.total, sig.signal_label, sig.close), daemon=True).start()
+    threading.Thread(target=check_and_fire_alerts, args=(symbol, sig.close, sig.total), daemon=True).start()
     return {
         "symbol":symbol,"interval":req.interval,"timestamp":int(time.time()),
         "latency_ms":round((time.time()-t_start)*1000),
@@ -103,6 +116,7 @@ async def analyse(req: AnalyseRequest):
         "conviction":{"bull_pct":sig.bull_conviction,"bear_pct":sig.bear_conviction,"bull_signals":sig.bull_signals,"bear_signals":sig.bear_signals},
         "fear_greed":fear_greed,"cp_news":cp_news[:3],"key_levels":levels,
         "ohlcv":ohlcv[-48:],
+        "derivatives": get_derivatives(symbol),
     }
 
 @app.post("/kronos")
@@ -234,3 +248,53 @@ def scan_top_signals(
 async def watchlist(req: WatchlistRequest):
     scores = get_watchlist_scores(req.symbols)
     return {"scores":scores,"timestamp":int(time.time())}
+
+
+# ── New endpoints ──────────────────────────────────────────────────────────────
+
+@app.get("/derivatives/{symbol}")
+async def derivatives_endpoint(symbol: str):
+    """Real-time perp data: funding rate, OI, L/S ratio."""
+    data = get_derivatives(symbol.upper().strip())
+    return {"symbol": symbol.upper().strip(), "timestamp": int(time.time()), **data}
+
+
+@app.get("/history/{symbol}")
+async def signal_history(symbol: str, limit: int = 30):
+    """Recent signal history for a symbol."""
+    rows = get_symbol_history(symbol.upper().strip(), limit)
+    return {"symbol": symbol.upper().strip(), "history": rows, "timestamp": int(time.time())}
+
+
+@app.get("/hit-rate")
+async def hit_rate(symbol: Optional[str] = None, days: int = 30):
+    """STRONG BUY hit rate — % that achieved 2%+ gain within 24H."""
+    data = get_hit_rate(symbol.upper() if symbol else None, days)
+    return {**data, "timestamp": int(time.time())}
+
+
+@app.get("/scanner-performance")
+async def scanner_performance(days: int = 7):
+    """Yesterday's scanner picks and their % return since signal."""
+    data = get_scanner_performance(days)
+    return {**data, "timestamp": int(time.time())}
+
+
+@app.post("/alerts")
+async def create_alert(req: AlertRequest):
+    """Register a price alert for a symbol/score threshold."""
+    result = register_alert(req)
+    return result
+
+
+@app.get("/alerts")
+async def list_alerts(email: str):
+    """List active alerts for an email address."""
+    return {"alerts": get_alerts(email), "timestamp": int(time.time())}
+
+
+@app.delete("/alerts/{alert_id}")
+async def remove_alert(alert_id: int):
+    """Delete an alert by ID."""
+    ok = delete_alert(alert_id)
+    return {"deleted": ok, "alert_id": alert_id}
