@@ -107,9 +107,14 @@ def get_open_interest(symbol: str) -> dict:
             else:
                 oi_usd = oi_val
 
-            # 24H OI history for change %
-            oi_24h_ago = _get_oi_history(sym)
-            change_pct = round(((oi_usd - oi_24h_ago) / oi_24h_ago) * 100, 2) if oi_24h_ago else 0
+            # 24H OI history for change % — use same USD conversion
+            oi_24h_ago_raw = _get_oi_history(sym)
+            # oi_24h_ago_raw is in contracts; multiply by same price to get USD
+            oi_24h_ago = oi_24h_ago_raw * price if (oi_24h_ago_raw < 1_000_000 and price > 1) else oi_24h_ago_raw
+            change_pct = round(((oi_usd - oi_24h_ago) / oi_24h_ago) * 100, 2) if oi_24h_ago and abs(oi_24h_ago) > 0 else 0
+            # Sanity clamp — anything over 500% is a unit mismatch
+            if abs(change_pct) > 500:
+                change_pct = 0
 
             return {
                 "oi_usd":      round(oi_usd),
