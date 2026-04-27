@@ -100,9 +100,11 @@ export interface AnalyseResponse {
   quote:      Quote;
   trade_setup: TradeSetup;
   conviction: Conviction;
-  key_levels: KeyLevel[];
-  ohlcv:      OHLCVBar[];
-  error?:     string;
+  key_levels:  KeyLevel[];
+  ohlcv:       OHLCVBar[];
+  fear_greed?: { value: number; label: string } | null;
+  cp_news?:    unknown;
+  error?:      string;
 }
 
 // ── Kronos Forecast ───────────────────────────────────────────────────────────

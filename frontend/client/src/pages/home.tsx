@@ -383,7 +383,7 @@ export default function Home() {
                       {[
                         { label: "RSI 14",  value: (sig.timing?.rsi ?? 50).toFixed(1),    sub: (sig.timing?.rsi ?? 50) >= 70 ? "OVERBOUGHT" : (sig.timing?.rsi ?? 50) <= 30 ? "OVERSOLD" : "NEUTRAL",  color: (sig.timing?.rsi ?? 50) >= 70 ? "text-red" : (sig.timing?.rsi ?? 50) <= 30 ? "text-teal" : "text-text" },
                         { label: "ADX 14",  value: (sig.timing?.adx ?? 0).toFixed(1),    sub: (sig.timing?.adx ?? 0) >= 25 ? "TRENDING" : "RANGING",   color: (sig.timing?.adx ?? 0) >= 25 ? "text-teal" : "text-text" },
-                        { label: "ATR 14",  value: (sig.timing?.atr ?? 0).toFixed(0),    sub: `${((sig.timing.atr / (sig.quote?.price ?? 1)) * 100).toFixed(2)}% of price`, color: "text-text" },
+                        { label: "ATR 14",  value: (sig.timing?.atr ?? 0).toFixed(0),    sub: `${((sig.timing.atr / ((sig.quote?.price ?? 0) || 1)) * 100).toFixed(2)}% of price`, color: "text-text" },
                         { label: "Rel Vol", value: `${(sig.timing?.rel_volume ?? 0).toFixed(2)}?`, sub: (sig.timing?.rel_volume ?? 0) >= 2 ? "HIGH" : "NORMAL", color: (sig.timing?.rel_volume ?? 0) >= 2 ? "text-teal" : "text-text" },
                       ].map(({ label, value, sub, color }) => (
                         <div key={label} className="bg-surface-2 rounded-lg border border-border/40 p-3">
@@ -565,7 +565,7 @@ export default function Home() {
             <div>
               <CSOVerdict sig={sig} kron={kronosHk.data} fearGreed={sig?.fear_greed} />
               <TopSignals onSelect={(sym) => runAnalysis(sym)} interval={interval} />
-              <TradeSetupCard setup={sig.trade_setup} close={sig.quote.price} />
+              <TradeSetupCard setup={sig?.trade_setup ?? null} close={sig?.quote?.price ?? 0} />
               <ConvictionMeter conviction={sig.conviction} />
               <KeyLevelsCard levels={sig.key_levels} />
               <WatchlistCard

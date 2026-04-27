@@ -239,31 +239,94 @@ export interface LivePrice {
   prev:   number;
 }
 
+// CoinGecko symbol → CoinGecko coin ID map for REST fallback
+const CG_IDS: Record<string, string> = {
+  BTC:  "bitcoin",   ETH: "ethereum",  SOL: "solana",
+  BNB:  "binancecoin", DOGE: "dogecoin", PEPE: "pepe",
+  WIF:  "dogwifcoin",  HYPE: "hyperliquid", XRP: "ripple",
+  ADA:  "cardano",
+};
+
 export function useLivePrices() {
   const [prices, setPrices] = useState<Record<string, { price: number; change: number }>>({});
+  const wsAlive = useRef(false);
+
+  // CoinGecko REST fallback — polls every 30s
+  const pollCoinGecko = useCallback(async () => {
+    try {
+      const ids = Object.values(CG_IDS).join(",");
+      const res = await fetch(
+        `https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd&include_24hr_change=true`,
+        { signal: AbortSignal.timeout(8000) },
+      );
+      if (!res.ok) return;
+      const data = await res.json();
+      const update: Record<string, { price: number; change: number }> = {};
+      for (const [sym, cgId] of Object.entries(CG_IDS)) {
+        const entry = data[cgId];
+        if (entry) {
+          update[sym] = { price: entry.usd ?? 0, change: entry.usd_24h_change ?? 0 };
+        }
+      }
+      if (Object.keys(update).length > 0) setPrices(prev => ({ ...prev, ...update }));
+    } catch { /* silent — best effort */ }
+  }, []);
 
   useEffect(() => {
     const COINS = ["BTC","ETH","SOL","BNB","DOGE","PEPE","WIF","HYPE","XRP","ADA"];
     const streams = COINS.map(c => c.toLowerCase() + "usdt@miniTicker").join("/");
-    const ws = new WebSocket("wss://stream.binance.com:9443/stream?streams=" + streams);
+    let ws: WebSocket | null = null;
+    let fallbackTimer: ReturnType<typeof setInterval> | null = null;
 
-    ws.onmessage = (e) => {
-      try {
-        const msg = JSON.parse(e.data);
-        const d = msg.data;
-        if (!d || !d.s) return;
-        const sym = d.s.replace("USDT","").toUpperCase();
-        const price = parseFloat(d.c);
-        const open = parseFloat(d.o);
-        const change = open > 0 ? ((price - open) / open) * 100 : 0;
-        setPrices(prev => ({ ...prev, [sym]: { price, change } }));
-      } catch {}
+    const startFallback = () => {
+      if (fallbackTimer) return; // already running
+      pollCoinGecko();           // immediate first poll
+      fallbackTimer = setInterval(pollCoinGecko, 30_000);
     };
 
-    ws.onerror = () => {};
-    ws.onclose = () => {};
-    return () => { try { ws.close(); } catch {} };
-  }, []);
+    try {
+      ws = new WebSocket("wss://stream.binance.com:9443/stream?streams=" + streams);
+
+      // Give WS 5s to connect — if it hasn't by then, start REST fallback
+      const wsTimeout = setTimeout(() => {
+        if (!wsAlive.current) startFallback();
+      }, 5000);
+
+      ws.onopen = () => {
+        wsAlive.current = true;
+        clearTimeout(wsTimeout);
+      };
+
+      ws.onmessage = (e) => {
+        try {
+          const msg = JSON.parse(e.data);
+          const d = msg.data;
+          if (!d || !d.s) return;
+          const sym = d.s.replace("USDT","").toUpperCase();
+          const price = parseFloat(d.c);
+          const open = parseFloat(d.o);
+          const change = open > 0 ? ((price - open) / open) * 100 : 0;
+          setPrices(prev => ({ ...prev, [sym]: { price, change } }));
+        } catch {}
+      };
+
+      ws.onerror = () => {
+        wsAlive.current = false;
+        startFallback();
+      };
+
+      ws.onclose = () => {
+        if (!wsAlive.current) startFallback();
+      };
+    } catch {
+      startFallback();
+    }
+
+    return () => {
+      try { ws?.close(); } catch {}
+      if (fallbackTimer) clearInterval(fallbackTimer);
+    };
+  }, [pollCoinGecko]);
 
   return prices;
 }

@@ -6,7 +6,10 @@ const API = (import.meta as Record<string, unknown> & { env?: Record<string, str
 interface Signal {
   symbol: string; score: number; max_score: number; signal: string;
   v: number; p: number; r: number; t: number; s: number;
-  price: number; change_24h: number; rsi: number; adx: number;
+  price: number;
+  change: number;    // /scan returns 'change', not 'change_24h'
+  change_24h?: number; // kept for type compat
+  rsi: number; adx: number;
 }
 interface Props { onSelect: (symbol: string) => void; interval?: string; }
 
@@ -96,8 +99,8 @@ export function TopSignals({ onSelect, interval = "1h" }: Props) {
               >
                 <span style={{ fontSize: 11, fontWeight: 700, color: "#f1f5f9", fontFamily: "monospace" }}>{sig.symbol}</span>
                 <span style={{ fontSize: 10, fontWeight: 700, color: "#22c55e" }}>{sig.score}/{sig.max_score}</span>
-                <span style={{ fontSize: 10, color: sig.change_24h >= 0 ? "#22c55e" : "#ef4444" }}>
-                  {sig.change_24h >= 0 ? "+" : ""}{sig.change_24h.toFixed(1)}%
+                <span style={{ fontSize: 10, color: (sig.change ?? sig.change_24h ?? 0) >= 0 ? "#22c55e" : "#ef4444" }}>
+                  {(sig.change ?? sig.change_24h ?? 0) >= 0 ? "+" : ""}{(sig.change ?? sig.change_24h ?? 0).toFixed(1)}%
                 </span>
               </button>
             ))}
