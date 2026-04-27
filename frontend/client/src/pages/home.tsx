@@ -453,49 +453,42 @@ export default function Home() {
                           PREDICTED OHLCV - NEXT 24 CANDLES
                         </div>
                         <ResponsiveContainer width="100%" height={180}>
-                          <ComposedChart margin={{ top: 4, right: 56, left: 0, bottom: 20 }} data={(() => {
+                          <ComposedChart
+                            margin={{ top: 8, right: 60, left: 0, bottom: 20 }}
+                            data={(() => {
                               const candles = kron.forecast.predicted_ohlcv;
                               const allP = candles.flatMap((c: any) => [c.open, c.high, c.low, c.close]);
                               const pMin = Math.min(...allP);
                               const pMax = Math.max(...allP);
-                              return candles.map((c: any) => ({ ...c, pMin, pMax, isGreen: c.close >= c.open }));
-                            })()} margin={{ top:4, right:8, left:0, bottom:4 }}>
-                            <YAxis
-                              domain={([min, max]: [number,number]) => { const p=(max-min)*0.15||min*0.01; return [min-p,max+p]; }}
-                              hide={true} width={0}
-                            />
-                            <XAxis
-                              dataKey="h"
-                              tickFormatter={(_: any, i: number) => i % 6 === 0 ? `+${i}h` : ""}
-                              tick={{ fontSize: 8, fill: "#475569" }}
-                              tickLine={false} axisLine={false}
+                              return candles.map((c: any, i: number) => ({
+                                ...c, i, pMin, pMax, isGreen: c.close >= c.open,
+                              }));
+                            })()}
+                          >
+                            <XAxis dataKey="i"
+                              tickFormatter={(i: number) => i % 6 === 0 ? `+${i}h` : ""}
+                              tick={{ fontSize: 8, fill: "#475569" }} tickLine={false} axisLine={false}
                             />
                             <YAxis
-                              domain={([min, max]: [number, number]) => {
-                                const p = (max - min) * 0.15 || min * 0.01;
-                                return [min - p, max + p];
-                              }}
-                              tickFormatter={(v: number) => {
-                                if (v >= 1000) return "$" + (v/1000).toFixed(1) + "k";
-                                return "$" + v.toFixed(2);
-                              }}
-                              tick={{ fontSize: 8, fill: "#475569" }}
-                              tickLine={false} axisLine={false}
+                              domain={([mn, mx]: [number,number]) => { const p=(mx-mn)*0.12||mn*0.01; return [mn-p,mx+p]; }}
+                              tickFormatter={(v: number) => v >= 1000 ? "$"+(v/1000).toFixed(1)+"k" : "$"+v.toFixed(2)}
+                              tick={{ fontSize: 8, fill: "#475569" }} tickLine={false} axisLine={false}
                               width={56} orientation="right"
                             />
-                            <Bar dataKey="close" fill="transparent" stroke="none" isAnimationActive={false}
-                              background={{ fill:"transparent" }}
+                            <Bar dataKey="close" fill="transparent" stroke="none"
+                              isAnimationActive={false}
+                              background={{ fill: "transparent" }}
                               shape={(props: any) => {
-                                const { x, y, width, background: bg, payload } = props;
-                                if (!payload || !bg || bg.height <= 0) return null;
-                                const { open, high, low, close, isGreen, pMin, pMax } = payload;
-                                const pad = (pMax-pMin)*0.15||pMin*0.01;
+                                const { x, y, width: w, background: bg, payload: pl } = props;
+                                if (!pl || !bg || bg.height <= 0) return null;
+                                const { open, high, low, close, isGreen, pMin, pMax } = pl;
+                                const pad = (pMax-pMin)*0.12||pMin*0.01;
                                 const dMin=pMin-pad, dMax=pMax+pad, range=dMax-dMin||1;
                                 const py = (p: number) => bg.y + bg.height - ((p-dMin)/range)*bg.height;
                                 const yH=py(high),yL=py(low),yO=py(open),yC=py(close);
-                                const top=Math.min(yO,yC),bot=Math.max(yO,yC);
+                                const top=Math.min(yO,yC), bot=Math.max(yO,yC);
                                 const col=isGreen?"#22c55e":"#ef4444";
-                                const cx=x+width/2, bW=Math.max(width-1,2), bH=Math.max(bot-top,1.5);
+                                const cx=x+w/2, bW=Math.max(w-1,2), bH=Math.max(bot-top,1.5);
                                 return (
                                   <g>
                                     <line x1={cx} y1={yH} x2={cx} y2={top} stroke={col} strokeWidth={1}/>
