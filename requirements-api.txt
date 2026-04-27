@@ -5,5 +5,5 @@ anthropic>=0.25.0
 feedparser>=6.0.0
 pydantic>=2.0.0
 python-multipart>=0.0.9
-
-# Trigger redeploy Mon Apr 27 05:08:22 UTC 2026
+itsdangerous>=2.1.0
+fpdf2>=2.7.0
