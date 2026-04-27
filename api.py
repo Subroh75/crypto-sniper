@@ -226,7 +226,7 @@ def scan_top_signals(
                 "price":     quote["price"],
                 "change":    quote["change_24h"],
                 "score":     sig.total,
-                "max_score": sig.max_score,
+                "max_score": 16,  # always 16 (V5+P3+R2+T3+S3)
                 "signal":    sig.signal,
                 "direction": sig.direction,
                 "components": {

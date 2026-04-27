@@ -171,8 +171,8 @@ def get_long_short_ratio(symbol: str) -> dict:
             long_pct   = round(buy_ratio * 100, 1)
             short_pct  = round(sell_ratio * 100, 1)
             sentiment  = (
-                "bearish" if long_pct > 65  else   # crowded longs = fade
-                "bullish" if long_pct < 38  else   # extreme fear = buy
+                "bearish" if long_pct > 60  else   # crowded longs = fade risk
+                "bullish" if long_pct < 40  else   # short squeeze territory
                 "neutral"
             )
             return {
@@ -180,9 +180,10 @@ def get_long_short_ratio(symbol: str) -> dict:
                 "short_pct":  short_pct,
                 "sentiment":  sentiment,
                 "note":       (
-                    "Crowded longs — fade risk" if long_pct > 65 else
-                    "Extreme fear — contrarian buy" if long_pct < 38 else
-                    "Balanced"
+                    "Crowded longs — fade risk" if long_pct > 60 else
+                    "Short squeeze risk — longs may be building" if long_pct < 40 else
+                    "Balanced" if 48 <= long_pct <= 52 else
+                    "Longs dominant" if long_pct > 52 else "Shorts dominant"
                 ),
                 "source": "Bybit",
             }

@@ -119,7 +119,8 @@ def calculate_signals(
     closes  = [bar[4] for bar in ohlcv]
     highs   = [bar[2] for bar in ohlcv]
     lows    = [bar[3] for bar in ohlcv]
-    volumes = []  # CoinGecko OHLC doesn't include volume; use quote vol
+    # Extract per-candle volume from index 5 if present (Binance includes it)
+    volumes = [bar[5] for bar in ohlcv if len(bar) > 5]
 
     close  = closes[-1]
     high   = highs[-1]
@@ -142,13 +143,20 @@ def calculate_signals(
     vwap = _calc_vwap_approx(ohlcv[-24:])  # last 24 bars
 
     # ── Relative Volume ────────────────────────────────────────────────────
-    # Since CoinGecko OHLC has no volume, use quote 24H volume vs median
-    # We'll store the quote volume for display but score on price action
+    # Use actual per-candle volumes from OHLCV when available (Binance data).
+    # Fall back to price-change proxy when no candle volume data.
     vol_24h = quote.get("volume_24h", 0)
-    # Approximate relative volume from price change magnitude
-    price_chg_abs = abs(quote.get("change_24h", 0))
-    rel_vol = 1.0 + (price_chg_abs / 10)  # rough proxy
-    rel_vol = max(0.5, min(rel_vol, 8.0))
+    if volumes and len(volumes) >= 20:
+        # Real relative volume: current candle vs 20-bar average
+        avg_vol = sum(volumes[-21:-1]) / 20  # last 20 bars excluding current
+        cur_vol = volumes[-1]
+        rel_vol = round(cur_vol / avg_vol, 2) if avg_vol > 0 else 1.0
+        rel_vol = max(0.5, min(rel_vol, 15.0))
+    else:
+        # Fallback: approximate from price change magnitude
+        price_chg_abs = abs(quote.get("change_24h", 0))
+        rel_vol = 1.0 + (price_chg_abs / 10)
+        rel_vol = max(0.5, min(rel_vol, 8.0))
 
     # ── V: Volume Score (0–5) ──────────────────────────────────────────────
     v_score = 0

@@ -105,26 +105,42 @@ def _validate_forecast(data: dict, close: float) -> dict:
 def _heuristic_forecast(symbol: str, ctx: dict) -> dict:
     """
     Deterministic heuristic forecast when no API key is set.
-    Based on RSI, ADX, and signal score.
+    Based on RSI, ADX, signal score, and actual recent OHLCV green candle ratio.
     """
     close  = ctx.get("close", 0) or 100
     rsi    = ctx.get("rsi", 50)
+    adx    = ctx.get("adx", 20)
     change = ctx.get("change_24h", 0)
     score  = ctx.get("total", 0)
+    ema_stack = ctx.get("ema_stack", False)
+
+    # Compute green_pct from actual signal context instead of hardcoded buckets.
+    # Uses RSI, ADX, score and 24h change to estimate momentum — unique per coin.
+    base_green = 50.0
+    # RSI contribution: RSI 70 = +15, RSI 30 = -15, linear between
+    base_green += (rsi - 50) * 0.3
+    # Score contribution: max score = 16, score 9 = +8, score 0 = -8
+    base_green += (score - 8) * 1.0
+    # 24h change contribution
+    base_green += min(max(change * 1.5, -10), 10)
+    # EMA stack bonus
+    if ema_stack:
+        base_green += 5
+    # ADX: trending strongly amplifies the directional bias
+    if adx >= 25:
+        base_green += (base_green - 50) * 0.2
+    green_pct = round(min(max(base_green, 15), 85), 1)
 
     # Direction based on signals
     if score >= 7 and change > 0:
         direction = "Rising"
         expected_move = abs(change) * 0.5
-        green_pct = 65
     elif rsi >= 70 or score < 3:
         direction = "Falling"
         expected_move = -(abs(change) * 0.8)
-        green_pct = 29
     else:
         direction = "Sideways"
         expected_move = change * 0.2
-        green_pct = 50
 
     target = round(close * (1 + expected_move / 100), 2)
     high   = round(close * 1.025, 2)
