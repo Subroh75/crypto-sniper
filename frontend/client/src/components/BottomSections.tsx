@@ -1,4 +1,5 @@
 // ─── BottomSections.tsx — Trending · News · Macro ───────────────────────────
+import { useState, useEffect, useRef } from "react";
 import { useTrending, useGainers, useNews, useMacro } from "@/hooks/useApi";
 import { fmtPrice, fmtPct, timeAgo } from "@/lib/api";
 
@@ -82,9 +83,86 @@ const SENTIMENT_STYLE = {
   neutral: { bar: "border-l-amber",   tag: "bg-amber/10 text-amber", label: "Neutral" },
 } as const;
 
+// Coin name map for news keyword matching
+const NEWS_COIN_NAMES: Record<string, string[]> = {
+  BTC: ["bitcoin", "btc"], ETH: ["ethereum", "eth"], SOL: ["solana", "sol"],
+  BNB: ["bnb", "binance"], XRP: ["ripple", "xrp"], DOGE: ["dogecoin", "doge"],
+  ADA: ["cardano", "ada"], AVAX: ["avalanche", "avax"], DOT: ["polkadot", "dot"],
+  LINK: ["chainlink", "link"], MATIC: ["polygon", "matic"], UNI: ["uniswap", "uni"],
+  ATOM: ["cosmos", "atom"], LTC: ["litecoin", "ltc"], NEAR: ["near", "near protocol"],
+  APT: ["aptos", "apt"], ARB: ["arbitrum", "arb"], OP: ["optimism", "op"],
+  SUI: ["sui"], INJ: ["injective", "inj"], TIA: ["celestia", "tia"],
+  SEI: ["sei"], PEPE: ["pepe"], SHIB: ["shiba", "shib"], WIF: ["dogwifhat", "wif"],
+};
+
+const RSS_FEEDS = [
+  { url: "https://cointelegraph.com/rss",                  source: "CoinTelegraph" },
+  { url: "https://www.coindesk.com/arc/outboundfeeds/rss/", source: "CoinDesk" },
+];
+
+function scoreSentiment(title: string, desc: string): "bullish" | "bearish" | "neutral" {
+  const text = (title + " " + desc).toLowerCase();
+  const bull = ["surge","rally","bull","gain","rise","pump","breakout","hit high","all-time high","ath","recover","soar","jump","moon","up ","spike"];
+  const bear = ["crash","drop","bear","fall","dump","collapse","plunge","tumble","slump","sell","loss","decline","warning","fear","hack","exploit","fraud","sec","ban"];
+  const bs = bull.filter(w => text.includes(w)).length;
+  const be = bear.filter(w => text.includes(w)).length;
+  return bs > be ? "bullish" : be > bs ? "bearish" : "neutral";
+}
+
+function useClientNews(symbol: string) {
+  const [articles, setArticles] = useState<Array<{title:string;source:string;url:string;published:string;sentiment:"bullish"|"bearish"|"neutral"}>>([]);
+  const [loading, setLoading]   = useState(false);
+  const [error, setError]       = useState<string|null>(null);
+  const prevSymbol = useRef("");
+
+  useEffect(() => {
+    if (!symbol || symbol === prevSymbol.current) return;
+    prevSymbol.current = symbol;
+    setLoading(true);
+    setError(null);
+    setArticles([]);
+
+    const keywords = [
+      symbol.toLowerCase(),
+      ...(NEWS_COIN_NAMES[symbol.toUpperCase()] ?? []),
+    ];
+
+    const fetches = RSS_FEEDS.map(feed =>
+      fetch(`https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(feed.url)}`)
+        .then(r => r.json())
+        .then(d => (d.items ?? []).map((item: Record<string,string>) => ({ ...item, _source: feed.source })))
+        .catch(() => [])
+    );
+
+    Promise.all(fetches).then(results => {
+      const all = results.flat();
+      const matched = all.filter((item: Record<string,string>) => {
+        const text = ((item.title ?? "") + " " + (item.description ?? "") + " " + (item.categories ?? []).join(" ")).toLowerCase();
+        return keywords.some(k => text.includes(k));
+      });
+      // Fallback to top 4 general crypto news if no match
+      const pool = matched.length >= 2 ? matched : all.slice(0, 8);
+      const seen = new Set<string>();
+      const deduped = pool.filter((item: Record<string,string>) => {
+        if (seen.has(item.title)) return false;
+        seen.add(item.title); return true;
+      });
+      setArticles(deduped.slice(0, 4).map((item: Record<string,string>) => ({
+        title:     item.title ?? "",
+        source:    item._source ?? "Crypto News",
+        url:       item.link ?? "",
+        published: item.pubDate ?? "",
+        sentiment: scoreSentiment(item.title ?? "", item.description ?? ""),
+      })));
+      setLoading(false);
+    }).catch(e => { setError(String(e)); setLoading(false); });
+  }, [symbol]);
+
+  return { articles, loading, error };
+}
+
 export function NewsSection({ symbol }: { symbol: string }) {
-  const { data, loading, error } = useNews(symbol);
-  const articles = data?.articles ?? [];
+  const { articles, loading, error } = useClientNews(symbol);
 
   return (
     <div className="card mb-3">
@@ -123,7 +201,7 @@ export function NewsSection({ symbol }: { symbol: string }) {
             })
           ) : (
             <div className="col-span-2 py-8 text-center text-[11px] font-mono text-text-muted/50">
-              {error ? `News unavailable — ${error}` : `No news found for ${symbol}`}
+              {error ? `News unavailable` : `No news found for ${symbol}`}
             </div>
           )}
         </div>
