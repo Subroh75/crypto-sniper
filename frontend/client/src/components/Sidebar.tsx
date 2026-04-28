@@ -1597,14 +1597,12 @@ export function DipScannerCard({ interval = "1h", onSelect }: { interval?: strin
     setLoading(true);
     setScanned(false);
     try {
-      // Fetch broad scan (min_score=1 to get full picture, then filter client-side)
-      const r = await fetch(`${SCAN_API}/scan?interval=${interval.toLowerCase()}&min_score=1`);
+      // Dedicated dip-scan endpoint: pre-filters by 24h drop server-side, then scores
+      const r = await fetch(
+        `${SCAN_API}/dip-scan?interval=${interval.toLowerCase()}&min_dip=${minDip}&min_score=${minScore}`
+      );
       const j = await r.json();
-      const all: DipSignal[] = j.signals ?? [];
-      const filtered = all
-        .filter(s => (s.change ?? 0) <= -minDip && s.score >= minScore)
-        .sort((a, b) => b.score - a.score);
-      setResults(filtered);
+      setResults((j.signals ?? []).sort((a: DipSignal, b: DipSignal) => b.score - a.score));
     } catch {
       setResults([]);
     } finally {

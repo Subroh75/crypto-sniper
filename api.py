@@ -312,6 +312,87 @@ async def watchlist(req: WatchlistRequest):
     return {"scores":scores,"timestamp":int(time.time())}
 
 
+_dip_cache: dict = {}
+_DIP_TTL = 300  # 5 minutes
+
+@app.get("/dip-scan", tags=["Signal"])
+def dip_scan(
+    interval: str = Query("1h"),
+    min_dip: float = Query(10.0, description="Min 24h drop % (absolute, e.g. 10 = down 10%+)"),
+    min_score: int = Query(7, ge=1, le=16),
+):
+    """
+    Contrarian dip scanner: coins down min_dip%+ in 24h that still score >= min_score.
+    Pre-filters by 24h price change BEFORE scoring — only scores actual dip candidates.
+    Cached 5 minutes.
+    """
+    import time, requests as _req
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    interval = interval.lower()
+    now = int(time.time())
+    cache_key = f"{interval}:{min_dip}:{min_score}"
+    if _dip_cache.get("key") == cache_key and now - _dip_cache.get("ts", 0) < _DIP_TTL:
+        return {"signals": _dip_cache["data"], "cached": True, "timestamp": _dip_cache["ts"]}
+
+    # Step 1: Get Binance 24h tickers, pre-filter to dip candidates only
+    try:
+        resp = _req.get("https://api.binance.com/api/v3/ticker/24hr", timeout=10)
+        tickers = resp.json()
+    except Exception:
+        return {"signals": [], "error": "Binance unavailable", "timestamp": now}
+
+    dip_candidates = [
+        t for t in tickers
+        if t.get("symbol", "").endswith("USDT")
+        and float(t.get("quoteVolume", 0)) > 500_000
+        and float(t.get("priceChangePercent", 0)) <= -min_dip
+    ]
+    dip_candidates.sort(key=lambda t: float(t.get("priceChangePercent", 0)))  # most down first
+
+    def score_dip(ticker):
+        sym = ticker["symbol"].replace("USDT", "")
+        try:
+            ohlcv = get_ohlcv(sym, interval)
+            if not ohlcv or len(ohlcv) < 10:
+                return None
+            quote = {
+                "price":      float(ticker["lastPrice"]),
+                "change_24h": float(ticker["priceChangePercent"]),
+                "volume_24h": float(ticker["quoteVolume"]),
+                "high_24h":   float(ticker["highPrice"]),
+                "low_24h":    float(ticker["lowPrice"]),
+            }
+            indicators = get_indicators(sym, interval)
+            sig = calculate_signals(ohlcv, quote, indicators)
+            if sig.total < min_score:
+                return None
+            return {
+                "symbol":    sym,
+                "price":     quote["price"],
+                "change":    quote["change_24h"],
+                "score":     sig.total,
+                "max_score": 16,
+                "signal":    sig.signal,
+                "rsi":       sig.rsi,
+                "adx":       sig.adx,
+            }
+        except Exception:
+            return None
+
+    signals = []
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        futures = {ex.submit(score_dip, t): t for t in dip_candidates}
+        for fut in as_completed(futures):
+            result = fut.result()
+            if result:
+                signals.append(result)
+
+    signals.sort(key=lambda s: s["score"], reverse=True)
+    _dip_cache.update({"key": cache_key, "ts": now, "data": signals})
+    return {"signals": signals, "cached": False, "timestamp": now, "candidates": len(dip_candidates)}
+
+
 # ── New endpoints ──────────────────────────────────────────────────────────────
 
 @app.get("/derivatives/{symbol}")
