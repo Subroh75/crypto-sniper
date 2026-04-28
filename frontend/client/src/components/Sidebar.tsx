@@ -901,7 +901,19 @@ const CG_BASKET_ID: Record<string, string> = {
   POLYX:"polymesh-network", CFG:"centrifuge",
 };
 
-const SCORE_COLORS = ["#22c55e","#22c55e","#22c55e","#f59e0b","#f59e0b","#ef4444"];
+// Per-slot colour palette — vivid, distinct regardless of score
+const SLOT_COLORS = [
+  "#7c3aed", // purple
+  "#22c55e", // teal
+  "#f59e0b", // amber
+  "#3b82f6", // blue
+  "#ef4444", // red
+  "#ec4899", // pink
+  "#06b6d4", // cyan
+  "#a3e635", // lime
+  "#f97316", // orange
+  "#8b5cf6", // violet
+];
 
 function scoreColor(score: number, max: number): string {
   const pct = score / max;
@@ -1059,10 +1071,11 @@ export function BasketScanner({
   const strongBuys = doneAll.filter(r => r.score >= 9).length;
 
   // Donut data — use score as weight, min 1 for visibility
-  const donutData = doneAll.map(r => ({
+  // Colour by slot index so every wedge is vivid and distinct
+  const donutData = doneAll.map((r, idx) => ({
     name:  r.symbol,
     value: Math.max(r.score, 1),
-    color: scoreColor(r.score, r.max),
+    color: SLOT_COLORS[idx % SLOT_COLORS.length],
   }));
 
   return (
@@ -1184,10 +1197,15 @@ export function BasketScanner({
                         outerRadius={38}
                         paddingAngle={2}
                         dataKey="value"
-                        strokeWidth={0}
                       >
                         {donutData.map((entry, idx) => (
-                          <Cell key={`cell-${idx}`} fill={entry.color} opacity={0.85} />
+                          <Cell
+                            key={`cell-${idx}`}
+                            fill={entry.color}
+                            opacity={1}
+                            stroke="rgba(6,9,18,0.6)"
+                            strokeWidth={1.5}
+                          />
                         ))}
                       </Pie>
                       <RechartTooltip
