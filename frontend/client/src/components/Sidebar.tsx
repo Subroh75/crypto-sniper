@@ -1,5 +1,5 @@
 // ─── Sidebar.tsx — Right column panels ──────────────────────────────────────
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { fmtPrice, fmtPct } from "@/lib/api";
 import type { TradeSetup, Conviction, KeyLevel, WatchlistScore, AnalyseResponse } from "@/types/api";
 
@@ -322,6 +322,41 @@ const PILL_STYLE: Record<string, string> = {
   WATCH: "bg-amber/10 text-amber border-amber/20",
 };
 
+// Top-100 coin list fetched from CoinGecko (CORS-open, no key needed)
+type CgCoin = { symbol: string; name: string; change_24h: number; rank: number };
+
+function useTop100() {
+  const [coins, setCoins]   = useState<CgCoin[]>([]);
+  const [loading, setLoading] = useState(false);
+  const fetched = useRef(false);
+
+  const fetch100 = useCallback(async () => {
+    if (fetched.current) return;
+    fetched.current = true;
+    setLoading(true);
+    try {
+      const pages = await Promise.all([1, 2].map(page =>
+        fetch(
+          `https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=50&page=${page}&sparkline=false`,
+          { signal: AbortSignal.timeout(10000) }
+        ).then(r => r.json()).catch(() => [])
+      ));
+      const all: CgCoin[] = [...pages[0], ...pages[1]]
+        .filter(Boolean)
+        .map((c: Record<string, unknown>, i: number) => ({
+          symbol:    (c.symbol as string ?? "").toUpperCase(),
+          name:      (c.name   as string ?? ""),
+          change_24h: (c.price_change_percentage_24h as number ?? 0),
+          rank:      i + 1,
+        }));
+      setCoins(all);
+    } catch { /* silent */ }
+    finally { setLoading(false); }
+  }, []);
+
+  return { coins, loading, fetch100 };
+}
+
 export function WatchlistCard({
   scores,
   loading,
@@ -338,15 +373,40 @@ export function WatchlistCard({
   onRemove?: (sym: string) => void;
 }) {
   const [addMode, setAddMode] = useState(false);
-  const [input, setInput]     = useState("");
+  const [query,   setQuery]   = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
+  const { coins: top100, loading: top100Loading, fetch100 } = useTop100();
 
-  const handleAdd = () => {
-    const sym = input.trim().toUpperCase();
+  // Kick off top-100 fetch when picker opens
+  useEffect(() => {
+    if (addMode) {
+      fetch100();
+      setTimeout(() => inputRef.current?.focus(), 50);
+    } else {
+      setQuery("");
+    }
+  }, [addMode, fetch100]);
+
+  const alreadyAdded = new Set(scores.map(s => s.symbol));
+
+  // Filter top-100 by query; also surface custom entry if not in list
+  const q = query.trim().toUpperCase();
+  const filtered = top100.filter(c =>
+    !q ||
+    c.symbol.startsWith(q) ||
+    c.name.toUpperCase().includes(q)
+  );
+  // If user typed something not in top-100 list, show it as a manual option at top
+  const customEntry = q && !top100.some(c => c.symbol === q)
+    ? { symbol: q, name: "Custom", change_24h: 0, rank: 0 }
+    : null;
+  const displayList = customEntry ? [customEntry, ...filtered] : filtered;
+
+  const handleAdd = (sym: string) => {
     if (sym && onAdd) {
       onAdd(sym);
-      setInput("");
       setAddMode(false);
+      setQuery("");
     }
   };
 
@@ -404,32 +464,91 @@ export function WatchlistCard({
           )}
         </div>
 
-        {/* Add coin */}
+        {/* Add coin — searchable top-100 picker */}
         {addMode ? (
-          <div className="mt-2 flex gap-1.5">
-            <input
-              ref={inputRef}
-              type="text"
-              value={input}
-              onChange={e => setInput(e.target.value.toUpperCase())}
-              onKeyDown={e => { if (e.key === "Enter") handleAdd(); if (e.key === "Escape") setAddMode(false); }}
-              placeholder="BTC, ETH…"
-              autoFocus
-              maxLength={10}
-              className="flex-1 min-w-0 px-2.5 py-1.5 rounded-lg border border-purple/40 bg-surface-2 text-text text-[12px] font-mono placeholder:text-text-muted/40 focus:outline-none"
-            />
-            <button
-              onClick={handleAdd}
-              className="px-2.5 py-1.5 rounded-lg text-[10px] font-mono font-bold bg-purple/10 text-purple border border-purple/30 hover:bg-purple/20 transition-all"
-            >
-              Add
-            </button>
-            <button
-              onClick={() => setAddMode(false)}
-              className="px-2 py-1.5 rounded-lg text-[10px] font-mono text-text-muted/60 border border-border/40 hover:border-border/70 transition-all"
-            >
-              ✕
-            </button>
+          <div className="mt-2">
+            {/* Search input */}
+            <div className="flex gap-1.5 mb-2">
+              <input
+                ref={inputRef}
+                type="text"
+                value={query}
+                onChange={e => setQuery(e.target.value.toUpperCase())}
+                onKeyDown={e => {
+                  if (e.key === "Escape") { setAddMode(false); }
+                  if (e.key === "Enter" && displayList.length > 0) {
+                    const first = displayList.find(c => !alreadyAdded.has(c.symbol));
+                    if (first) handleAdd(first.symbol);
+                  }
+                }}
+                placeholder="Search by name or symbol…"
+                maxLength={20}
+                className="flex-1 min-w-0 px-2.5 py-1.5 rounded-lg border border-purple/40 bg-surface-2 text-text text-[11px] font-mono placeholder:text-text-muted/40 focus:outline-none"
+              />
+              <button
+                onClick={() => setAddMode(false)}
+                className="px-2 py-1.5 rounded-lg text-[11px] font-mono text-text-muted/60 border border-border/40 hover:border-border/70 transition-all"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Scrollable coin list */}
+            <div className="rounded-lg border border-border/40 bg-surface-2 overflow-hidden">
+              {/* Header */}
+              <div className="flex items-center gap-2 px-2.5 py-1.5 border-b border-border/30 bg-surface-offset">
+                <span className="text-[8px] font-mono font-bold text-text-muted/40 uppercase tracking-widest flex-1">
+                  {top100Loading ? "Loading top 100…" : `Top 100 by market cap${q ? ` · ${displayList.length} match` : ""}`}
+                </span>
+              </div>
+              <div className="max-h-[220px] overflow-y-auto">
+                {top100Loading ? (
+                  Array.from({ length: 6 }).map((_, i) => (
+                    <div key={i} className="h-8 mx-2 my-1 bg-surface-offset rounded animate-pulse" />
+                  ))
+                ) : displayList.length === 0 ? (
+                  <div className="text-center text-[10px] font-mono text-text-muted/50 py-4">No coins found</div>
+                ) : (
+                  displayList.map(coin => {
+                    const added = alreadyAdded.has(coin.symbol);
+                    return (
+                      <button
+                        key={coin.symbol}
+                        onClick={() => !added && handleAdd(coin.symbol)}
+                        disabled={added}
+                        className={`w-full flex items-center justify-between px-2.5 py-1.5 border-b border-border/20 last:border-0 transition-all text-left ${
+                          added
+                            ? "opacity-40 cursor-default"
+                            : "hover:bg-purple/5 hover:border-purple/10"
+                        }`}
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          {coin.rank > 0 && (
+                            <span className="text-[8px] font-mono text-text-muted/30 w-4 shrink-0 text-right">{coin.rank}</span>
+                          )}
+                          <span className="text-[11px] font-mono font-black text-text shrink-0">{coin.symbol}</span>
+                          <span className="text-[9px] font-mono text-text-muted/50 truncate">{coin.name}</span>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          {coin.change_24h !== 0 && (
+                            <span className={`text-[9px] font-mono ${
+                              coin.change_24h >= 0 ? "text-teal" : "text-red"
+                            }`}>
+                              {coin.change_24h >= 0 ? "+" : ""}{coin.change_24h.toFixed(1)}%
+                            </span>
+                          )}
+                          {added ? (
+                            <span className="text-[8px] font-mono text-text-muted/40">Added</span>
+                          ) : (
+                            <span className="text-[9px] font-mono text-purple/60">+</span>
+                          )}
+                        </div>
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+            </div>
           </div>
         ) : (
           <button
