@@ -135,8 +135,86 @@ export function NewsSection({ symbol }: { symbol: string }) {
 // ════════════════════════════════════════════════════════════════════════════
 // MACRO
 // ════════════════════════════════════════════════════════════════════════════
+// Derive a macro regime score (-3 to +3) and per-metric interpretation from live data
+function buildMacroInsights(data: Record<string, number | null | undefined> | null) {
+  const fedRate  = data?.fed_rate ?? 4.25;
+  const cpi      = data?.us_cpi   ?? 3.1;
+  const dxy      = data?.dxy      ?? 101.4;
+  const gold     = data?.gold     ?? 3240;
+  const yield10y = 4.38; // static fallback
+
+  // Each metric scores -1 (bearish for crypto), 0 (neutral), +1 (bullish)
+  const fedScore  = fedRate <= 3.5 ? 1 : fedRate >= 5.0 ? -1 : 0;
+  const cpiScore  = cpi <= 2.5 ? 1 : cpi >= 4.0 ? -1 : 0;
+  const dxyScore  = dxy <= 99 ? 1 : dxy >= 104 ? -1 : 0;
+  const yieldScore = yield10y <= 3.5 ? 1 : yield10y >= 4.5 ? -1 : 0;
+  const goldScore  = gold >= 2500 ? 1 : gold <= 1800 ? -1 : 0; // gold up = risk-off but also inflation hedge
+
+  const total = fedScore + cpiScore + dxyScore + yieldScore + goldScore;
+
+  const regime =
+    total >= 3  ? { label: "RISK-ON",     color: "text-teal",  bg: "bg-teal/8 border-teal/20",    desc: "Macro tailwinds are strong. Low rates + weak dollar = ideal crypto environment." } :
+    total >= 1  ? { label: "MILD BULLISH",color: "text-teal",  bg: "bg-teal/5 border-teal/15",    desc: "Conditions lean supportive. Most macro factors are not headwinds for crypto." } :
+    total === 0 ? { label: "NEUTRAL",     color: "text-amber", bg: "bg-amber/8 border-amber/20",  desc: "Mixed signals. Bulls and bears have equal footing from a macro standpoint." } :
+    total >= -2 ? { label: "MILD BEARISH",color: "text-red",   bg: "bg-red/5 border-red/15",      desc: "Some macro headwinds present. High rates or strong dollar compress risk appetite." } :
+                  { label: "RISK-OFF",    color: "text-red",   bg: "bg-red/8 border-red/20",      desc: "Macro environment is hostile to risk assets. Capital preservation favoured." };
+
+  const impacts = [
+    {
+      label: "Fed Rate",
+      value: `${fedRate}%`,
+      signal: fedScore > 0 ? "Bullish" : fedScore < 0 ? "Bearish" : "Neutral",
+      color:  fedScore > 0 ? "text-teal" : fedScore < 0 ? "text-red" : "text-amber",
+      note:   fedRate <= 3.5 ? "Accommodative — cheap capital flows into risk assets"
+            : fedRate >= 5.0 ? "Restrictive — high cost of capital limits crypto upside"
+            : "Moderate — neither stimulative nor restrictive for crypto",
+    },
+    {
+      label: "US CPI",
+      value: `${cpi}%`,
+      signal: cpiScore > 0 ? "Bullish" : cpiScore < 0 ? "Bearish" : "Neutral",
+      color:  cpiScore > 0 ? "text-teal" : cpiScore < 0 ? "text-red" : "text-amber",
+      note:   cpi <= 2.5 ? "Inflation tamed — reduces pressure for rate hikes"
+            : cpi >= 4.0 ? "Elevated inflation — forces Fed hawkishness, risk-asset drag"
+            : "Within range — rate cut path remains open",
+    },
+    {
+      label: "DXY",
+      value: dxy > 0 ? dxy.toFixed(1) : "101.4",
+      signal: dxyScore > 0 ? "Bullish" : dxyScore < 0 ? "Bearish" : "Neutral",
+      color:  dxyScore > 0 ? "text-teal" : dxyScore < 0 ? "text-red" : "text-amber",
+      note:   dxy <= 99  ? "Weak dollar — strong historical tailwind for BTC and alts"
+            : dxy >= 104 ? "Strong dollar — inversely correlated with crypto rally potential"
+            : "Dollar neutral — no significant FX headwind or tailwind",
+    },
+    {
+      label: "10Y Yield",
+      value: `${yield10y}%`,
+      signal: yieldScore > 0 ? "Bullish" : yieldScore < 0 ? "Bearish" : "Neutral",
+      color:  yieldScore > 0 ? "text-teal" : yieldScore < 0 ? "text-red" : "text-amber",
+      note:   yield10y <= 3.5 ? "Low yields push capital toward higher-risk assets like crypto"
+            : yield10y >= 4.5 ? "High yields make bonds competitive — reduces crypto appeal"
+            : "Yields moderate — not a decisive factor either way",
+    },
+    {
+      label: "Gold",
+      value: gold > 0 ? fmtPrice(gold) : "$3,240",
+      signal: goldScore > 0 ? "Bullish" : goldScore < 0 ? "Bearish" : "Neutral",
+      color:  goldScore > 0 ? "text-teal" : goldScore < 0 ? "text-red" : "text-amber",
+      note:   gold >= 2500 ? "Gold elevated — inflation hedge demand benefits BTC narrative"
+            : gold <= 1800 ? "Gold weak — risk-off sentiment not yet driving store-of-value bids"
+            : "Gold range-bound — neutral read on inflation and safe-haven flows",
+    },
+  ];
+
+  return { regime, impacts, total };
+}
+
 export function MacroSection() {
   const { data } = useMacro();
+
+  const macroData = data as Record<string, number | null | undefined> | null;
+  const { regime, impacts } = buildMacroInsights(macroData);
 
   const stats = [
     { label: "Fed Rate", value: data?.fed_rate != null ? `${data.fed_rate}%`    : "4.25%", color: "" },
@@ -150,7 +228,9 @@ export function MacroSection() {
   return (
     <div className="card mb-3">
       <SectionHeader icon="🌐" title="MACRO CONTEXT" badge="NEW" />
-      <div className="p-4">
+      <div className="p-4 space-y-4">
+
+        {/* Metric tiles */}
         <div className="grid grid-cols-6 gap-2">
           {stats.map(({ label, value, color }) => (
             <div key={label} className="bg-surface-2 rounded-lg border border-border/40 p-2.5">
@@ -159,6 +239,44 @@ export function MacroSection() {
             </div>
           ))}
         </div>
+
+        {/* Macro Regime verdict */}
+        <div className={`rounded-lg border ${regime.bg} px-4 py-3 flex items-start gap-4`}>
+          <div className="shrink-0">
+            <div className="text-[9px] font-mono text-text-muted/60 uppercase tracking-widest mb-1">Macro Regime</div>
+            <div className={`text-[15px] font-mono font-black ${regime.color}`}>{regime.label}</div>
+          </div>
+          <div className="w-px self-stretch bg-border/30" />
+          <p className="text-[11px] text-text-muted leading-relaxed pt-0.5">{regime.desc}</p>
+        </div>
+
+        {/* Per-metric crypto impact table */}
+        <div className="rounded-lg border border-border/40 overflow-hidden">
+          <div className="grid grid-cols-4 px-3 py-1.5 border-b border-border/30 bg-surface-2">
+            <span className="text-[9px] font-mono font-bold text-text-muted/50 uppercase tracking-widest">Indicator</span>
+            <span className="text-[9px] font-mono font-bold text-text-muted/50 uppercase tracking-widest">Value</span>
+            <span className="text-[9px] font-mono font-bold text-text-muted/50 uppercase tracking-widest">Signal</span>
+            <span className="text-[9px] font-mono font-bold text-text-muted/50 uppercase tracking-widest">Crypto Impact</span>
+          </div>
+          {impacts.map((row, i) => (
+            <div
+              key={row.label}
+              className={`grid grid-cols-4 px-3 py-2.5 items-start gap-2 ${
+                i < impacts.length - 1 ? "border-b border-border/20" : ""
+              }`}
+            >
+              <span className="text-[10px] font-mono font-bold text-text-muted/80">{row.label}</span>
+              <span className={`text-[10px] font-mono font-bold ${row.color}`}>{row.value}</span>
+              <span className={`text-[9px] font-mono font-bold px-1.5 py-0.5 rounded self-start ${
+                row.signal === "Bullish" ? "bg-teal/10 text-teal" :
+                row.signal === "Bearish" ? "bg-red/10 text-red" :
+                "bg-amber/10 text-amber"
+              }`}>{row.signal}</span>
+              <span className="text-[10px] text-text-muted/70 leading-snug">{row.note}</span>
+            </div>
+          ))}
+        </div>
+
       </div>
     </div>
   );
