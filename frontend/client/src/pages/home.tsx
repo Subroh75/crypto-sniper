@@ -806,7 +806,6 @@ export default function Home() {
               <TrendingSection onSelect={(sym) => runAnalysis(sym)} />
               <NewsSection symbol={symbol} />
               <MacroSection />
-              <OptionsIntelligenceSection />
 
               {/* 09: Perplexity Deep Research */}
               <DeepResearchSection symbol={symbol} analyseData={sig} />
@@ -917,6 +916,7 @@ export default function Home() {
                 interval={interval}
                 onSelect={(sym) => runAnalysis(sym)}
               />
+              <OptionsIntelligenceSection />
             </div>
             {/*  end RIGHT sidebar  */}
 
