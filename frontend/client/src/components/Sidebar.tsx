@@ -2,6 +2,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { fmtPrice, fmtPct } from "@/lib/api";
 import type { TradeSetup, Conviction, KeyLevel, WatchlistScore, AnalyseResponse } from "@/types/api";
+import { PieChart, Pie, Cell, Tooltip as RechartTooltip, ResponsiveContainer } from "recharts";
 
 // ── Shared card wrapper ───────────────────────────────────────────────────────
 function SideCard({
@@ -880,16 +881,72 @@ const BASKETS: Array<{ id: string; label: string; icon: string; desc: string; sy
   },
 ];
 
-type BasketResult = {
-  symbol:  string;
-  score:   number;
-  max:     number;
-  label:   string;
-  change:  number;
-  price:   number;
-  done:    boolean;
-  error:   boolean;
+// CoinGecko ID map for historical price fetching
+const CG_BASKET_ID: Record<string, string> = {
+  BTC:"bitcoin", ETH:"ethereum", BNB:"binancecoin", SOL:"solana",
+  XRP:"ripple", ADA:"cardano", TAO:"bittensor", RENDER:"render-token",
+  FET:"fetch-ai", AGIX:"singularitynet", OCEAN:"ocean-protocol",
+  WLD:"worldcoin-wld", AKT:"akash-network", NMR:"numeraire",
+  ARB:"arbitrum", OP:"optimism", MNT:"mantle", POL:"matic-network",
+  STRK:"starknet", METIS:"metis-token", ZK:"zksync",
+  DOGE:"dogecoin", SHIB:"shiba-inu", PEPE:"pepe", WIF:"dogwifhat",
+  BONK:"bonk", FLOKI:"floki", BRETT:"brett",
+  UNI:"uniswap", AAVE:"aave", MKR:"maker", CRV:"curve-dao-token",
+  COMP:"compound-governance-token", LDO:"lido-dao",
+  JUP:"jupiter-exchange-solana", GMX:"gmx",
+  RAY:"raydium", PYTH:"pyth-network", JTO:"jito-governance-token",
+  STX:"blockstack", ORDI:"ordinals", RUNE:"thorchain",
+  BCH:"bitcoin-cash", ICP:"internet-computer",
+  LINK:"chainlink", ONDO:"ondo-finance", AVAX:"avalanche-2",
+  POLYX:"polymesh-network", CFG:"centrifuge",
 };
+
+const SCORE_COLORS = ["#22c55e","#22c55e","#22c55e","#f59e0b","#f59e0b","#ef4444"];
+
+function scoreColor(score: number, max: number): string {
+  const pct = score / max;
+  if (pct >= 0.65) return "#22c55e";
+  if (pct >= 0.40) return "#f59e0b";
+  return "#64748b";
+}
+
+type BasketResult = {
+  symbol: string;
+  score:  number;
+  max:    number;
+  label:  string;
+  change: number;
+  price:  number;
+  done:   boolean;
+  error:  boolean;
+};
+
+type ReturnPeriod = "1W" | "1M" | "3M";
+
+const PERIOD_DAYS: Record<ReturnPeriod, number> = { "1W": 7, "1M": 30, "3M": 90 };
+
+async function fetchHistoricalReturn(symbol: string, days: number): Promise<number | null> {
+  const cgId = CG_BASKET_ID[symbol.toUpperCase()];
+  if (!cgId) return null;
+  try {
+    const r = await fetch(
+      `https://api.coingecko.com/api/v3/coins/${cgId}/market_chart?vs_currency=usd&days=${days}&interval=daily`,
+      { signal: AbortSignal.timeout(8000) }
+    );
+    if (!r.ok) return null;
+    const j = await r.json();
+    const prices: [number, number][] = j.prices ?? [];
+    if (prices.length < 2) return null;
+    const entry = prices[0][1];
+    const exit  = prices[prices.length - 1][1];
+    if (!entry || entry === 0) return null;
+    return ((exit - entry) / entry) * 100;
+  } catch {
+    return null;
+  }
+}
+
+const RENDER_BASE = "https://crypto-sniper.onrender.com";
 
 export function BasketScanner({
   interval,
@@ -904,9 +961,17 @@ export function BasketScanner({
   const [done,         setDone]         = useState(false);
   const abortRef = useRef<AbortController | null>(null);
 
+  // Returns calculator state
+  const [calcAmount,  setCalcAmount]  = useState("100");
+  const [calcPeriod,  setCalcPeriod]  = useState<ReturnPeriod>("1M");
+  const [calcResult,  setCalcResult]  = useState<{ value: number; pct: number } | null>(null);
+  const [calcLoading, setCalcLoading] = useState(false);
+  const calcAbortRef = useRef<AbortController | null>(null);
+
   const basket = BASKETS.find(b => b.id === activeBasket) ?? null;
 
   const runScan = useCallback(async (b: typeof BASKETS[0]) => {
+    // Abort any previous scan
     abortRef.current?.abort();
     const ctrl = new AbortController();
     abortRef.current = ctrl;
@@ -914,12 +979,11 @@ export function BasketScanner({
     setActiveBasket(b.id);
     setScanning(true);
     setDone(false);
+    setCalcResult(null);
     setResults(b.symbols.map(sym => ({
       symbol: sym, score: 0, max: 16, label: "—",
       change: 0, price: 0, done: false, error: false,
     })));
-
-    const RENDER_BASE = "https://crypto-sniper.onrender.com";
 
     await Promise.allSettled(
       b.symbols.map(async (sym) => {
@@ -932,9 +996,9 @@ export function BasketScanner({
           });
           if (!res.ok) throw new Error();
           const data = await res.json();
-          const score  = data?.signal?.total  ?? 0;
-          const max    = data?.signal?.max    ?? 16;
-          const label  = data?.signal?.label  ?? "—";
+          const score  = data?.signal?.total    ?? 0;
+          const max    = data?.signal?.max      ?? 16;
+          const label  = data?.signal?.label    ?? "—";
           const change = data?.quote?.change_24h ?? 0;
           const price  = data?.quote?.price      ?? 0;
           setResults(prev => prev.map(r =>
@@ -958,14 +1022,48 @@ export function BasketScanner({
     }
   }, [interval]);
 
-  // Sort: done results by score desc first, then pending at bottom
+  // Run returns calculator
+  const runCalc = useCallback(async (period: ReturnPeriod, amount: string, syms: string[]) => {
+    calcAbortRef.current?.abort();
+    calcAbortRef.current = new AbortController();
+    setCalcLoading(true);
+    setCalcResult(null);
+    const days = PERIOD_DAYS[period];
+    // Fetch all in parallel, equal-weight average
+    const returns = await Promise.all(syms.map(s => fetchHistoricalReturn(s, days)));
+    const valid = returns.filter((r): r is number => r !== null);
+    if (valid.length === 0) { setCalcLoading(false); return; }
+    const avgPct = valid.reduce((a, b) => a + b, 0) / valid.length;
+    const startAmt = parseFloat(amount) || 100;
+    const endAmt = startAmt * (1 + avgPct / 100);
+    setCalcResult({ value: parseFloat(endAmt.toFixed(2)), pct: parseFloat(avgPct.toFixed(2)) });
+    setCalcLoading(false);
+  }, []);
+
+  // Auto-run calc when done changes, period changes, or amount changes
+  useEffect(() => {
+    if (!done || !basket) return;
+    const doneSyms = results.filter(r => r.done && !r.error).map(r => r.symbol);
+    if (doneSyms.length === 0) return;
+    runCalc(calcPeriod, calcAmount, doneSyms);
+  }, [done, calcPeriod]);  // eslint-disable-line
+
+  // Sort: done by score desc, pending at bottom
   const sorted = [...results].sort((a, b) => {
     if (a.done !== b.done) return a.done ? -1 : 1;
     return b.score - a.score;
   });
 
   const top        = sorted.find(r => r.done && !r.error);
-  const strongBuys = sorted.filter(r => r.done && r.score >= 9).length;
+  const doneAll    = sorted.filter(r => r.done && !r.error);
+  const strongBuys = doneAll.filter(r => r.score >= 9).length;
+
+  // Donut data — use score as weight, min 1 for visibility
+  const donutData = doneAll.map(r => ({
+    name:  r.symbol,
+    value: Math.max(r.score, 1),
+    color: scoreColor(r.score, r.max),
+  }));
 
   return (
     <SideCard>
@@ -977,7 +1075,7 @@ export function BasketScanner({
           {BASKETS.map(b => (
             <button
               key={b.id}
-              onClick={() => runScan(b)}
+              onClick={() => !scanning && runScan(b)}
               disabled={scanning}
               className={`flex flex-col items-center gap-0.5 py-2 px-1 rounded-lg border text-center transition-all ${
                 activeBasket === b.id
@@ -991,7 +1089,7 @@ export function BasketScanner({
           ))}
         </div>
 
-        {/* Active basket + scan status */}
+        {/* Status row */}
         {basket && (
           <div className="flex items-center justify-between mb-2 px-0.5">
             <div>
@@ -1002,25 +1100,21 @@ export function BasketScanner({
               <span className="text-[8px] font-mono text-amber animate-pulse">scanning…</span>
             )}
             {done && (
-              <span className={`text-[8px] font-mono ${strongBuys > 0 ? "text-teal" : "text-text-muted/50"}`}>
+              <span className={`text-[8px] font-mono font-bold ${strongBuys > 0 ? "text-teal" : "text-text-muted/50"}`}>
                 {strongBuys > 0 ? `${strongBuys} strong buy${strongBuys > 1 ? "s" : ""}` : "no strong buys"}
               </span>
             )}
           </div>
         )}
 
-        {/* Leaderboard */}
+        {/* ── Leaderboard ─────────────────────────────────────────── */}
         {results.length > 0 && (
-          <div className="space-y-1">
+          <div className="space-y-1 mb-3">
             {sorted.map((r, i) => {
               const isTop    = r === top && done && r.score >= 9;
               const pct      = Math.round((r.score / r.max) * 100);
-              const barColor =
-                r.score >= 9 ? "bg-teal" :
-                r.score >= 5 ? "bg-amber" : "bg-border/50";
-              const scoreColor =
-                r.score >= 9 ? "text-teal" :
-                r.score >= 5 ? "text-amber" : "text-text-muted/40";
+              const bColor   = scoreColor(r.score, r.max);
+              const sColor   = r.score >= 9 ? "text-teal" : r.score >= 6 ? "text-amber" : "text-text-muted/40";
               return (
                 <button
                   key={r.symbol}
@@ -1032,23 +1126,18 @@ export function BasketScanner({
                       : "border-border/30 bg-surface-2 hover:border-purple/30"
                   } ${!r.done ? "opacity-50 cursor-default" : ""}`}
                 >
-                  {/* Rank */}
                   <span className="text-[8px] font-mono text-text-muted/25 w-3 shrink-0 text-right">
                     {r.done && !r.error ? i + 1 : "·"}
                   </span>
-
-                  {/* Symbol */}
                   <span className={`text-[11px] font-mono font-black w-10 shrink-0 ${
                     r.done && !r.error ? "text-text" : "text-text-muted/30"
                   }`}>{r.symbol}</span>
-
-                  {/* Score bar */}
                   <div className="flex-1 min-w-0">
                     {r.done && !r.error ? (
                       <div className="relative h-1.5 bg-surface-offset rounded-full overflow-hidden">
                         <div
-                          className={`absolute left-0 top-0 h-full rounded-full transition-all duration-700 ${barColor}`}
-                          style={{ width: `${pct}%` }}
+                          className="absolute left-0 top-0 h-full rounded-full transition-all duration-700"
+                          style={{ width: `${pct}%`, background: bColor }}
                         />
                       </div>
                     ) : r.error ? (
@@ -1057,13 +1146,9 @@ export function BasketScanner({
                       <div className="h-1.5 rounded-full bg-surface-offset animate-pulse" />
                     )}
                   </div>
-
-                  {/* Score */}
-                  <span className={`text-[10px] font-mono font-bold shrink-0 ${scoreColor}`}>
+                  <span className={`text-[10px] font-mono font-bold shrink-0 ${sColor}`}>
                     {r.done && !r.error ? `${r.score}/${r.max}` : "—"}
                   </span>
-
-                  {/* 24h % */}
                   {r.done && !r.error && (
                     <span className={`text-[8px] font-mono shrink-0 w-9 text-right ${
                       r.change >= 0 ? "text-teal" : "text-red"
@@ -1074,6 +1159,189 @@ export function BasketScanner({
                 </button>
               );
             })}
+          </div>
+        )}
+
+        {/* ── Allocation Donut + Constituent Table ─────────────────── */}
+        {done && donutData.length > 0 && (
+          <>
+            <div className="border-t border-border/20 pt-3 mb-3">
+              <div className="text-[8px] font-mono text-text-muted/40 uppercase tracking-widest mb-2">
+                Allocation by signal strength
+              </div>
+
+              {/* Donut + legend side-by-side */}
+              <div className="flex items-center gap-3">
+                {/* Donut */}
+                <div className="shrink-0" style={{ width: 80, height: 80 }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={donutData}
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={24}
+                        outerRadius={38}
+                        paddingAngle={2}
+                        dataKey="value"
+                        strokeWidth={0}
+                      >
+                        {donutData.map((entry, idx) => (
+                          <Cell key={`cell-${idx}`} fill={entry.color} opacity={0.85} />
+                        ))}
+                      </Pie>
+                      <RechartTooltip
+                        content={({ active, payload }) => {
+                          if (!active || !payload?.length) return null;
+                          const d = payload[0].payload;
+                          return (
+                            <div className="text-[9px] font-mono px-2 py-1 rounded bg-surface-card border border-border/60 text-text">
+                              {d.name}: {d.value}/{doneAll.find(r=>r.symbol===d.name)?.max ?? 16}
+                            </div>
+                          );
+                        }}
+                      />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+
+                {/* Legend — 2 column */}
+                <div className="flex-1 grid grid-cols-2 gap-x-2 gap-y-0.5">
+                  {donutData.map(d => (
+                    <button
+                      key={d.name}
+                      onClick={() => onSelect(d.name)}
+                      className="flex items-center gap-1 group"
+                    >
+                      <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: d.color }} />
+                      <span className="text-[9px] font-mono text-text-muted/70 group-hover:text-text transition-colors truncate">
+                        {d.name}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* ── Constituent table ──────────────────────────────── */}
+            <div className="border-t border-border/20 pt-3 mb-3">
+              <div className="text-[8px] font-mono text-text-muted/40 uppercase tracking-widest mb-2">
+                Constituents
+              </div>
+              <div className="space-y-0.5">
+                {doneAll.map((r, i) => {
+                  const alloc = Math.round((Math.max(r.score, 1) / donutData.reduce((a,d)=>a+d.value,0)) * 100);
+                  return (
+                    <button
+                      key={r.symbol}
+                      onClick={() => onSelect(r.symbol)}
+                      className="w-full flex items-center gap-2 py-1.5 px-1.5 rounded hover:bg-surface-2 transition-colors text-left group"
+                    >
+                      <span className="text-[8px] font-mono text-text-muted/30 w-3 shrink-0">{i+1}</span>
+                      <span className="text-[10px] font-mono font-bold text-text w-10 shrink-0 group-hover:text-purple transition-colors">
+                        {r.symbol}
+                      </span>
+                      <span className="flex-1 text-[9px] font-mono text-text-muted/50 text-right">
+                        ${r.price < 0.01 ? r.price.toFixed(6) : r.price < 1 ? r.price.toFixed(4) : r.price.toFixed(2)}
+                      </span>
+                      <span className={`text-[9px] font-mono w-10 text-right shrink-0 ${r.change>=0?"text-teal":"text-red"}`}>
+                        {r.change>=0?"+":""}{r.change.toFixed(1)}%
+                      </span>
+                      <span
+                        className="text-[8px] font-mono font-bold w-6 text-right shrink-0"
+                        style={{ color: scoreColor(r.score, r.max) }}
+                      >
+                        {alloc}%
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </>
+        )}
+
+        {/* ── Returns Calculator ────────────────────────────────────── */}
+        {done && doneAll.length > 0 && (
+          <div className="border-t border-border/20 pt-3 mb-3">
+            <div className="text-[8px] font-mono text-text-muted/40 uppercase tracking-widest mb-2">
+              Returns calculator
+            </div>
+
+            {/* Period tabs */}
+            <div className="flex items-center gap-1.5 mb-2">
+              <span className="text-[9px] font-mono text-text-muted/50 mr-1">If you invested</span>
+              {(["1W","1M","3M"] as ReturnPeriod[]).map(p => (
+                <button
+                  key={p}
+                  onClick={() => {
+                    setCalcPeriod(p);
+                    runCalc(p, calcAmount, doneAll.map(r => r.symbol));
+                  }}
+                  className={`text-[9px] font-mono px-2 py-0.5 rounded border transition-all ${
+                    calcPeriod === p
+                      ? "border-purple/50 bg-purple/10 text-purple font-bold"
+                      : "border-border/40 text-text-muted/50 hover:border-purple/30"
+                  }`}
+                >
+                  {p} ago
+                </button>
+              ))}
+            </div>
+
+            {/* Amount input */}
+            <div className="flex items-center gap-2 mb-2">
+              <span className="text-[9px] font-mono text-text-muted/40">$</span>
+              <input
+                type="number"
+                value={calcAmount}
+                onChange={e => setCalcAmount(e.target.value)}
+                onBlur={() => runCalc(calcPeriod, calcAmount, doneAll.map(r=>r.symbol))}
+                className="flex-1 bg-surface-2 border border-border/50 rounded px-2 py-1 text-[10px] font-mono text-text focus:outline-none focus:border-purple/50"
+                placeholder="100"
+                min="1"
+              />
+              <span className="text-[9px] font-mono text-text-muted/40">invested</span>
+            </div>
+
+            {/* Result */}
+            {calcLoading && (
+              <div className="h-12 rounded-lg bg-surface-2 animate-pulse" />
+            )}
+            {!calcLoading && calcResult && (
+              <div
+                className="rounded-lg px-3 py-3 border"
+                style={
+                  calcResult.pct >= 0
+                    ? { background: "rgba(34,197,94,0.06)", borderColor: "rgba(34,197,94,0.2)" }
+                    : { background: "rgba(239,68,68,0.06)", borderColor: "rgba(239,68,68,0.2)" }
+                }
+              >
+                <div className="text-[8px] font-mono text-text-muted/50 mb-0.5">would have become</div>
+                <div className="flex items-baseline justify-between">
+                  <span
+                    className="text-[20px] font-black font-mono"
+                    style={{ color: calcResult.pct >= 0 ? "#22c55e" : "#ef4444" }}
+                  >
+                    ${calcResult.value.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                  </span>
+                  <span
+                    className="text-[12px] font-bold font-mono"
+                    style={{ color: calcResult.pct >= 0 ? "#22c55e" : "#ef4444" }}
+                  >
+                    {calcResult.pct >= 0 ? "+" : ""}{calcResult.pct.toFixed(1)}%
+                  </span>
+                </div>
+                <div className="text-[8px] font-mono text-text-muted/30 mt-1">
+                  Equal-weight avg across {doneAll.length} coins · {calcPeriod} historical
+                </div>
+              </div>
+            )}
+            {!calcLoading && !calcResult && done && (
+              <div className="text-[9px] font-mono text-text-muted/40 text-center py-2">
+                Historical data unavailable for this basket
+              </div>
+            )}
           </div>
         )}
 
@@ -1091,7 +1359,7 @@ export function BasketScanner({
         {done && top && top.score >= 5 && (
           <button
             onClick={() => onSelect(top.symbol)}
-            className="w-full mt-2 py-2 rounded-lg text-[10px] font-mono font-bold text-white flex items-center justify-center gap-1.5 transition-all hover:opacity-90"
+            className="w-full mt-1 py-2 rounded-lg text-[10px] font-mono font-bold text-white flex items-center justify-center gap-1.5 transition-all hover:opacity-90"
             style={{
               background: top.score >= 9
                 ? "linear-gradient(135deg, #22c55e, #16a34a)"
