@@ -197,10 +197,11 @@ async def macro():
 @app.get("/scan", tags=["Signal"])
 def scan_top_signals(
     interval: str = Query("1h", description="Candle interval e.g. 1h 4h 1d"),
-    min_score: int = Query(5, ge=1, le=16),
+    min_score: int = Query(9, ge=1, le=16),
 ):
     """
-    Scan top coins by volume from Binance, score each, return those >= min_score.
+    Scan top 200 coins by market cap, score each, return those >= min_score.
+    Universe: CoinGecko top-200 by market cap (symbols intersected with Binance USDT pairs).
     Cached 5 minutes.
     """
     import time, requests as _req
@@ -212,17 +213,49 @@ def scan_top_signals(
     if _scan_cache.get("key") == cache_key and now - _scan_cache.get("ts", 0) < _SCAN_TTL:
         return {"signals": _scan_cache["data"], "cached": True, "timestamp": _scan_cache["ts"]}
 
-    # Get top coins by quote volume from Binance 24hr ticker
+    # ── Step 1: Get top-200 symbols by market cap from CoinGecko ──────────────
+    top200_syms: list[str] = []
+    try:
+        for page in range(1, 3):
+            cg = _req.get(
+                "https://api.coingecko.com/api/v3/coins/markets"
+                "?vs_currency=usd&order=market_cap_desc"
+                f"&per_page=100&page={page}&sparkline=false",
+                timeout=12,
+            )
+            if cg.status_code == 200:
+                for coin in cg.json():
+                    sym = coin.get("symbol", "").upper().strip()
+                    if sym and sym not in top200_syms:
+                        top200_syms.append(sym)
+            time.sleep(0.3)
+    except Exception:
+        pass  # fall back to Binance volume ordering if CoinGecko fails
+
+    # ── Step 2: Get Binance 24h tickers for price/volume data ─────────────────
     try:
         resp = _req.get("https://api.binance.com/api/v3/ticker/24hr", timeout=10)
         tickers = resp.json()
     except Exception:
         return {"signals": [], "error": "Binance unavailable", "timestamp": now}
 
-    # Filter USDT pairs, sort by quote volume, take top 50
-    usdt = [t for t in tickers if t.get("symbol","").endswith("USDT") and float(t.get("quoteVolume",0)) > 1_000_000]
-    usdt.sort(key=lambda t: float(t.get("quoteVolume", 0)), reverse=True)
-    top50 = usdt[:50]
+    # Build symbol→ticker map from all USDT pairs with meaningful volume
+    ticker_map: dict[str, dict] = {}
+    for t in tickers:
+        s = t.get("symbol", "")
+        if s.endswith("USDT") and float(t.get("quoteVolume", 0)) > 500_000:
+            sym = s.replace("USDT", "")
+            ticker_map[sym] = t
+
+    # ── Step 3: Build scan list — top-200 market cap ∩ Binance USDT pairs ─────
+    if top200_syms:
+        # Preserve market-cap order, only include symbols tradeable on Binance
+        scan_list = [ticker_map[s] for s in top200_syms if s in ticker_map]
+    else:
+        # CoinGecko unavailable — fall back to top-100 by Binance volume
+        all_usdt = list(ticker_map.values())
+        all_usdt.sort(key=lambda t: float(t.get("quoteVolume", 0)), reverse=True)
+        scan_list = all_usdt[:100]
 
     def score_coin(ticker):
         sym = ticker["symbol"].replace("USDT", "")
@@ -246,20 +279,23 @@ def scan_top_signals(
                 "price":     quote["price"],
                 "change":    quote["change_24h"],
                 "score":     sig.total,
-                "max_score": 16,  # always 16 (V5+P3+R2+T3+S3)
+                "max_score": 16,
                 "signal":    sig.signal,
                 "direction": sig.direction,
-                "components": {
-                    "V": sig.v_score, "P": sig.p_score,
-                    "R": sig.r_score, "T": sig.t_score, "S": sig.s_score,
-                },
+                "rsi":       sig.rsi,
+                "adx":       sig.adx,
+                "v":         sig.v_score,
+                "p":         sig.p_score,
+                "r":         sig.r_score,
+                "t":         sig.t_score,
+                "s":         sig.s_score,
             }
         except Exception:
             return None
 
     signals = []
-    with ThreadPoolExecutor(max_workers=8) as ex:
-        futures = {ex.submit(score_coin, t): t for t in top50}
+    with ThreadPoolExecutor(max_workers=10) as ex:
+        futures = {ex.submit(score_coin, t): t for t in scan_list}
         for fut in as_completed(futures):
             result = fut.result()
             if result:

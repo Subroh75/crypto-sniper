@@ -23,14 +23,15 @@ export function TopSignals({ onSelect, interval = "1h" }: Props) {
   const [signals, setSignals] = useState<Signal[]>([]);
   const [loading, setLoading] = useState(false);
   const [lastScan, setLastScan] = useState<string>("");
-  const [minScore, setMinScore] = useState(5);
+  const [minScore, setMinScore] = useState(9);
 
   const scan = useCallback(async () => {
     setLoading(true);
     try {
       const r = await fetch(`${API}/scan?interval=${interval.toLowerCase()}&min_score=${minScore}`);
       const j = await r.json();
-      setSignals((j.signals || []).filter((s: Signal) => s.signal === "STRONG BUY"));
+      // API already filters by min_score — no extra client-side filter needed
+      setSignals(j.signals || []);
       setLastScan(new Date().toLocaleTimeString());
     } catch { setSignals([]); }
     finally { setLoading(false); }
@@ -39,7 +40,7 @@ export function TopSignals({ onSelect, interval = "1h" }: Props) {
   useEffect(() => { scan(); }, [scan]);
   useEffect(() => { const t = setInterval(scan, 5 * 60 * 1000); return () => clearInterval(t); }, [scan]);
 
-  const nextScore = minScore === 5 ? 7 : minScore === 7 ? 9 : 5;
+  const nextScore = minScore === 9 ? 11 : minScore === 11 ? 13 : 9;
   const isEmpty = !loading && signals.length === 0 && !!lastScan;
   const duration = Math.max(signals.length * 4, 12);
 

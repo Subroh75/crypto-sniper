@@ -901,6 +901,24 @@ const CG_BASKET_ID: Record<string, string> = {
   POLYX:"polymesh-network", CFG:"centrifuge",
 };
 
+// Binance symbols that need non-standard USDT pair names
+const BINANCE_SYM_MAP: Record<string, string> = {
+  "TAO": "TAOUSDT",
+  "RENDER": "RENDERUSDT",
+  "STX": "STXUSDT",
+  "ORDI": "ORDIUSDT",
+  "RUNE": "RUNEUSDT",
+  "AKT": "AKTUSDT",
+  "CFG": "CFGUSDT",
+  "MNT": "MNTUSDT",
+  "ZK": "ZKUSDT",
+  "STRK": "STRKUSDT",
+  "AGIX": "AGIXUSDT",
+  "GMX": "GMXUSDT",
+  "RAY": "RAYUSDT",
+  "PYTH": "PYTHUSDT",
+};
+
 // Per-slot colour palette — vivid, distinct regardless of score
 const SLOT_COLORS = [
   "#7c3aed", // purple
@@ -937,13 +955,37 @@ type ReturnPeriod = "1W" | "1M" | "3M";
 
 const PERIOD_DAYS: Record<ReturnPeriod, number> = { "1W": 7, "1M": 30, "3M": 90 };
 
-async function fetchHistoricalReturn(symbol: string, days: number): Promise<number | null> {
+// Fetch via Binance.US klines — fast, reliable, no rate limit issues
+async function fetchFromBinance(symbol: string, days: number): Promise<number | null> {
+  const sym = symbol.toUpperCase();
+  const pair = BINANCE_SYM_MAP[sym] ?? `${sym}USDT`;
+  const limit = days + 2;
+  try {
+    const r = await fetch(
+      `https://api.binance.us/api/v3/klines?symbol=${pair}&interval=1d&limit=${limit}`,
+      { signal: AbortSignal.timeout(8000) }
+    );
+    if (!r.ok) return null;
+    const candles: [string,string,string,string,string,...unknown[]][] = await r.json();
+    if (!Array.isArray(candles) || candles.length < 2) return null;
+    // Use open of first candle as entry (= price N days ago), close of last as exit
+    const entry = parseFloat(candles[0][1]);  // open
+    const exit  = parseFloat(candles[candles.length - 1][4]); // close
+    if (!entry || entry === 0) return null;
+    return ((exit - entry) / entry) * 100;
+  } catch {
+    return null;
+  }
+}
+
+// Fallback: CoinGecko market_chart (sequential to avoid 429)
+async function fetchFromCoinGecko(symbol: string, days: number): Promise<number | null> {
   const cgId = CG_BASKET_ID[symbol.toUpperCase()];
   if (!cgId) return null;
   try {
     const r = await fetch(
       `https://api.coingecko.com/api/v3/coins/${cgId}/market_chart?vs_currency=usd&days=${days}&interval=daily`,
-      { signal: AbortSignal.timeout(8000) }
+      { signal: AbortSignal.timeout(10000) }
     );
     if (!r.ok) return null;
     const j = await r.json();
@@ -956,6 +998,14 @@ async function fetchHistoricalReturn(symbol: string, days: number): Promise<numb
   } catch {
     return null;
   }
+}
+
+async function fetchHistoricalReturn(symbol: string, days: number): Promise<number | null> {
+  // Try Binance.US first (fastest, no rate limits)
+  const binanceResult = await fetchFromBinance(symbol, days);
+  if (binanceResult !== null) return binanceResult;
+  // Fall back to CoinGecko
+  return fetchFromCoinGecko(symbol, days);
 }
 
 const RENDER_BASE = "https://crypto-sniper.onrender.com";
