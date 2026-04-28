@@ -221,12 +221,15 @@ function buildMacroInsights(data: Record<string, number | null | undefined> | nu
   const gold     = data?.gold     ?? 3240;
   const yield10y = 4.38; // static fallback
 
+  const sp500 = 5241; // static fallback
+
   // Each metric scores -1 (bearish for crypto), 0 (neutral), +1 (bullish)
   const fedScore  = fedRate <= 3.5 ? 1 : fedRate >= 5.0 ? -1 : 0;
   const cpiScore  = cpi <= 2.5 ? 1 : cpi >= 4.0 ? -1 : 0;
   const dxyScore  = dxy <= 99 ? 1 : dxy >= 104 ? -1 : 0;
   const yieldScore = yield10y <= 3.5 ? 1 : yield10y >= 4.5 ? -1 : 0;
   const goldScore  = gold >= 2500 ? 1 : gold <= 1800 ? -1 : 0; // gold up = risk-off but also inflation hedge
+  const spScore   = sp500 >= 5000 ? 1 : sp500 <= 4000 ? -1 : 0;
 
   const total = fedScore + cpiScore + dxyScore + yieldScore + goldScore;
 
@@ -283,6 +286,15 @@ function buildMacroInsights(data: Record<string, number | null | undefined> | nu
             : gold <= 1800 ? "Gold weak — risk-off sentiment not yet driving store-of-value bids"
             : "Gold range-bound — neutral read on inflation and safe-haven flows",
     },
+    {
+      label: "S&P 500",
+      value: sp500.toLocaleString(),
+      signal: spScore > 0 ? "Bullish" : spScore < 0 ? "Bearish" : "Neutral",
+      color:  spScore > 0 ? "text-teal" : spScore < 0 ? "text-red" : "text-amber",
+      note:   sp500 >= 5000 ? "Equities strong — risk-on environment supports crypto correlation"
+            : sp500 <= 4000 ? "Equities weak — broad risk-off likely weighs on crypto"
+            : "S&P range-bound — no decisive risk-on or risk-off signal",
+    },
   ];
 
   return { regime, impacts, total };
@@ -319,44 +331,55 @@ export function MacroSection() {
         </div>
 
         {/* Macro Regime verdict */}
-        <div className={`rounded-lg border ${regime.bg} px-4 py-3 flex items-start gap-4`}>
-          <div className="shrink-0">
-            <div className="text-[9px] font-mono text-text-muted/60 uppercase tracking-widest mb-1">Macro Regime</div>
-            <div className={`text-[15px] font-mono font-black ${regime.color}`}>{regime.label}</div>
+        <div className={`rounded-lg border ${regime.bg} px-4 py-3 flex items-center gap-4`}>
+          <div className="shrink-0 min-w-[110px]">
+            <div className="text-[8px] font-mono text-text-muted/50 uppercase tracking-widest mb-1">Macro Regime</div>
+            <div className={`text-[14px] font-mono font-black tracking-wide ${regime.color}`}>{regime.label}</div>
           </div>
           <div className="w-px self-stretch bg-border/30" />
-          <p className="text-[11px] text-text-muted leading-relaxed pt-0.5">{regime.desc}</p>
+          <p className="text-[11px] text-text-muted leading-relaxed">{regime.desc}</p>
         </div>
 
-        {/* Per-metric crypto impact table */}
-        <div className="rounded-lg border border-border/40 overflow-hidden">
-          {/* Header */}
-          <div className="flex items-center px-3 py-1.5 border-b border-border/30 bg-surface-2 gap-3">
-            <span className="text-[9px] font-mono font-bold text-text-muted/50 uppercase tracking-widest" style={{width:"22%"}}>Indicator</span>
-            <span className="text-[9px] font-mono font-bold text-text-muted/50 uppercase tracking-widest" style={{width:"16%"}}>Value</span>
-            <span className="text-[9px] font-mono font-bold text-text-muted/50 uppercase tracking-widest" style={{width:"16%"}}>Signal</span>
-            <span className="text-[9px] font-mono font-bold text-text-muted/50 uppercase tracking-widest" style={{flex:1}}>Crypto Impact</span>
+        {/* Per-metric crypto impact — 2-column card grid */}
+        <div>
+          <div className="text-[8px] font-mono font-bold text-text-muted/40 uppercase tracking-widest mb-2 px-0.5">Crypto Impact Breakdown</div>
+          <div className="grid grid-cols-2 gap-2">
+            {impacts.map((row) => {
+              const pillCls =
+                row.signal === "Bullish" ? "bg-teal/10 text-teal border-teal/25" :
+                row.signal === "Bearish" ? "bg-red/10 text-red border-red/25" :
+                "bg-amber/10 text-amber border-amber/25";
+              const dotCls =
+                row.signal === "Bullish" ? "bg-teal" :
+                row.signal === "Bearish" ? "bg-red" :
+                "bg-amber";
+              return (
+                <div
+                  key={row.label}
+                  className="bg-surface-2 rounded-lg border border-border/40 p-3 flex flex-col gap-2"
+                >
+                  {/* Top row: indicator name + signal pill */}
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[10px] font-mono font-bold text-text-muted/80 uppercase tracking-wide">
+                      {row.label}
+                    </span>
+                    <span className={`inline-flex items-center gap-1 text-[8px] font-mono font-bold px-2 py-0.5 rounded-full border ${pillCls} shrink-0`}>
+                      <span className={`w-1 h-1 rounded-full ${dotCls}`} />
+                      {row.signal}
+                    </span>
+                  </div>
+                  {/* Value */}
+                  <div className={`text-[17px] font-mono font-black leading-none ${row.color}`}>
+                    {row.value}
+                  </div>
+                  {/* Impact note */}
+                  <div className="text-[10px] text-text-muted/60 leading-snug">
+                    {row.note}
+                  </div>
+                </div>
+              );
+            })}
           </div>
-          {/* Rows */}
-          {impacts.map((row, i) => (
-            <div
-              key={row.label}
-              className={`flex items-center px-3 py-2 gap-3 ${
-                i < impacts.length - 1 ? "border-b border-border/20" : ""
-              }`}
-            >
-              <span className="text-[10px] font-mono font-bold text-text-muted/80" style={{width:"22%"}}>{row.label}</span>
-              <span className={`text-[10px] font-mono font-bold ${row.color}`} style={{width:"16%"}}>{row.value}</span>
-              <span style={{width:"16%"}}>
-                <span className={`inline-block text-[9px] font-mono font-bold px-2 py-0.5 rounded border ${
-                  row.signal === "Bullish" ? "bg-teal/10 text-teal border-teal/20" :
-                  row.signal === "Bearish" ? "bg-red/10 text-red border-red/20" :
-                  "bg-amber/10 text-amber border-amber/20"
-                }`}>{row.signal}</span>
-              </span>
-              <span className="text-[10px] text-text-muted/70 leading-snug" style={{flex:1}}>{row.note}</span>
-            </div>
-          ))}
         </div>
 
       </div>
