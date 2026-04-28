@@ -386,3 +386,309 @@ export function MacroSection() {
     </div>
   );
 }
+
+// ════════════════════════════════════════════════════════════════════════════
+// MARKET OPTIONS INTELLIGENCE
+// Deribit public API — BTC + ETH options. No auth required.
+// Always rendered as market-wide sentiment, irrespective of analysed coin.
+// ════════════════════════════════════════════════════════════════════════════
+
+interface OptionsData {
+  currency:       string;
+  underlying:     number;
+  nearest_expiry: string;
+  atm_iv:         number | null;
+  pc_ratio:       number | null;
+  skew:           number | null;   // OTM put IV − OTM call IV
+  max_pain:       number | null;
+  exp_move_pct:   number | null;
+  exp_move_usd:   number | null;
+}
+
+async function fetchDeribitOptions(currency: "BTC" | "ETH"): Promise<OptionsData | null> {
+  try {
+    const r = await fetch(
+      `https://www.deribit.com/api/v2/public/get_book_summary_by_currency?currency=${currency}&kind=option`,
+      { signal: AbortSignal.timeout(12000) }
+    );
+    if (!r.ok) return null;
+    const d = await r.json();
+    const results: Array<Record<string, unknown>> = d.result ?? [];
+
+    // Parse instruments
+    interface Inst { expiry: string; strike: number; type: "C"|"P"; oi: number; mark_iv: number; underlying: number; }
+    const instruments: Inst[] = [];
+    for (const row of results) {
+      const name = row.instrument_name as string;
+      const parts = name.split("-");
+      if (parts.length !== 4) continue;
+      const [, expiry, strikeStr, optType] = parts;
+      const strike = parseInt(strikeStr, 10);
+      if (isNaN(strike)) continue;
+      instruments.push({
+        expiry,
+        strike,
+        type:       (optType as "C"|"P"),
+        oi:         (row.open_interest as number) ?? 0,
+        mark_iv:    (row.mark_iv       as number) ?? 0,
+        underlying: (row.underlying_price as number) ?? 0,
+      });
+    }
+    if (!instruments.length) return null;
+
+    // Sort expiries chronologically — parse "28APR26" or "28APR2026"
+    const parseExp = (e: string): number => {
+      const months: Record<string,number> = {
+        JAN:0,FEB:1,MAR:2,APR:3,MAY:4,JUN:5,JUL:6,AUG:7,SEP:8,OCT:9,NOV:10,DEC:11
+      };
+      const m = e.match(/^(\d{1,2})([A-Z]{3})(\d{2,4})$/);
+      if (!m) return Infinity;
+      const day = parseInt(m[1], 10);
+      const mon = months[m[2]] ?? 0;
+      const yr  = parseInt(m[3], 10) + (m[3].length === 2 ? 2000 : 0);
+      return new Date(yr, mon, day).getTime();
+    };
+    const expiries = [...new Set(instruments.map(i => i.expiry))].sort((a,b) => parseExp(a)-parseExp(b));
+    const nearest  = expiries[0];
+    const near     = instruments.filter(i => i.expiry === nearest);
+    const und      = near[0]?.underlying ?? 0;
+
+    // Put/Call OI ratio
+    const puts  = near.filter(i=>i.type==="P").reduce((s,i)=>s+i.oi,0);
+    const calls = near.filter(i=>i.type==="C").reduce((s,i)=>s+i.oi,0);
+    const pc_ratio = calls > 0 ? parseFloat((puts/calls).toFixed(3)) : null;
+
+    // ATM IV (closest call strike to spot)
+    const atmCall = near.filter(i=>i.type==="C").sort((a,b)=>Math.abs(a.strike-und)-Math.abs(b.strike-und))[0];
+    const atm_iv  = atmCall?.mark_iv ?? null;
+
+    // 25Δ skew proxy: OTM put (−10%) vs OTM call (+10%)
+    const otmPut  = near.filter(i=>i.type==="P").sort((a,b)=>Math.abs(a.strike-und*0.90)-Math.abs(b.strike-und*0.90))[0];
+    const otmCall = near.filter(i=>i.type==="C").sort((a,b)=>Math.abs(a.strike-und*1.10)-Math.abs(b.strike-und*1.10))[0];
+    const skew = (otmPut && otmCall && otmCall.mark_iv > 0)
+      ? parseFloat((otmPut.mark_iv - otmCall.mark_iv).toFixed(1))
+      : null;
+
+    // Max pain: strike minimising total option seller loss
+    const strikes = [...new Set(near.map(i=>i.strike))].sort((a,b)=>a-b);
+    let minLoss = Infinity, max_pain: number|null = null;
+    for (const s of strikes) {
+      const loss = near.reduce((acc, i) => {
+        if (i.type==="C" && s > i.strike) return acc + i.oi*(s-i.strike);
+        if (i.type==="P" && s < i.strike) return acc + i.oi*(i.strike-s);
+        return acc;
+      }, 0);
+      if (loss < minLoss) { minLoss=loss; max_pain=s; }
+    }
+
+    // 1-week expected move (±1σ)
+    const exp_move_pct = atm_iv != null
+      ? parseFloat(((atm_iv/100)*Math.sqrt(7/365)*100).toFixed(1))
+      : null;
+    const exp_move_usd = atm_iv != null
+      ? Math.round(und*(atm_iv/100)*Math.sqrt(7/365))
+      : null;
+
+    return { currency, underlying: und, nearest_expiry: nearest, atm_iv, pc_ratio, skew, max_pain, exp_move_pct, exp_move_usd };
+  } catch {
+    return null;
+  }
+}
+
+function ivSentiment(iv: number|null): { label: string; color: string } {
+  if (iv == null) return { label: "—",            color: "text-text-muted/40" };
+  if (iv < 40)   return { label: "Low (calm)",    color: "text-teal" };
+  if (iv < 70)   return { label: "Moderate",      color: "text-amber" };
+  if (iv < 100)  return { label: "Elevated",      color: "text-orange" };
+  return              { label: "Extreme",          color: "text-red" };
+}
+
+function pcSentiment(pc: number|null): { label: string; color: string } {
+  if (pc == null) return { label: "—",               color: "text-text-muted/40" };
+  if (pc < 0.7)   return { label: "Call bias",        color: "text-teal" };
+  if (pc < 1.0)   return { label: "Slight hedge",     color: "text-amber" };
+  if (pc < 1.3)   return { label: "Hedge bias",       color: "text-orange" };
+  return               { label: "Fear / hedge heavy", color: "text-red" };
+}
+
+function skewSentiment(sk: number|null): { label: string; color: string } {
+  if (sk == null)  return { label: "—",              color: "text-text-muted/40" };
+  if (sk <= -5)    return { label: "Call premium",    color: "text-teal" };
+  if (sk < 5)      return { label: "Neutral",         color: "text-text-muted" };
+  if (sk < 15)     return { label: "Put premium",     color: "text-amber" };
+  return                { label: "Strong fear skew",  color: "text-red" };
+}
+
+function OptionsCurrencyPanel({ data, loading }: { data: OptionsData|null; loading: boolean }) {
+  if (loading) {
+    return (
+      <div className="space-y-2">
+        {[1,2,3,4,5].map(i => (
+          <div key={i} className="h-8 rounded-lg bg-surface-2 animate-pulse" />
+        ))}
+      </div>
+    );
+  }
+  if (!data) {
+    return (
+      <div className="text-center py-4 text-[10px] font-mono text-text-muted/40">
+        Deribit unavailable
+      </div>
+    );
+  }
+
+  const iv   = ivSentiment(data.atm_iv);
+  const pc   = pcSentiment(data.pc_ratio);
+  const sk   = skewSentiment(data.skew);
+
+  const fmtPrice = (n: number) =>
+    n >= 1000 ? `$${n.toLocaleString(undefined, { maximumFractionDigits: 0 })}` : `$${n.toFixed(2)}`;
+
+  const rows: Array<{ label: string; value: string; sub: string; color: string }> = [
+    {
+      label: "ATM IV",
+      value: data.atm_iv != null ? `${data.atm_iv.toFixed(1)}%` : "—",
+      sub:   iv.label,
+      color: iv.color,
+    },
+    {
+      label: "Put/Call",
+      value: data.pc_ratio != null ? data.pc_ratio.toFixed(2) : "—",
+      sub:   pc.label,
+      color: pc.color,
+    },
+    {
+      label: "25Δ Skew",
+      value: data.skew != null ? `${data.skew > 0 ? "+" : ""}${data.skew}` : "—",
+      sub:   sk.label,
+      color: sk.color,
+    },
+    {
+      label: "Max Pain",
+      value: data.max_pain != null ? fmtPrice(data.max_pain) : "—",
+      sub:   data.underlying > 0
+        ? `spot ${fmtPrice(data.underlying)}`
+        : "—",
+      color: data.max_pain != null && data.underlying > 0
+        ? data.max_pain > data.underlying ? "text-teal" : "text-red"
+        : "text-text-muted/40",
+    },
+    {
+      label: "1W Exp Move",
+      value: data.exp_move_pct != null ? `±${data.exp_move_pct}%` : "—",
+      sub:   data.exp_move_usd != null ? `±${fmtPrice(data.exp_move_usd)}` : "—",
+      color: data.exp_move_pct != null
+        ? data.exp_move_pct < 5 ? "text-teal" : data.exp_move_pct < 10 ? "text-amber" : "text-orange"
+        : "text-text-muted/40",
+    },
+  ];
+
+  return (
+    <div className="space-y-1.5">
+      {rows.map(row => (
+        <div
+          key={row.label}
+          className="flex items-center justify-between py-1.5 px-2 rounded-lg bg-surface-2 border border-border/30"
+        >
+          <span className="text-[9px] font-mono text-text-muted/60 uppercase tracking-wide w-20 shrink-0">
+            {row.label}
+          </span>
+          <div className="flex items-baseline gap-2 ml-auto">
+            <span className={`text-[13px] font-mono font-black ${row.color}`}>
+              {row.value}
+            </span>
+            <span className="text-[8px] font-mono text-text-muted/40 text-right min-w-[70px]">
+              {row.sub}
+            </span>
+          </div>
+        </div>
+      ))}
+      <div className="text-[8px] font-mono text-text-muted/25 text-right pt-0.5">
+        expiry {data.nearest_expiry} · Deribit
+      </div>
+    </div>
+  );
+}
+
+export function OptionsIntelligenceSection() {
+  const [btc, setBtc] = useState<OptionsData|null>(null);
+  const [eth, setEth] = useState<OptionsData|null>(null);
+  const [loadingBtc, setLoadingBtc] = useState(true);
+  const [loadingEth, setLoadingEth] = useState(true);
+  const [tab, setTab] = useState<"BTC"|"ETH">("BTC");
+
+  useEffect(() => {
+    fetchDeribitOptions("BTC").then(d => { setBtc(d); setLoadingBtc(false); });
+    fetchDeribitOptions("ETH").then(d => { setEth(d); setLoadingEth(false); });
+  }, []);
+
+  // Derive an overall market sentiment signal
+  const btcSig = btc
+    ? (btc.pc_ratio != null && btc.pc_ratio > 1.0 ? -1 : 1) +
+      (btc.skew     != null && btc.skew     > 10   ? -1 : 1) +
+      (btc.atm_iv   != null && btc.atm_iv   > 70   ? -1 : 1)
+    : 0;
+  const regimeLabel = !btc ? "Loading…"
+    : btcSig >= 2  ? "Options Bullish"
+    : btcSig <= -1 ? "Options Bearish"
+    : "Options Neutral";
+  const regimeColor = !btc ? "text-text-muted/40"
+    : btcSig >= 2  ? "text-teal"
+    : btcSig <= -1 ? "text-red"
+    : "text-amber";
+  const regimeBg = !btc ? "bg-surface-2 border-border/40"
+    : btcSig >= 2  ? "bg-teal/5 border-teal/20"
+    : btcSig <= -1 ? "bg-red/5 border-red/20"
+    : "bg-amber/5 border-amber/20";
+
+  return (
+    <div className="card mb-3">
+      <SectionHeader icon="📊" title="MARKET OPTIONS INTELLIGENCE" badge="LIVE" src="Deribit" />
+      <div className="p-4 space-y-4">
+
+        {/* Regime verdict */}
+        <div className={`rounded-lg border ${regimeBg} px-4 py-3 flex items-center gap-4`}>
+          <div className="shrink-0 min-w-[140px]">
+            <div className="text-[8px] font-mono text-text-muted/50 uppercase tracking-widest mb-1">Options Regime</div>
+            <div className={`text-[14px] font-mono font-black tracking-wide ${regimeColor}`}>{regimeLabel}</div>
+          </div>
+          <div className="w-px self-stretch bg-border/30" />
+          <p className="text-[11px] text-text-muted leading-relaxed">
+            {btcSig >= 2
+              ? "Calls dominate OI, skew is flat, IV is calm — options market not pricing significant downside."
+              : btcSig <= -1
+              ? "Put/call elevated, negative skew and high IV — market paying up for downside protection."
+              : "Mixed signals — hedging activity present but not decisive. Monitor IV direction."}
+          </p>
+        </div>
+
+        {/* BTC / ETH tab switcher */}
+        <div className="flex gap-1">
+          {(["BTC","ETH"] as const).map(c => (
+            <button
+              key={c}
+              onClick={() => setTab(c)}
+              className={`text-[9px] font-mono font-bold px-3 py-1.5 rounded-lg border transition-all ${
+                tab === c
+                  ? "border-purple/50 bg-purple/10 text-purple"
+                  : "border-border/40 bg-surface-2 text-text-muted/60 hover:border-purple/30"
+              }`}
+            >
+              {c}
+            </button>
+          ))}
+          <div className="ml-auto text-[8px] font-mono text-text-muted/30 self-center">
+            nearest expiry · open interest
+          </div>
+        </div>
+
+        {/* Panel */}
+        {tab === "BTC"
+          ? <OptionsCurrencyPanel data={btc} loading={loadingBtc} />
+          : <OptionsCurrencyPanel data={eth} loading={loadingEth} />
+        }
+
+      </div>
+    </div>
+  );
+}

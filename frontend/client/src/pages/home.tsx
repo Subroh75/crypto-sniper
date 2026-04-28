@@ -16,7 +16,7 @@ import {
 import { TopSignals } from "@/components/TopSignals";
 import { CSOVerdict } from "@/components/CSOVerdict";
 import {
-  TrendingSection, NewsSection, MacroSection,
+  TrendingSection, NewsSection, MacroSection, OptionsIntelligenceSection,
 } from "@/components/BottomSections";
 import { DeepResearchSection } from "@/components/DeepResearch";
 import { MultiTimeframeCard } from "@/components/MultiTimeframe";
@@ -806,6 +806,7 @@ export default function Home() {
               <TrendingSection onSelect={(sym) => runAnalysis(sym)} />
               <NewsSection symbol={symbol} />
               <MacroSection />
+              <OptionsIntelligenceSection />
 
               {/* 09: Perplexity Deep Research */}
               <DeepResearchSection symbol={symbol} analyseData={sig} />
