@@ -232,7 +232,6 @@ export function BacktestInternalCard({ symbol }: { symbol: string | null }) {
         icon="◈"
         title="SIGNAL BACKTEST"
         badge="1D"
-        src="1D · OHLCV · Internal Engine"
         right={
           s?.total_trades ? (
             <span className="text-[9px] font-mono text-text-muted/60">

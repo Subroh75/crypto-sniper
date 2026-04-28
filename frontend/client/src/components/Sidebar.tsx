@@ -187,7 +187,7 @@ export function ConvictionMeter({ conviction }: { conviction: Conviction | null 
 
   return (
     <SideCard>
-      <SideCardHeader icon="🎯" title="CONVICTION METER" src="Agent synthesis" />
+      <SideCardHeader icon="🎯" title="CONVICTION METER" />
       <div className="p-4">
         {/* Bull bar */}
         <div className="mb-3">
@@ -287,7 +287,7 @@ export function KeyLevelsCard({ levels }: { levels: KeyLevel[] }) {
 
   return (
     <SideCard>
-      <SideCardHeader icon="📍" title="KEY PRICE LEVELS" src="Twelve Data · CoinGecko" />
+      <SideCardHeader icon="📍" title="KEY PRICE LEVELS" />
       <div className="p-3 space-y-1">
         {levels.map((level, i) => {
           const style = kindStyle[level.kind] ?? kindStyle.dynamic;
@@ -352,7 +352,7 @@ export function WatchlistCard({
 
   return (
     <SideCard>
-      <SideCardHeader icon="👁" title="WATCHLIST" badge="LIVE" src="CoinGecko" />
+      <SideCardHeader icon="👁" title="WATCHLIST" badge="LIVE" />
       <div className="p-3">
         <div className="space-y-1.5">
           {loading ? (
@@ -661,7 +661,7 @@ export function ExportCard({
   return (
     <SideCard glow>
       <div className="h-[2px]" style={{ background: "linear-gradient(90deg, #7c5cfc, #00d4aa)" }} />
-      <SideCardHeader num="10" icon="📄" title="EXPORT REPORT" src="Full intelligence pack" />
+      <SideCardHeader num="10" icon="📄" title="EXPORT REPORT" />
       <div className="p-4">
         <div className="text-[10px] font-mono text-text-muted leading-relaxed mb-4">
           Includes: signal · components · chart · on-chain · forecast · agents · trending · news · macro · deep research

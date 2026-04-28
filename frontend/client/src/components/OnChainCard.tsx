@@ -326,7 +326,6 @@ export function OnChainCard({ symbol }: { symbol: string | null }) {
         icon="⬡"
         title="ON-CHAIN INTELLIGENCE"
         badge="LIVE"
-        src={src}
         right={
           state.market_cap != null ? (
             <span className="text-[9px] font-mono font-bold px-2 py-0.5 rounded border"

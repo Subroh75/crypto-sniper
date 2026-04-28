@@ -35,7 +35,7 @@ export function TrendingSection({ onSelect }: { onSelect: (sym: string) => void 
 
   return (
     <div className="card mb-3">
-      <SectionHeader icon="🔥" title="TRENDING NOW" src="CoinGecko" />
+      <SectionHeader icon="🔥" title="TRENDING NOW" />
       <div className="p-4">
         {loading ? (
           <div className="grid grid-cols-5 gap-2">
@@ -88,7 +88,7 @@ export function NewsSection({ symbol }: { symbol: string }) {
 
   return (
     <div className="card mb-3">
-      <SectionHeader icon="📰" title="LIVE NEWS" badge="NEW" src="MarketAux · CryptoPanic" />
+      <SectionHeader icon="📰" title="LIVE NEWS" badge="NEW" />
       <div className="p-4">
         <div className="grid grid-cols-2 gap-2">
           {loading ? (
@@ -149,7 +149,7 @@ export function MacroSection() {
 
   return (
     <div className="card mb-3">
-      <SectionHeader icon="🌐" title="MACRO CONTEXT" badge="NEW" src="Econdb · FRED" />
+      <SectionHeader icon="🌐" title="MACRO CONTEXT" badge="NEW" />
       <div className="p-4">
         <div className="grid grid-cols-6 gap-2">
           {stats.map(({ label, value, color }) => (

@@ -313,7 +313,7 @@ export default function Home() {
 
               {/* 01: Signal Output */}
               <Card>
-                <CardHeader num="01" icon="!" title="SIGNAL OUTPUT" src="CoinGecko  ·  Twelve Data"
+                <CardHeader num="01" icon="!" title="SIGNAL OUTPUT"
                   right={
                     hitRate.data?.hit_rate_pct != null ? (
                       <button
@@ -361,7 +361,7 @@ export default function Home() {
 
               {/* 02: Signal Components */}
               <Card>
-                <CardHeader num="02" title="SIGNAL COMPONENTS V/P/R/T/S" src="CoinGecko  ·  LunarCrush" />
+                <CardHeader num="02" title="SIGNAL COMPONENTS V/P/R/T/S" />
                 <div className="p-4">
                   <div className="grid grid-cols-5 gap-2">
                     {(["V","P","R","T","S"] as const).map(key => {
@@ -453,7 +453,7 @@ export default function Home() {
                   // Spot-only coin — show mempool + fear/greed instead
                   return (
                     <Card>
-                      <CardHeader num="05" title="MARKET CONTEXT" src="CoinGecko" />
+                      <CardHeader num="05" title="MARKET CONTEXT" />
                       <div className="p-4">
                         <div className="grid grid-cols-2 gap-2">
                           <div className="bg-surface-2 rounded-lg border border-border/40 p-3">
@@ -486,7 +486,7 @@ export default function Home() {
 
                 return (
                   <Card>
-                    <CardHeader num="05" title="PERP DERIVATIVES" badge="LIVE" src={`${fr.source} · ${oi.source}`} />
+                    <CardHeader num="05" title="PERP DERIVATIVES" badge="LIVE" />
                     <div className="p-4">
                       <div className="grid grid-cols-3 gap-2">
                         {/* Funding Rate */}
@@ -543,7 +543,7 @@ export default function Home() {
 
               {/* 06: Kronos AI Forecast */}
               <Card>
-                <CardHeader num="06" title="KRONOS AI FORECAST" src="Perplexity  ·  Claude" />
+                <CardHeader num="06" title="KRONOS AI FORECAST" />
                 <div className="p-4">
                   {kronosHk.loading && (
                     <div className="flex items-center gap-3 py-8 justify-center text-text-muted text-[11px] font-mono">
@@ -715,7 +715,7 @@ export default function Home() {
 
               {/* 07: Agent Debate */}
               <Card>
-                <CardHeader num="07" icon="-" title="AI LAB - AGENT DEBATE" src="Claude Haiku  ·  Perplexity context" />
+                <CardHeader num="07" icon="-" title="AI LAB - AGENT DEBATE" />
                 <div className="p-4">
                   {kron?.agents ? (
                     <div className="grid grid-cols-2 gap-2">
@@ -764,7 +764,6 @@ export default function Home() {
               {scanPerf.data && (
                 <Card>
                   <CardHeader num="10" title="SCANNER PERFORMANCE" badge="HISTORY"
-                    src={`Last ${scanPerf.data.summary.days}d`}
                     right={
                       scanPerf.data.summary.win_rate_pct != null ? (
                         <span className="text-[9px] font-mono font-bold text-teal px-2 py-0.5 rounded bg-teal/5 border border-teal/20">
