@@ -140,7 +140,16 @@ async def kronos(req: KronosRequest):
             sig = calculate_signals(ohlcv, quote, indicators)
             signal_ctx = {"symbol":symbol,"interval":req.interval,"close":sig.close,"rsi":sig.rsi,"adx":sig.adx,"ema_stack":sig.ema_stack,"signal":sig.signal_label,"total":sig.total,"direction":sig.direction,"change_24h":quote.get("change_24h",0)}
         forecast = await run_kronos_forecast(symbol, signal_ctx)
-        agents = await run_agent_council(symbol, signal_ctx)
+        # Enrich signal_ctx with Kronos forecast so agents can reference it
+        agent_ctx = dict(signal_ctx)
+        agent_ctx["kron_direction"]     = forecast.get("direction", "N/A")
+        agent_ctx["kron_move_pct"]      = forecast.get("expected_move_pct")
+        agent_ctx["kron_green_pct"]     = forecast.get("green_candle_pct")
+        agent_ctx["kron_trade_quality"] = forecast.get("trade_quality", "N/A")
+        agent_ctx["kron_bull_conviction"] = forecast.get("bull_conviction", "N/A")
+        agent_ctx["kron_bear_conviction"] = forecast.get("bear_conviction", "N/A")
+        agent_ctx["kron_momentum"]      = forecast.get("momentum", "N/A")
+        agents = await run_agent_council(symbol, agent_ctx)
         return {"symbol":symbol,"timestamp":int(time.time()),"forecast":forecast,"agents":agents}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

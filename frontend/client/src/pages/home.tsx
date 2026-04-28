@@ -167,26 +167,45 @@ export default function Home() {
     const result = await analyse.run(s, i);
     if (!result) return;
 
-    // Build signal context for Kronos
+    // Build signal context for Kronos — include all VPRTS + market structure + conviction data
     const ctx = {
-      close:      result.quote.price,
-      rsi:        result.timing.rsi,
-      adx:        result.timing.adx,
-      atr:        result.timing.atr,
-      ema_stack:  result.structure.ema20 > 0 && result.structure.ema50 > 0
-                    && result.quote.price > result.structure.ema20,
-      ema20:      result.structure.ema20,
-      ema50:      result.structure.ema50,
-      ema200:     result.structure.ema200,
-      bb_upper:   result.structure.bb_upper,
-      signal:     result.signal.label,
-      total:      result.signal.total,
-      direction:  result.signal.direction,
-      change_24h: result.quote.change_24h,
-      rel_volume: result.timing.rel_volume,
-      stop:       result.trade_setup.stop,
-      target:     result.trade_setup.target,
-      rr_ratio:   result.trade_setup.rr_ratio,
+      close:        result.quote.price,
+      rsi:          result.timing.rsi,
+      adx:          result.timing.adx,
+      atr:          result.timing.atr,
+      rel_volume:   result.timing.rel_volume,
+      ema_stack:    result.structure.ema20 > 0 && result.structure.ema50 > 0
+                      && result.quote.price > result.structure.ema20,
+      ema20:        result.structure.ema20,
+      ema50:        result.structure.ema50,
+      ema200:       result.structure.ema200,
+      vwap:         result.structure.vwap,
+      bb_upper:     result.structure.bb_upper,
+      bb_lower:     result.structure.bb_lower,
+      signal:       result.signal.label,
+      total:        result.signal.total,
+      direction:    result.signal.direction,
+      change_24h:   result.quote.change_24h,
+      // VPRTS component scores
+      v_score:      result.components?.V?.score ?? 0,
+      p_score:      result.components?.P?.score ?? 0,
+      r_score:      result.components?.R?.score ?? 0,
+      t_score:      result.components?.T?.score ?? 0,
+      s_score:      result.components?.S?.score ?? 0,
+      // Trade setup
+      entry:        result.trade_setup.entry,
+      stop:         result.trade_setup.stop,
+      target:       result.trade_setup.target,
+      rr_ratio:     result.trade_setup.rr_ratio,
+      stop_dist_pct: result.trade_setup.stop_dist_pct,
+      // Conviction signals
+      bull_pct:     result.conviction?.bull_pct ?? 0,
+      bear_pct:     result.conviction?.bear_pct ?? 0,
+      bull_signals: result.conviction?.bull_signals ?? [],
+      bear_signals: result.conviction?.bear_signals ?? [],
+      // Sentiment
+      fg_value:     result.fear_greed?.value ?? null,
+      fg_label:     result.fear_greed?.label ?? null,
     } as Record<string, unknown>;
 
     kronosHk.run(s, i, ctx);
@@ -715,33 +734,61 @@ export default function Home() {
 
               {/* 07: Agent Debate */}
               <Card>
-                <CardHeader num="07" icon="-" title="AI LAB - AGENT DEBATE" />
-                <div className="p-4">
+                <CardHeader num="07" icon="⚖" title="AI LAB - AGENT DEBATE" badge="LIVE" />
+                <div className="p-3 space-y-2">
                   {kron?.agents ? (
-                    <div className="grid grid-cols-2 gap-2">
-                      {kron.agents.map(agent => (
-                        <div key={agent.key} className="bg-surface-2 rounded-lg border border-border/40 p-3">
-                          <div className="flex items-center justify-between mb-2.5">
+                    kron.agents.map(agent => {
+                      const accentClass =
+                        agent.key === "bull" ? "border-teal/25 bg-teal/4"  :
+                        agent.key === "bear" ? "border-red/25 bg-red/4"    :
+                        agent.key === "risk" ? "border-orange/25 bg-orange/4" :
+                        "border-purple/25 bg-purple/4";
+                      const iconBg =
+                        agent.key === "bull" ? "bg-teal/10 text-teal"  :
+                        agent.key === "bear" ? "bg-red/10 text-red"    :
+                        agent.key === "risk" ? "bg-orange/10 text-amber" :
+                        "bg-purple/10 text-purple";
+                      // Split text into paragraphs on newlines or VERDICT: line
+                      const lines = agent.text
+                        .split(/\n+/)
+                        .map((l: string) => l.trim())
+                        .filter((l: string) => l.length > 0);
+                      const bodyLines = lines.filter((l: string) => !l.toUpperCase().startsWith("VERDICT:"));
+                      const verdictLine = lines.find((l: string) => l.toUpperCase().startsWith("VERDICT:"));
+                      return (
+                        <div key={agent.key} className={`rounded-lg border ${accentClass} overflow-hidden`}>
+                          {/* Agent header */}
+                          <div className="flex items-center justify-between px-3 py-2 border-b border-border/30">
                             <div className="flex items-center gap-2">
-                              <div className={`w-6 h-6 rounded-md flex items-center justify-center text-xs ${
-                                agent.key === "bull" ? "bg-teal/10" :
-                                agent.key === "bear" ? "bg-red/10"  :
-                                agent.key === "risk" ? "bg-orange/10" : "bg-purple/10"
-                              }`}>{agent.icon}</div>
-                              <span className="text-[10px] font-mono font-bold text-text-muted/70 uppercase tracking-wide">
+                              <div className={`w-6 h-6 rounded-md flex items-center justify-center text-sm ${iconBg}`}>
+                                {agent.icon}
+                              </div>
+                              <span className="text-[10px] font-mono font-bold text-text-muted/80 uppercase tracking-widest">
                                 {agent.name}
                               </span>
                             </div>
                             <VerdictBadge verdict={agent.verdict} />
                           </div>
-                          <p className="text-[11px] text-text-muted leading-relaxed">{agent.text}</p>
+                          {/* Agent body — full elaborated text */}
+                          <div className="px-3 pt-2.5 pb-3 space-y-1.5">
+                            {bodyLines.map((line: string, li: number) => (
+                              <p key={li} className="text-[11px] text-text-muted leading-relaxed">
+                                {line}
+                              </p>
+                            ))}
+                            {verdictLine && (
+                              <p className="text-[10px] font-mono font-bold text-text-muted/40 uppercase tracking-widest pt-1">
+                                {verdictLine}
+                              </p>
+                            )}
+                          </div>
                         </div>
-                      ))}
-                    </div>
+                      );
+                    })
                   ) : kronosHk.loading ? (
-                    <div className="grid grid-cols-2 gap-2">
+                    <div className="space-y-2">
                       {[...Array(4)].map((_,i) => (
-                        <div key={i} className="h-28 bg-surface-2 rounded-lg animate-pulse border border-border/30" />
+                        <div key={i} className="h-24 bg-surface-2 rounded-lg animate-pulse border border-border/30" />
                       ))}
                     </div>
                   ) : (
