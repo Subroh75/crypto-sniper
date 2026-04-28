@@ -1109,3 +1109,269 @@ export function BasketScanner({
     </SideCard>
   );
 }
+
+// ════════════════════════════════════════════════════════════════════════════
+// 12. SCANNER CUMULATIVE RETURN
+// ════════════════════════════════════════════════════════════════════════════
+const SCAN_API = (import.meta as Record<string, unknown> & { env?: Record<string, string> })
+  .env?.VITE_API_BASE ?? "https://crypto-sniper.onrender.com";
+
+export function ScannerCumulativeCard() {
+  const [data, setData] = useState<{
+    first_date: string | null;
+    cumulative_pct: number | null;
+    avg_return_pct: number | null;
+    win_rate_pct: number | null;
+    total_picks: number;
+    checked: number;
+  } | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetch(`${SCAN_API}/scanner-performance?days=365`)
+      .then(r => r.json())
+      .then(j => {
+        const at = j.alltime;
+        if (at && at.first_date) setData(at);
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
+  if (loading) {
+    return (
+      <SideCard>
+        <SideCardHeader num="12" icon="📈" title="STRATEGY RETURN" badge="ALL-TIME" />
+        <div className="px-4 py-5 text-[10px] font-mono text-text-muted/50 text-center animate-pulse">
+          Loading...
+        </div>
+      </SideCard>
+    );
+  }
+
+  const noData = !data || data.checked === 0;
+
+  const cumPct   = data?.cumulative_pct ?? null;
+  const isPos    = cumPct != null && cumPct >= 0;
+  const cumColor = cumPct == null ? "text-text-muted/40"
+                 : cumPct >= 0   ? "text-teal"
+                 : "text-red";
+
+  // Format date as "Apr 2026"
+  const fmtDate = (d: string | null) => {
+    if (!d) return "—";
+    const [y, m] = d.split("-");
+    const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+    return `${months[parseInt(m, 10) - 1]} ${y}`;
+  };
+
+  return (
+    <SideCard>
+      <SideCardHeader num="12" icon="📈" title="STRATEGY RETURN" badge="ALL-TIME" />
+      <div className="px-4 py-4">
+        {noData ? (
+          <div className="text-center py-3">
+            <p className="text-[10px] font-mono text-text-muted/50">
+              Accumulating signal history —
+            </p>
+            <p className="text-[9px] font-mono text-text-muted/30 mt-1">
+              check back after the daily scan runs
+            </p>
+          </div>
+        ) : (
+          <>
+            {/* Hero line */}
+            <div className="flex items-baseline justify-between mb-3">
+              <div>
+                <div className="text-[9px] font-mono text-text-muted/50 uppercase tracking-widest mb-0.5">
+                  Since {fmtDate(data!.first_date)}
+                </div>
+                <div className={`text-2xl font-black font-mono ${cumColor}`}>
+                  {cumPct != null
+                    ? `${isPos ? "+" : ""}${cumPct.toFixed(1)}%`
+                    : "—"}
+                </div>
+              </div>
+              {cumPct != null && (
+                <div
+                  className="text-[9px] font-mono font-bold px-2 py-1 rounded-md border"
+                  style={
+                    cumPct >= 0
+                      ? { color: "#22c55e", background: "rgba(34,197,94,0.08)", borderColor: "rgba(34,197,94,0.2)" }
+                      : { color: "#ef4444", background: "rgba(239,68,68,0.08)", borderColor: "rgba(239,68,68,0.2)" }
+                  }
+                >
+                  {isPos ? "▲" : "▼"} {Math.abs(cumPct).toFixed(1)}%
+                </div>
+              )}
+            </div>
+
+            {/* Divider */}
+            <div className="border-t border-border/30 mb-3" />
+
+            {/* Stats row */}
+            <div className="grid grid-cols-3 gap-2">
+              {[
+                { label: "Avg/pick",  value: data!.avg_return_pct != null ? `${data!.avg_return_pct >= 0 ? "+" : ""}${data!.avg_return_pct.toFixed(1)}%` : "—",
+                  color: data!.avg_return_pct != null && data!.avg_return_pct >= 0 ? "text-teal" : "text-red" },
+                { label: "Win rate",  value: data!.win_rate_pct != null ? `${data!.win_rate_pct.toFixed(0)}%` : "—",
+                  color: "text-text" },
+                { label: "Picks",     value: `${data!.checked}/${data!.total_picks}`,
+                  color: "text-text-muted" },
+              ].map(({ label, value, color }) => (
+                <div key={label} className="text-center">
+                  <div className={`text-[12px] font-mono font-bold ${color}`}>{value}</div>
+                  <div className="text-[8px] font-mono text-text-muted/50 uppercase tracking-wide mt-0.5">{label}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* Disclaimer */}
+            <p className="text-[8px] font-mono text-text-muted/30 mt-3 text-center leading-relaxed">
+              Compound return on all resolved STRONG BUY picks.
+              Not financial advice.
+            </p>
+          </>
+        )}
+      </div>
+    </SideCard>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// 13. DIP SCANNER
+// ════════════════════════════════════════════════════════════════════════════
+interface DipSignal {
+  symbol: string;
+  score: number;
+  max_score: number;
+  signal: string;
+  change: number;
+  price: number;
+}
+
+export function DipScannerCard({ interval = "1h", onSelect }: { interval?: string; onSelect: (sym: string) => void }) {
+  const [results, setResults] = useState<DipSignal[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [scanned, setScanned] = useState(false);
+  const [minDip, setMinDip] = useState(10);   // % down threshold (absolute)
+  const [minScore, setMinScore] = useState(7); // score floor
+
+  const runDipScan = useCallback(async () => {
+    setLoading(true);
+    setScanned(false);
+    try {
+      // Fetch broad scan (min_score=1 to get full picture, then filter client-side)
+      const r = await fetch(`${SCAN_API}/scan?interval=${interval.toLowerCase()}&min_score=1`);
+      const j = await r.json();
+      const all: DipSignal[] = j.signals ?? [];
+      const filtered = all
+        .filter(s => (s.change ?? 0) <= -minDip && s.score >= minScore)
+        .sort((a, b) => b.score - a.score);
+      setResults(filtered);
+    } catch {
+      setResults([]);
+    } finally {
+      setLoading(false);
+      setScanned(true);
+    }
+  }, [interval, minDip, minScore]);
+
+  const cycleMinDip  = () => setMinDip(d => d === 5 ? 10 : d === 10 ? 15 : 5);
+  const cycleScore   = () => setMinScore(s => s === 5 ? 7 : s === 7 ? 9 : 5);
+
+  const dipColor = (chg: number) =>
+    chg <= -15 ? "#ef4444" : chg <= -10 ? "#f59e0b" : "#94a3b8";
+
+  return (
+    <SideCard>
+      <SideCardHeader num="13" icon="📉" title="DIP SCANNER" badge="CONTRARIAN" />
+      <div className="px-4 py-3">
+
+        {/* Description */}
+        <p className="text-[9px] font-mono text-text-muted/60 leading-relaxed mb-3">
+          Coins down {minDip}%+ in 24h with score ≥{minScore}. Contrarian re-entry setups.
+        </p>
+
+        {/* Controls */}
+        <div className="flex items-center gap-2 mb-3">
+          <button
+            onClick={cycleMinDip}
+            className="text-[9px] font-mono px-2 py-1 rounded border border-border/60 text-text-muted hover:border-red/40 hover:text-red transition-colors"
+          >
+            Dip ≥{minDip}%
+          </button>
+          <button
+            onClick={cycleScore}
+            className="text-[9px] font-mono px-2 py-1 rounded border border-border/60 text-text-muted hover:border-purple/40 hover:text-purple transition-colors"
+          >
+            Score ≥{minScore}
+          </button>
+          <button
+            onClick={runDipScan}
+            disabled={loading}
+            className="ml-auto text-[9px] font-mono font-bold px-3 py-1 rounded border transition-all"
+            style={loading
+              ? { color: "#334155", borderColor: "#1e293b", cursor: "not-allowed" }
+              : { color: "#ef4444", borderColor: "rgba(239,68,68,0.3)", background: "rgba(239,68,68,0.06)", cursor: "pointer" }
+            }
+          >
+            {loading ? "Scanning..." : "Scan"}
+          </button>
+        </div>
+
+        {/* Results */}
+        {loading && (
+          <div className="space-y-1.5 py-1">
+            {[1,2,3].map(i => (
+              <div key={i} className="h-7 rounded bg-surface-2 animate-pulse" />
+            ))}
+          </div>
+        )}
+
+        {!loading && scanned && results.length === 0 && (
+          <div className="text-center py-4">
+            <div className="text-[10px] font-mono text-text-muted/50">No dip setups found</div>
+            <div className="text-[9px] font-mono text-text-muted/30 mt-1">
+              Try lowering the dip or score threshold
+            </div>
+          </div>
+        )}
+
+        {!loading && !scanned && (
+          <div className="text-center py-4">
+            <div className="text-[20px] mb-1">📉</div>
+            <div className="text-[10px] font-mono text-text-muted/50">
+              Find oversold coins with<br />strong underlying structure
+            </div>
+          </div>
+        )}
+
+        {!loading && results.length > 0 && (
+          <div className="space-y-1">
+            {results.slice(0, 8).map((s, i) => (
+              <button
+                key={s.symbol}
+                onClick={() => onSelect(s.symbol)}
+                className="w-full flex items-center gap-2 py-1.5 px-2 rounded-lg border border-border/20 hover:border-red/30 hover:bg-red/5 transition-all text-left"
+              >
+                <span className="text-[9px] font-mono text-text-muted/40 w-4">{i + 1}.</span>
+                <span className="text-[11px] font-mono font-bold text-text flex-1">{s.symbol}</span>
+                <span className="text-[10px] font-mono font-bold" style={{ color: dipColor(s.change) }}>
+                  {s.change.toFixed(1)}%
+                </span>
+                <span className="text-[10px] font-mono text-purple/80">
+                  {s.score}/{s.max_score}
+                </span>
+              </button>
+            ))}
+            <p className="text-[8px] font-mono text-text-muted/30 text-center pt-1">
+              {results.length} setup{results.length !== 1 ? "s" : ""} found — click to analyse
+            </p>
+          </div>
+        )}
+
+      </div>
+    </SideCard>
+  );
+}

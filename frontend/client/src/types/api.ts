@@ -312,6 +312,14 @@ export interface ScannerPerformance {
     win_rate_pct:   number | null;
     days:           number;
   };
+  alltime?: {
+    first_date:      string | null;
+    total_picks:     number;
+    checked:         number;
+    cumulative_pct:  number | null;
+    avg_return_pct:  number | null;
+    win_rate_pct:    number | null;
+  };
   timestamp: number;
 }
 

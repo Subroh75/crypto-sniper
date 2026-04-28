@@ -202,6 +202,7 @@ def get_scanner_performance(days: int = 7) -> dict:
     """
     Return the last N days of scanner picks with their % return.
     For unchecked picks > 24H old, tries to fill in outcome on the fly.
+    Also returns alltime cumulative stats (all resolved picks ever).
     """
     cutoff_date = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
     try:
@@ -228,11 +229,41 @@ def get_scanner_performance(days: int = 7) -> dict:
                             (pct, pick["symbol"], pick["scan_date"]),
                         )
 
-        # Summary stats
+        # Summary stats (windowed)
         checked = [p for p in picks if p["outcome_pct"] is not None]
         avg_return = round(sum(p["outcome_pct"] for p in checked) / len(checked), 2) if checked else None
         winners = [p for p in checked if p["outcome_pct"] >= 2.0]
         win_rate = round(len(winners) / len(checked) * 100, 1) if checked else None
+
+        # All-time cumulative stats (every resolved pick ever)
+        alltime: dict = {"first_date": None, "total_picks": 0, "checked": 0,
+                         "cumulative_pct": None, "avg_return_pct": None, "win_rate_pct": None}
+        try:
+            with _get_conn() as c:
+                at_rows = c.execute(
+                    """SELECT scan_date, outcome_pct FROM scanner_picks
+                       WHERE outcome_checked=1 ORDER BY scan_date ASC"""
+                ).fetchall()
+                total_row = c.execute("SELECT COUNT(*) as n FROM scanner_picks").fetchone()
+            if at_rows:
+                at_resolved = [dict(r) for r in at_rows]
+                at_pcts = [r["outcome_pct"] for r in at_resolved if r["outcome_pct"] is not None]
+                at_wins = [p for p in at_pcts if p >= 2.0]
+                # Compound return: multiply (1 + r/100) across all picks
+                compound = 1.0
+                for p in at_pcts:
+                    compound *= (1 + p / 100)
+                cumulative = round((compound - 1) * 100, 2)
+                alltime = {
+                    "first_date":      at_resolved[0]["scan_date"],
+                    "total_picks":     total_row["n"] if total_row else 0,
+                    "checked":         len(at_pcts),
+                    "cumulative_pct":  cumulative,
+                    "avg_return_pct":  round(sum(at_pcts) / len(at_pcts), 2) if at_pcts else None,
+                    "win_rate_pct":    round(len(at_wins) / len(at_pcts) * 100, 1) if at_pcts else None,
+                }
+        except Exception as e:
+            logger.warning(f"alltime stats failed: {e}")
 
         return {
             "picks": picks,
@@ -243,10 +274,11 @@ def get_scanner_performance(days: int = 7) -> dict:
                 "win_rate_pct": win_rate,
                 "days": days,
             },
+            "alltime": alltime,
         }
     except Exception as e:
         logger.warning(f"get_scanner_performance failed: {e}")
-        return {"picks": [], "summary": {"total_picks": 0, "checked": 0, "avg_return_pct": None, "win_rate_pct": None, "days": days}}
+        return {"picks": [], "summary": {"total_picks": 0, "checked": 0, "avg_return_pct": None, "win_rate_pct": None, "days": days}, "alltime": {"first_date": None, "total_picks": 0, "checked": 0, "cumulative_pct": None, "avg_return_pct": None, "win_rate_pct": None}}
 
 
 # ── Backtest ─────────────────────────────────────────────────────────────────

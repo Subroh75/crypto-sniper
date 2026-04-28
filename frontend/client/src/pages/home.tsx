@@ -11,6 +11,7 @@ import { PriceChart } from "@/components/PriceChart";
 import {
   TradeSetupCard, ConvictionMeter, KeyLevelsCard,
   WatchlistCard, SubscribeCard, ExportCard, BasketScanner,
+  ScannerCumulativeCard, DipScannerCard,
 } from "@/components/Sidebar";
 import { TopSignals } from "@/components/TopSignals";
 import { CSOVerdict } from "@/components/CSOVerdict";
@@ -907,6 +908,11 @@ export default function Home() {
                 exporting={exporting}
               />
               <BasketScanner
+                interval={interval}
+                onSelect={(sym) => runAnalysis(sym)}
+              />
+              <ScannerCumulativeCard />
+              <DipScannerCard
                 interval={interval}
                 onSelect={(sym) => runAnalysis(sym)}
               />
