@@ -437,11 +437,13 @@ import {
   getWatchlistItems, addWatchlistItem, removeWatchlistItem,
   requestMagicLink, verifyMagicLink, getMe,
   getOnchain,
+  getBacktestInternal,
 } from "@/lib/api";
 import type {
   BacktestData, ConfluenceData,
   MagicLinkResult, VerifyResult, AuthUser,
   OnChainData,
+  BacktestInternalData,
 } from "@/types/api";
 
 /** Backtest of STRONG BUY signals */
@@ -496,6 +498,16 @@ export function useEditableWatchlist(userId: string) {
 export function useOnChain(symbol: string | null) {
   return useAsync<OnChainData>(
     () => getOnchain(symbol ?? "BTC"),
+    [symbol],
+    !!symbol,
+  );
+}
+
+
+/** Internal signal backtest — replays scoring engine on 1D history */
+export function useBacktestInternal(symbol: string | null) {
+  return useAsync<BacktestInternalData>(
+    () => getBacktestInternal(symbol ?? "BTC"),
     [symbol],
     !!symbol,
   );

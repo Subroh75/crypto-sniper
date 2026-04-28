@@ -234,3 +234,8 @@ export function getMe(sessionToken: string): Promise<import("@/types/api").AuthU
 export function getOnchain(symbol: string): Promise<import("@/types/api").OnChainData> {
   return get(`/onchain/${encodeURIComponent(symbol.toUpperCase())}`, 1);
 }
+
+/** Internal signal backtest — replays scoring engine on 1D OHLCV history */
+export function getBacktestInternal(symbol: string): Promise<import("@/types/api").BacktestInternalData> {
+  return get(`/backtest-internal/${encodeURIComponent(symbol.toUpperCase())}`, 1);
+}

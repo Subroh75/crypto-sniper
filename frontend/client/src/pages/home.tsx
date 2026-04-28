@@ -21,6 +21,7 @@ import { DeepResearchSection } from "@/components/DeepResearch";
 import { MultiTimeframeCard } from "@/components/MultiTimeframe";
 import { BacktestCard } from "@/components/BacktestCard";
 import { OnChainCard } from "@/components/OnChainCard";
+import { BacktestInternalCard } from "@/components/BacktestInternalCard";
 import { AuthModal, AuthButton } from "@/components/AuthModal";
 import {
   useAnalyse, useKronos, useWatchlist, usePdfExport,
@@ -827,6 +828,9 @@ export default function Home() {
 
               {/* 13: On-Chain Intelligence */}
               <OnChainCard symbol={symbol} />
+
+              {/* 14: Internal Signal Backtest */}
+              <BacktestInternalCard symbol={symbol} />
 
             </div>
             {/*  end LEFT column  */}

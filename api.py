@@ -33,6 +33,7 @@ from alerts import (
     check_and_fire_alerts,
 )
 from onchain import get_onchain
+from backtest_internal import run_backtest as run_internal_backtest
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -371,6 +372,22 @@ async def me(session_token: str):
     if not email:
         raise HTTPException(status_code=401, detail="Invalid or expired session")
     return {"email": email, "timestamp": int(time.time())}
+
+
+# ── Internal Signal Backtest ────────────────────────────────────────────────
+
+@app.get("/backtest-internal/{symbol}")
+async def backtest_internal(symbol: str):
+    """
+    Replay the live scoring engine bar-by-bar over 1D OHLCV history.
+    Returns trades, equity curve, bar scores, and summary stats.
+    Fully self-contained — no external trade data needed.
+    """
+    import asyncio
+    result = await asyncio.get_event_loop().run_in_executor(
+        None, run_internal_backtest, symbol.upper().strip()
+    )
+    return result
 
 
 # ── On-Chain Intelligence ────────────────────────────────────────────────────

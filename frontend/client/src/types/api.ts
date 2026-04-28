@@ -405,6 +405,71 @@ export interface AuthUser {
   email: string;
 }
 
+
+// ── Internal Signal Backtest ───────────────────────────────────────────────
+export interface BacktestTrade {
+  date:        string;
+  entry_price: number;
+  exit_price:  number;
+  score:       number;
+  signal:      string;
+  rsi:         number;
+  adx:         number;
+  ret_1d:      number;
+  ret_3d:      number | null;
+  ret_5d:      number | null;
+  win_1d:      boolean;
+  win_3d:      boolean | null;
+  win_5d:      boolean | null;
+}
+
+export interface BacktestEquityPoint {
+  date:   string;
+  score:  number;
+  signal: string;
+  equity: number;
+  close:  number;
+}
+
+export interface BacktestBarScore {
+  date:      string;
+  score:     number;
+  signal:    string;
+  close:     number;
+  rsi:       number;
+  adx:       number;
+  ema_stack: boolean;
+}
+
+export interface BacktestInternalSummary {
+  symbol:        string;
+  bars_scanned:  number;
+  total_trades:  number;
+  wins_1d:       number;
+  losses_1d:     number;
+  win_rate_1d:   number | null;
+  avg_ret_1d:    number | null;
+  avg_ret_3d:    number | null;
+  avg_ret_5d:    number | null;
+  total_return:  number | null;
+  max_drawdown:  number | null;
+  sharpe_proxy:  number | null;
+  threshold:     number;
+  hold_days:     number;
+  score_dist:    Record<string, number>;
+  first_date:    string | null;
+  last_date:     string | null;
+}
+
+export interface BacktestInternalData {
+  symbol:     string;
+  trades:     BacktestTrade[];
+  equity:     BacktestEquityPoint[];
+  bar_scores: BacktestBarScore[];
+  summary:    BacktestInternalSummary;
+  error?:     string;
+}
+
 // ── On-Chain Intelligence ─────────────────────────────────────────────────────
 export interface OnChainSignal {
   type:   "positive" | "caution" | "risk";
