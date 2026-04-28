@@ -223,44 +223,50 @@ def _build_context(symbol: str, ctx: dict) -> str:
 
 async def run_agent_council(symbol: str, signal_ctx: dict) -> list[dict]:
     """
-    Run all 4 agents and return their verdicts.
+    Run all 4 agents in parallel and return their verdicts.
     Falls back to template responses if API key not set.
     """
     if not ANTHROPIC_KEY:
         return _fallback_agents(symbol, signal_ctx)
 
     context = _build_context(symbol, signal_ctx)
-    client  = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
-    results = []
 
-    for agent_key, agent in AGENTS.items():
+    import asyncio
+
+    async def _run_one(agent_key: str, agent: dict) -> dict:
         try:
-            msg = client.messages.create(
-                model="claude-haiku-4-5-20251001",
-                max_tokens=400,
-                system=agent["instruction"],
-                messages=[{
-                    "role": "user",
-                    "content": f"Analyse this setup and give your detailed verdict:\n\n{context}"
-                }]
-            )
+            loop = asyncio.get_event_loop()
+            # Anthropic SDK is sync — run in thread pool to avoid blocking event loop
+            def _call():
+                client = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
+                return client.messages.create(
+                    model="claude-haiku-4-5-20251001",
+                    max_tokens=400,
+                    system=agent["instruction"],
+                    messages=[{
+                        "role": "user",
+                        "content": f"Analyse this setup and give your detailed verdict:\n\n{context}"
+                    }]
+                )
+            msg  = await loop.run_in_executor(None, _call)
             text = msg.content[0].text.strip()
-
-            # Extract verdict from the dedicated VERDICT: line first, then fallback scan
             verdict = _extract_verdict(text, agent_key)
-
-            results.append({
+            return {
                 "key":     agent_key,
                 "name":    agent["name"],
                 "icon":    agent["icon"],
                 "text":    text,
                 "verdict": verdict,
-            })
+            }
         except Exception as e:
             logger.warning(f"Agent {agent_key} error: {e}")
-            results.append(_fallback_agent(agent_key, symbol, signal_ctx))
+            return _fallback_agent(agent_key, symbol, signal_ctx)
 
-    return results
+    tasks = [_run_one(k, v) for k, v in AGENTS.items()]
+    results = await asyncio.gather(*tasks)
+    # Preserve AGENTS order
+    order = list(AGENTS.keys())
+    return sorted(results, key=lambda r: order.index(r["key"]) if r["key"] in order else 99)
 
 
 def _extract_verdict(text: str, agent_key: str) -> str:
