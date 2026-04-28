@@ -149,7 +149,7 @@ export async function deleteAlert(id: number): Promise<void> {
 
 // ââ Utility: format numbers âââââââââââââââââââââââââââââââââââââââââââââââââââ
 export function fmt(n: number | null | undefined, decimals = 2): string {
-  if (n == null || isNaN(n)) return "â";
+  if (n == null || isNaN(n)) return "-";
   return n.toLocaleString("en-US", {
     minimumFractionDigits: decimals,
     maximumFractionDigits: decimals,
@@ -157,20 +157,20 @@ export function fmt(n: number | null | undefined, decimals = 2): string {
 }
 
 export function fmtPrice(n: number | null | undefined): string {
-  if (n == null || isNaN(n) || n === 0) return "â";
+  if (n == null || isNaN(n) || n === 0) return "-";
   if (n < 0.001) return `$${n.toFixed(8)}`;
   if (n < 1)     return `$${n.toFixed(4)}`;
   return `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 export function fmtPct(n: number | null | undefined, showPlus = true): string {
-  if (n == null || isNaN(n)) return "â";
+  if (n == null || isNaN(n)) return "-";
   const sign = showPlus && n > 0 ? "+" : "";
   return `${sign}${n.toFixed(2)}%`;
 }
 
 export function fmtBigNum(n: number | null | undefined): string {
-  if (n == null || isNaN(n)) return "â";
+  if (n == null || isNaN(n)) return "-";
   if (n >= 1e12) return `$${(n / 1e12).toFixed(2)}T`;
   if (n >= 1e9)  return `$${(n / 1e9).toFixed(2)}B`;
   if (n >= 1e6)  return `$${(n / 1e6).toFixed(2)}M`;
@@ -235,7 +235,7 @@ export function getOnchain(symbol: string): Promise<import("@/types/api").OnChai
   return get(`/onchain/${encodeURIComponent(symbol.toUpperCase())}`, 1);
 }
 
-/** Internal signal backtest — replays scoring engine on 1D OHLCV history */
+/** Internal signal backtest - replays scoring engine on 1D OHLCV history */
 export function getBacktestInternal(symbol: string): Promise<import("@/types/api").BacktestInternalData> {
   return get(`/backtest-internal/${encodeURIComponent(symbol.toUpperCase())}`, 1);
 }
