@@ -330,27 +330,31 @@ export function MacroSection() {
 
         {/* Per-metric crypto impact table */}
         <div className="rounded-lg border border-border/40 overflow-hidden">
-          <div className="grid grid-cols-4 px-3 py-1.5 border-b border-border/30 bg-surface-2">
-            <span className="text-[9px] font-mono font-bold text-text-muted/50 uppercase tracking-widest">Indicator</span>
-            <span className="text-[9px] font-mono font-bold text-text-muted/50 uppercase tracking-widest">Value</span>
-            <span className="text-[9px] font-mono font-bold text-text-muted/50 uppercase tracking-widest">Signal</span>
-            <span className="text-[9px] font-mono font-bold text-text-muted/50 uppercase tracking-widest">Crypto Impact</span>
+          {/* Header */}
+          <div className="flex items-center px-3 py-1.5 border-b border-border/30 bg-surface-2 gap-3">
+            <span className="text-[9px] font-mono font-bold text-text-muted/50 uppercase tracking-widest" style={{width:"22%"}}>Indicator</span>
+            <span className="text-[9px] font-mono font-bold text-text-muted/50 uppercase tracking-widest" style={{width:"16%"}}>Value</span>
+            <span className="text-[9px] font-mono font-bold text-text-muted/50 uppercase tracking-widest" style={{width:"16%"}}>Signal</span>
+            <span className="text-[9px] font-mono font-bold text-text-muted/50 uppercase tracking-widest" style={{flex:1}}>Crypto Impact</span>
           </div>
+          {/* Rows */}
           {impacts.map((row, i) => (
             <div
               key={row.label}
-              className={`grid grid-cols-4 px-3 py-2.5 items-start gap-2 ${
+              className={`flex items-center px-3 py-2 gap-3 ${
                 i < impacts.length - 1 ? "border-b border-border/20" : ""
               }`}
             >
-              <span className="text-[10px] font-mono font-bold text-text-muted/80">{row.label}</span>
-              <span className={`text-[10px] font-mono font-bold ${row.color}`}>{row.value}</span>
-              <span className={`text-[9px] font-mono font-bold px-1.5 py-0.5 rounded self-start ${
-                row.signal === "Bullish" ? "bg-teal/10 text-teal" :
-                row.signal === "Bearish" ? "bg-red/10 text-red" :
-                "bg-amber/10 text-amber"
-              }`}>{row.signal}</span>
-              <span className="text-[10px] text-text-muted/70 leading-snug">{row.note}</span>
+              <span className="text-[10px] font-mono font-bold text-text-muted/80" style={{width:"22%"}}>{row.label}</span>
+              <span className={`text-[10px] font-mono font-bold ${row.color}`} style={{width:"16%"}}>{row.value}</span>
+              <span style={{width:"16%"}}>
+                <span className={`inline-block text-[9px] font-mono font-bold px-2 py-0.5 rounded border ${
+                  row.signal === "Bullish" ? "bg-teal/10 text-teal border-teal/20" :
+                  row.signal === "Bearish" ? "bg-red/10 text-red border-red/20" :
+                  "bg-amber/10 text-amber border-amber/20"
+                }`}>{row.signal}</span>
+              </span>
+              <span className="text-[10px] text-text-muted/70 leading-snug" style={{flex:1}}>{row.note}</span>
             </div>
           ))}
         </div>
