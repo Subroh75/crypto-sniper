@@ -167,45 +167,47 @@ export default function Home() {
     const result = await analyse.run(s, i);
     if (!result) return;
 
-    // Build signal context for Kronos — include all VPRTS + market structure + conviction data
+    // Build signal context for Kronos — include all VPRTS + market structure + conviction data.
+    // All numeric fields default to 0 (never null/undefined) to prevent backend format-string crashes.
+    const n = (v: number | null | undefined, fallback = 0) => v ?? fallback;
     const ctx = {
-      close:        result.quote.price,
-      rsi:          result.timing.rsi,
-      adx:          result.timing.adx,
-      atr:          result.timing.atr,
-      rel_volume:   result.timing.rel_volume,
+      close:        n(result.quote.price),
+      rsi:          n(result.timing.rsi, 50),
+      adx:          n(result.timing.adx),
+      atr:          n(result.timing.atr),
+      rel_volume:   n(result.timing.rel_volume, 1),
       ema_stack:    result.structure.ema20 > 0 && result.structure.ema50 > 0
                       && result.quote.price > result.structure.ema20,
-      ema20:        result.structure.ema20,
-      ema50:        result.structure.ema50,
-      ema200:       result.structure.ema200,
-      vwap:         result.structure.vwap,
-      bb_upper:     result.structure.bb_upper,
-      bb_lower:     result.structure.bb_lower,
+      ema20:        n(result.structure.ema20),
+      ema50:        n(result.structure.ema50),
+      ema200:       n(result.structure.ema200),
+      vwap:         n(result.structure.vwap),
+      bb_upper:     n(result.structure.bb_upper),
+      bb_lower:     n(result.structure.bb_lower),
       signal:       result.signal.label,
-      total:        result.signal.total,
+      total:        n(result.signal.total),
       direction:    result.signal.direction,
-      change_24h:   result.quote.change_24h,
+      change_24h:   n(result.quote.change_24h),
       // VPRTS component scores
-      v_score:      result.components?.V?.score ?? 0,
-      p_score:      result.components?.P?.score ?? 0,
-      r_score:      result.components?.R?.score ?? 0,
-      t_score:      result.components?.T?.score ?? 0,
-      s_score:      result.components?.S?.score ?? 0,
-      // Trade setup
-      entry:        result.trade_setup.entry,
-      stop:         result.trade_setup.stop,
-      target:       result.trade_setup.target,
-      rr_ratio:     result.trade_setup.rr_ratio,
-      stop_dist_pct: result.trade_setup.stop_dist_pct,
+      v_score:      n(result.components?.V?.score),
+      p_score:      n(result.components?.P?.score),
+      r_score:      n(result.components?.R?.score),
+      t_score:      n(result.components?.T?.score),
+      s_score:      n(result.components?.S?.score),
+      // Trade setup — keep null for optional fields (backend guards these)
+      entry:        result.trade_setup.entry ?? 0,
+      stop:         result.trade_setup.stop ?? 0,
+      target:       result.trade_setup.target ?? 0,
+      rr_ratio:     result.trade_setup.rr_ratio ?? 0,
+      stop_dist_pct: result.trade_setup.stop_dist_pct ?? 0,
       // Conviction signals
-      bull_pct:     result.conviction?.bull_pct ?? 0,
-      bear_pct:     result.conviction?.bear_pct ?? 0,
+      bull_pct:     n(result.conviction?.bull_pct),
+      bear_pct:     n(result.conviction?.bear_pct),
       bull_signals: result.conviction?.bull_signals ?? [],
       bear_signals: result.conviction?.bear_signals ?? [],
       // Sentiment
-      fg_value:     result.fear_greed?.value ?? null,
-      fg_label:     result.fear_greed?.label ?? null,
+      fg_value:     result.fear_greed?.value ?? 50,
+      fg_label:     result.fear_greed?.label ?? "Neutral",
     } as Record<string, unknown>;
 
     kronosHk.run(s, i, ctx);
