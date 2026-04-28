@@ -817,3 +817,295 @@ export function ExportCard({
     </SideCard>
   );
 }
+
+// ════════════════════════════════════════════════════════════════════════════
+// 11. BASKET SCANNER
+// ════════════════════════════════════════════════════════════════════════════
+const BASKETS: Array<{ id: string; label: string; icon: string; desc: string; symbols: string[] }> = [
+  {
+    id: "bluechip",
+    label: "Blue Chip",
+    icon: "💎",
+    desc: "Top 6 by market cap",
+    symbols: ["BTC", "ETH", "BNB", "SOL", "XRP", "ADA"],
+  },
+  {
+    id: "ai",
+    label: "AI Tokens",
+    icon: "🤖",
+    desc: "Artificial intelligence narrative",
+    symbols: ["TAO", "RENDER", "FET", "AGIX", "OCEAN", "WLD", "AKT", "NMR"],
+  },
+  {
+    id: "l2",
+    label: "Layer 2",
+    icon: "⚡",
+    desc: "Ethereum scaling solutions",
+    symbols: ["ARB", "OP", "MNT", "POL", "STRK", "METIS", "ZK"],
+  },
+  {
+    id: "meme",
+    label: "Meme",
+    icon: "🐸",
+    desc: "Meme supercycle basket",
+    symbols: ["DOGE", "SHIB", "PEPE", "WIF", "BONK", "FLOKI", "BRETT"],
+  },
+  {
+    id: "defi",
+    label: "DeFi",
+    icon: "🔗",
+    desc: "Decentralised finance",
+    symbols: ["UNI", "AAVE", "MKR", "CRV", "COMP", "LDO", "JUP", "GMX"],
+  },
+  {
+    id: "solana",
+    label: "Solana Eco",
+    icon: "🌐",
+    desc: "Solana ecosystem tokens",
+    symbols: ["SOL", "RAY", "PYTH", "JUP", "BONK", "WIF", "JTO"],
+  },
+  {
+    id: "btceco",
+    label: "BTC Eco",
+    icon: "₿",
+    desc: "Bitcoin ecosystem tokens",
+    symbols: ["BTC", "STX", "ORDI", "RUNE", "BCH", "ICP"],
+  },
+  {
+    id: "rwa",
+    label: "RWA",
+    icon: "🏦",
+    desc: "Real world assets",
+    symbols: ["LINK", "ONDO", "MKR", "AVAX", "POLYX", "CFG"],
+  },
+];
+
+type BasketResult = {
+  symbol:  string;
+  score:   number;
+  max:     number;
+  label:   string;
+  change:  number;
+  price:   number;
+  done:    boolean;
+  error:   boolean;
+};
+
+export function BasketScanner({
+  interval,
+  onSelect,
+}: {
+  interval: string;
+  onSelect: (sym: string) => void;
+}) {
+  const [activeBasket, setActiveBasket] = useState<string | null>(null);
+  const [results,      setResults]      = useState<BasketResult[]>([]);
+  const [scanning,     setScanning]     = useState(false);
+  const [done,         setDone]         = useState(false);
+  const abortRef = useRef<AbortController | null>(null);
+
+  const basket = BASKETS.find(b => b.id === activeBasket) ?? null;
+
+  const runScan = useCallback(async (b: typeof BASKETS[0]) => {
+    abortRef.current?.abort();
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
+
+    setActiveBasket(b.id);
+    setScanning(true);
+    setDone(false);
+    setResults(b.symbols.map(sym => ({
+      symbol: sym, score: 0, max: 16, label: "—",
+      change: 0, price: 0, done: false, error: false,
+    })));
+
+    const RENDER_BASE = "https://crypto-sniper.onrender.com";
+
+    await Promise.allSettled(
+      b.symbols.map(async (sym) => {
+        try {
+          const res = await fetch(`${RENDER_BASE}/analyse`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ symbol: sym, interval }),
+            signal: ctrl.signal,
+          });
+          if (!res.ok) throw new Error();
+          const data = await res.json();
+          const score  = data?.signal?.total  ?? 0;
+          const max    = data?.signal?.max    ?? 16;
+          const label  = data?.signal?.label  ?? "—";
+          const change = data?.quote?.change_24h ?? 0;
+          const price  = data?.quote?.price      ?? 0;
+          setResults(prev => prev.map(r =>
+            r.symbol === sym
+              ? { ...r, score, max, label, change, price, done: true, error: false }
+              : r
+          ));
+        } catch {
+          if (!ctrl.signal.aborted) {
+            setResults(prev => prev.map(r =>
+              r.symbol === sym ? { ...r, done: true, error: true } : r
+            ));
+          }
+        }
+      })
+    );
+
+    if (!ctrl.signal.aborted) {
+      setScanning(false);
+      setDone(true);
+    }
+  }, [interval]);
+
+  // Sort: done results by score desc first, then pending at bottom
+  const sorted = [...results].sort((a, b) => {
+    if (a.done !== b.done) return a.done ? -1 : 1;
+    return b.score - a.score;
+  });
+
+  const top        = sorted.find(r => r.done && !r.error);
+  const strongBuys = sorted.filter(r => r.done && r.score >= 9).length;
+
+  return (
+    <SideCard>
+      <SideCardHeader icon="🧺" title="BASKET SCANNER" badge="NEW" />
+      <div className="p-3">
+
+        {/* Theme pills — 4-col grid */}
+        <div className="grid grid-cols-4 gap-1 mb-3">
+          {BASKETS.map(b => (
+            <button
+              key={b.id}
+              onClick={() => runScan(b)}
+              disabled={scanning}
+              className={`flex flex-col items-center gap-0.5 py-2 px-1 rounded-lg border text-center transition-all ${
+                activeBasket === b.id
+                  ? "border-purple/60 bg-purple/10 text-purple"
+                  : "border-border/40 bg-surface-2 text-text-muted/70 hover:border-purple/30 hover:text-text"
+              } disabled:opacity-50 disabled:cursor-wait`}
+            >
+              <span className="text-[13px] leading-none">{b.icon}</span>
+              <span className="text-[8px] font-mono font-bold leading-tight mt-0.5">{b.label}</span>
+            </button>
+          ))}
+        </div>
+
+        {/* Active basket + scan status */}
+        {basket && (
+          <div className="flex items-center justify-between mb-2 px-0.5">
+            <div>
+              <span className="text-[9px] font-mono text-text-muted/60">{basket.desc}</span>
+              <span className="text-[9px] font-mono text-text-muted/30"> · {interval}</span>
+            </div>
+            {scanning && (
+              <span className="text-[8px] font-mono text-amber animate-pulse">scanning…</span>
+            )}
+            {done && (
+              <span className={`text-[8px] font-mono ${strongBuys > 0 ? "text-teal" : "text-text-muted/50"}`}>
+                {strongBuys > 0 ? `${strongBuys} strong buy${strongBuys > 1 ? "s" : ""}` : "no strong buys"}
+              </span>
+            )}
+          </div>
+        )}
+
+        {/* Leaderboard */}
+        {results.length > 0 && (
+          <div className="space-y-1">
+            {sorted.map((r, i) => {
+              const isTop    = r === top && done && r.score >= 9;
+              const pct      = Math.round((r.score / r.max) * 100);
+              const barColor =
+                r.score >= 9 ? "bg-teal" :
+                r.score >= 5 ? "bg-amber" : "bg-border/50";
+              const scoreColor =
+                r.score >= 9 ? "text-teal" :
+                r.score >= 5 ? "text-amber" : "text-text-muted/40";
+              return (
+                <button
+                  key={r.symbol}
+                  onClick={() => r.done && !r.error && onSelect(r.symbol)}
+                  disabled={!r.done || r.error}
+                  className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-lg border transition-all text-left ${
+                    isTop
+                      ? "border-teal/40 bg-teal/5"
+                      : "border-border/30 bg-surface-2 hover:border-purple/30"
+                  } ${!r.done ? "opacity-50 cursor-default" : ""}`}
+                >
+                  {/* Rank */}
+                  <span className="text-[8px] font-mono text-text-muted/25 w-3 shrink-0 text-right">
+                    {r.done && !r.error ? i + 1 : "·"}
+                  </span>
+
+                  {/* Symbol */}
+                  <span className={`text-[11px] font-mono font-black w-10 shrink-0 ${
+                    r.done && !r.error ? "text-text" : "text-text-muted/30"
+                  }`}>{r.symbol}</span>
+
+                  {/* Score bar */}
+                  <div className="flex-1 min-w-0">
+                    {r.done && !r.error ? (
+                      <div className="relative h-1.5 bg-surface-offset rounded-full overflow-hidden">
+                        <div
+                          className={`absolute left-0 top-0 h-full rounded-full transition-all duration-700 ${barColor}`}
+                          style={{ width: `${pct}%` }}
+                        />
+                      </div>
+                    ) : r.error ? (
+                      <span className="text-[8px] font-mono text-red/40">err</span>
+                    ) : (
+                      <div className="h-1.5 rounded-full bg-surface-offset animate-pulse" />
+                    )}
+                  </div>
+
+                  {/* Score */}
+                  <span className={`text-[10px] font-mono font-bold shrink-0 ${scoreColor}`}>
+                    {r.done && !r.error ? `${r.score}/${r.max}` : "—"}
+                  </span>
+
+                  {/* 24h % */}
+                  {r.done && !r.error && (
+                    <span className={`text-[8px] font-mono shrink-0 w-9 text-right ${
+                      r.change >= 0 ? "text-teal" : "text-red"
+                    }`}>
+                      {r.change >= 0 ? "+" : ""}{r.change.toFixed(1)}%
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Empty state */}
+        {results.length === 0 && (
+          <div className="text-center py-5">
+            <div className="text-[20px] mb-2 opacity-40">🧺</div>
+            <div className="text-[10px] font-mono text-text-muted/40 leading-relaxed">
+              Pick a theme to scan all coins<br />in that basket ranked by score.
+            </div>
+          </div>
+        )}
+
+        {/* Top scorer CTA */}
+        {done && top && top.score >= 5 && (
+          <button
+            onClick={() => onSelect(top.symbol)}
+            className="w-full mt-2 py-2 rounded-lg text-[10px] font-mono font-bold text-white flex items-center justify-center gap-1.5 transition-all hover:opacity-90"
+            style={{
+              background: top.score >= 9
+                ? "linear-gradient(135deg, #22c55e, #16a34a)"
+                : "linear-gradient(135deg, #f59e0b, #d97706)",
+              boxShadow: top.score >= 9
+                ? "0 2px 12px rgba(34,197,94,0.25)"
+                : "0 2px 12px rgba(245,158,11,0.20)",
+            }}
+          >
+            ⚡ Analyse top scorer — {top.symbol} ({top.score}/{top.max})
+          </button>
+        )}
+
+      </div>
+    </SideCard>
+  );
+}

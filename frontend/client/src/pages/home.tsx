@@ -10,7 +10,7 @@ import { MarketBar } from "@/components/MarketBar";
 import { PriceChart } from "@/components/PriceChart";
 import {
   TradeSetupCard, ConvictionMeter, KeyLevelsCard,
-  WatchlistCard, SubscribeCard, ExportCard,
+  WatchlistCard, SubscribeCard, ExportCard, BasketScanner,
 } from "@/components/Sidebar";
 import { TopSignals } from "@/components/TopSignals";
 import { CSOVerdict } from "@/components/CSOVerdict";
@@ -905,6 +905,10 @@ export default function Home() {
                 onRerun={() => runAnalysis()}
                 onExport={() => exportPdf(reportId, `crypto-sniper-${symbol}-${interval}.pdf`)}
                 exporting={exporting}
+              />
+              <BasketScanner
+                interval={interval}
+                onSelect={(sym) => runAnalysis(sym)}
               />
             </div>
             {/*  end RIGHT sidebar  */}
