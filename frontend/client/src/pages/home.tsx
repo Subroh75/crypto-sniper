@@ -403,10 +403,21 @@ export default function Home() {
                   <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2">
                     {(["V","P","R","T","S"] as const).map(key => {
                       const comp = sig.components[key];
-                      const colors: Record<string, string> = { V:"#b8c2dc", P:"#b8c2dc", R:"#b8c2dc", T:"#00d4aa", S:"#ff8c42" };
-                      const color = comp.score > 0 ? colors[key] : "#4a5470";
+                      // Colour driven by score ratio: bullish=green, partial=amber, weak=red, zero=muted
+                      const ratio = comp.max > 0 ? comp.score / comp.max : 0;
+                      const color =
+                        comp.score === 0   ? "#4a5470"   // zero — muted grey
+                        : ratio >= 0.67   ? "#22c55e"   // 2/3+ of max — bullish green
+                        : ratio >= 0.34   ? "#f59e0b"   // 1/3–2/3 — amber/neutral
+                        : "#ef4444";                    // below 1/3 — bearish red
                       return (
-                        <div key={key} className={`bg-surface-2 rounded-lg border p-3 ${key === "S" ? "border-orange/20" : "border-border/50"}`}>
+                        <div key={key} className="bg-surface-2 rounded-lg border p-3"
+                          style={{ borderColor:
+                            comp.score === 0 ? "rgba(74,84,112,0.3)"
+                            : ratio >= 0.67  ? "rgba(34,197,94,0.25)"
+                            : ratio >= 0.34  ? "rgba(245,158,11,0.25)"
+                            : "rgba(239,68,68,0.25)"
+                          }}>
                           <div className="text-[22px] font-black mb-0.5" style={{ color }}>{key}</div>
                           <div className="text-[9px] font-mono text-text-muted/70 uppercase tracking-wide mb-2">
                             <MetricTooltip id={key}>{comp.label}</MetricTooltip>
