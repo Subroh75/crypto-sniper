@@ -235,7 +235,7 @@ export default function Home() {
       {isMobile && <PWAInstallBanner />}
 
       {/*  HEADER  */}
-      <header className="sticky top-0 z-50 border-b border-border/60 backdrop-blur-xl bg-bg/90">
+      <header className="sticky top-0 z-50 border-b border-border/60 backdrop-blur-xl bg-bg/90" style={{ paddingTop: 'env(safe-area-inset-top, 0px)' }}>
         <div className="flex items-center gap-2 md:gap-4 px-3 md:px-4 h-[50px]">
           <Logo />
           {/* LiveTicker hidden on mobile to save space */}
