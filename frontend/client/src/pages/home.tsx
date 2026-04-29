@@ -915,7 +915,7 @@ export default function Home() {
               {/* Signals group */}
               <div className={isMobile && mobileTab !== "signals" ? "hidden" : ""}>
                 <CSOVerdict sig={sig} kron={kronosHk.data} fearGreed={sig?.fear_greed} />
-                <TopSignals onSelect={(sym) => { runAnalysis(sym); if(isMobile) setMobileTab("analyse"); }} interval={interval} />
+                <TopSignals onSelect={(sym) => { runAnalysis(sym); if(isMobile) setMobileTab("analyse"); }} interval={interval} listMode={isMobile} />
                 <TradeSetupCard setup={sig?.trade_setup ?? null} close={sig?.quote?.price ?? 0} />
                 <ConvictionMeter conviction={sig.conviction} />
                 <KeyLevelsCard levels={sig.key_levels} />
