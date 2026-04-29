@@ -94,9 +94,9 @@ function AlertBell() {
       <button
         onClick={handleOpen}
         aria-label="Alert notifications"
-        style={{ background: "transparent", border: "1px solid #1e293b", borderRadius: 8,
-          padding: "6px 8px", cursor: "pointer", display: "flex", alignItems: "center",
-          color: count > 0 ? "#f59e0b" : "#475569", position: "relative", minHeight: 36 }}
+        style={{ background: count > 0 ? "#f59e0b18" : "#7c3aed0d", border: `1px solid ${count > 0 ? "#f59e0b55" : "#7c3aed33"}`, borderRadius: 8,
+          padding: "6px 9px", cursor: "pointer", display: "flex", alignItems: "center",
+          color: count > 0 ? "#f59e0b" : "#a78bfa", position: "relative", minHeight: 36 }}
       >
         {/* Bell SVG */}
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -351,7 +351,7 @@ export default function Home() {
             <AuthButton user={auth.user} onClick={() => setAuthOpen(true)} />
             <AlertBell />
             <button
-              className="text-[11px] font-mono font-bold text-white px-2.5 md:px-3 py-1.5 rounded transition-all min-h-[36px]"
+              className="hidden md:flex text-[11px] font-mono font-bold text-white px-2.5 md:px-3 py-1.5 rounded transition-all min-h-[36px]"
               style={{ background: "#7c3aed" }}
             >
               Subscribe
