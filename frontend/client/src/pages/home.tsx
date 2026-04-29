@@ -25,6 +25,7 @@ import { BacktestCard } from "@/components/BacktestCard";
 import { OnChainCard } from "@/components/OnChainCard";
 import { BacktestInternalCard } from "@/components/BacktestInternalCard";
 import { AuthModal, AuthButton } from "@/components/AuthModal";
+import { PWAInstallBanner } from "@/components/PWAInstallBanner";
 import {
   useAnalyse, useKronos, useWatchlist, usePdfExport,
   useHitRate, useScannerPerformance, useAlerts,
@@ -229,6 +230,7 @@ export default function Home() {
 
   return (
     <div className="min-h-screen bg-bg text-text" id={reportId}>
+      {isMobile && <PWAInstallBanner />}
 
       {/*  HEADER  */}
       <header className="sticky top-0 z-50 border-b border-border/60 backdrop-blur-xl bg-bg/90">
