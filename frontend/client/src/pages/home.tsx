@@ -3,7 +3,8 @@
 // Left: 10 analysis sections. Right: sidebar (Trade Setup, Conviction,
 // Key Levels, Watchlist, Subscribe, Export).
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
+import { useMobile } from "@/hooks/useMobile";
 import { Logo } from "@/components/Logo";
 import { LiveTicker } from "@/components/LiveTicker";
 import { MarketBar } from "@/components/MarketBar";
@@ -217,23 +218,35 @@ export default function Home() {
   const sig    = analyse.data;
   const kron   = kronosHk.data;
   const loading = analyse.loading;
+  const isMobile = useMobile();
+  // Mobile tab: which panel is visible
+  const [mobileTab, setMobileTab] = useState<"analyse"|"signals"|"sidebar"|"scanner">("analyse");
+
+  // Scroll-to-top when switching mobile tabs
+  useEffect(() => {
+    if (isMobile) window.scrollTo({ top: 0, behavior: "smooth" });
+  }, [mobileTab, isMobile]);
 
   return (
     <div className="min-h-screen bg-bg text-text" id={reportId}>
 
       {/*  HEADER  */}
       <header className="sticky top-0 z-50 border-b border-border/60 backdrop-blur-xl bg-bg/90">
-        <div className="flex items-center gap-4 px-4 h-[50px]">
+        <div className="flex items-center gap-2 md:gap-4 px-3 md:px-4 h-[50px]">
           <Logo />
-          <LiveTicker />
-          <div className="flex items-center gap-3 flex-shrink-0">
-            <div className="flex items-center gap-1.5 text-[10px] font-mono text-teal">
+          {/* LiveTicker hidden on mobile to save space */}
+          <div className="hidden md:block flex-1 min-w-0">
+            <LiveTicker />
+          </div>
+          <div className="flex-1 md:flex-none" />
+          <div className="flex items-center gap-2 md:gap-3 flex-shrink-0">
+            <div className="flex items-center gap-1 text-[10px] font-mono text-teal">
               <div className="w-[6px] h-[6px] rounded-full bg-teal animate-pulse shadow-sm shadow-teal/50" />
-              LIVE
+              <span className="hidden sm:inline">LIVE</span>
             </div>
             <AuthButton user={auth.user} onClick={() => setAuthOpen(true)} />
             <button
-              className="text-[11px] font-mono font-bold text-white px-3 py-1.5 rounded transition-all"
+              className="text-[11px] font-mono font-bold text-white px-2.5 md:px-3 py-1.5 rounded transition-all min-h-[36px]"
               style={{ background: "#7c3aed" }}
             >
               Subscribe
@@ -246,22 +259,22 @@ export default function Home() {
       <MarketBar />
 
       {/*  HERO SEARCH  */}
-      <div className="text-center px-4 py-8">
-        <h1 className="text-4xl sm:text-5xl font-black tracking-tight mb-2"
+      <div className="text-center px-4 py-6 md:py-8">
+        <h1 className="text-2xl sm:text-4xl md:text-5xl font-black tracking-tight mb-2 leading-tight"
             style={{ background: "linear-gradient(140deg,#fff 20%,#7c3aed 80%)", WebkitBackgroundClip:"text", WebkitTextFillColor:"transparent" }}>
           Real-Time Crypto Signal Engine
         </h1>
-        <p className="text-text-muted text-[13px] mb-5">
-          Live V/P/R/T/S scoring &middot; Kronos AI forecast &middot; On-chain signals &middot; Multi-agent debate
+        <p className="text-text-muted text-[11px] md:text-[13px] mb-4 md:mb-5 px-2">
+          V/P/R/T/S scoring &middot; Kronos AI &middot; On-chain &middot; Agent debate
         </p>
 
         {/* Timeframe pills */}
-        <div className="flex justify-center gap-1.5 mb-3">
+        <div className="flex justify-center gap-1 md:gap-1.5 mb-3 flex-wrap">
           {INTERVALS.map(iv => (
             <button
               key={iv}
               onClick={() => setInterval(iv)}
-              className={`text-[11px] font-mono font-bold px-3 py-1 rounded-md border transition-all ${
+              className={`text-[11px] font-mono font-bold px-2.5 md:px-3 py-1.5 rounded-md border transition-all min-h-[36px] ${
                 iv === interval
                   ? "border-purple text-purple bg-purple/8"
                   : "border-border/50 text-text-muted hover:border-text-muted hover:text-text"
@@ -272,34 +285,34 @@ export default function Home() {
           ))}
         </div>
 
-        {/* Search row */}
-        <div className="flex gap-2 max-w-[640px] mx-auto mb-3">
+        {/* Search row — stacks on mobile */}
+        <div className="flex flex-col sm:flex-row gap-2 max-w-[640px] mx-auto mb-3">
           <input
             ref={inputRef}
             value={input}
             onChange={e => setInput(e.target.value.toUpperCase())}
             onKeyDown={e => e.key === "Enter" && runAnalysis()}
-            placeholder="BTC - ETH - SOL - KAVA..."
-            className="flex-1 h-[46px] rounded-lg border border-border/60 bg-surface px-4 text-[15px] font-sans font-medium text-text placeholder:text-text-muted/50 outline-none focus:border-purple transition-all"
+            placeholder="BTC  ETH  SOL  KAVA..."
+            className="flex-1 h-[48px] rounded-lg border border-border/60 bg-surface px-4 text-[15px] font-sans font-medium text-text placeholder:text-text-muted/50 outline-none focus:border-purple transition-all w-full"
           />
           <button
-            onClick={() => runAnalysis()}
+            onClick={() => { runAnalysis(); if (isMobile) setMobileTab("analyse"); }}
             disabled={loading}
-            className="h-[46px] px-5 rounded-lg font-sans font-bold text-[13px] text-white flex items-center gap-2 transition-all disabled:opacity-60"
+            className="h-[48px] px-5 rounded-lg font-sans font-bold text-[13px] text-white flex items-center justify-center gap-2 transition-all disabled:opacity-60 w-full sm:w-auto"
             style={{ background: "#7c3aed" }}
           >
-            {loading ? "..." : "Analyse"}
+            {loading ? "Analysing..." : "Analyse"}
           </button>
         </div>
 
         {/* Quick coins */}
-        <div className="flex justify-center gap-2 flex-wrap">
+        <div className="flex justify-center gap-1.5 flex-wrap">
           <span className="text-[10px] font-mono text-text-muted/60 py-1 px-1">Try</span>
           {QUICK_COINS.map(sym => (
             <button
               key={sym}
-              onClick={() => runAnalysis(sym)}
-              className="text-[11px] font-mono px-3 py-1 rounded-md border border-border/50 bg-surface-2 text-text-muted hover:border-purple/40 hover:text-text transition-all"
+              onClick={() => { runAnalysis(sym); if (isMobile) setMobileTab("analyse"); }}
+              className="text-[11px] font-mono px-2.5 py-1 rounded-md border border-border/50 bg-surface-2 text-text-muted hover:border-purple/40 hover:text-text transition-all min-h-[32px]"
             >
               {sym}
             </button>
@@ -307,8 +320,8 @@ export default function Home() {
         </div>
       </div>
 
-      {/*  MAIN TWO-COL LAYOUT  */}
-      <div className="max-w-[1380px] mx-auto px-4 pb-20">
+      {/*  MAIN LAYOUT  */}
+      <div className="max-w-[1380px] mx-auto px-3 md:px-4 pb-tab-bar md:pb-20">
 
         {!sig && !loading && (
           <div className="text-center py-10 text-text-muted text-[13px] font-mono">
@@ -328,10 +341,12 @@ export default function Home() {
         )}
 
         {sig && !loading && (
-          <div className="grid gap-3" style={{ gridTemplateColumns: "1fr 320px" }}>
-
-            {/*  LEFT COLUMN  */}
-            <div>
+          <div
+            className={isMobile ? "flex flex-col gap-3" : "grid gap-3"}
+            style={isMobile ? undefined : { gridTemplateColumns: "1fr 320px" }}
+          >
+            {/* LEFT COLUMN — full on desktop; hidden on mobile unless tab=analyse */}
+            <div className={isMobile && mobileTab !== "analyse" ? "hidden" : ""}>
 
               {/* 01: Signal Output */}
               <Card>
@@ -385,7 +400,7 @@ export default function Home() {
               <Card>
                 <CardHeader num="02" title="SIGNAL COMPONENTS V/P/R/T/S" />
                 <div className="p-4">
-                  <div className="grid grid-cols-5 gap-2">
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2">
                     {(["V","P","R","T","S"] as const).map(key => {
                       const comp = sig.components[key];
                       const colors: Record<string, string> = { V:"#b8c2dc", P:"#b8c2dc", R:"#b8c2dc", T:"#00d4aa", S:"#ff8c42" };
@@ -419,7 +434,7 @@ export default function Home() {
               />
 
               {/* 03 + 04: Market Structure + Timing Quality */}
-              <div className="grid grid-cols-2 gap-3 mb-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
                 <Card className="mb-0">
                   <CardHeader num="03" icon="-" title="MARKET STRUCTURE" />
                   <div className="p-4 space-y-2">
@@ -477,7 +492,7 @@ export default function Home() {
                     <Card>
                       <CardHeader num="05" title="MARKET CONTEXT" />
                       <div className="p-4">
-                        <div className="grid grid-cols-2 gap-2">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                           <div className="bg-surface-2 rounded-lg border border-border/40 p-3">
                             <div className="text-[9px] font-mono text-text-muted/70 uppercase tracking-wide mb-1">
                               <MetricTooltip id="RSI">Fear/Greed Index</MetricTooltip>
@@ -510,7 +525,7 @@ export default function Home() {
                   <Card>
                     <CardHeader num="05" title="PERP DERIVATIVES" badge="LIVE" />
                     <div className="p-4">
-                      <div className="grid grid-cols-3 gap-2">
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                         {/* Funding Rate */}
                         <div className="bg-surface-2 rounded-lg border border-border/40 p-3">
                           <div className="text-[9px] font-mono text-text-muted/70 uppercase tracking-wide mb-1">
@@ -578,7 +593,7 @@ export default function Home() {
                   {kron && !kronosHk.loading && (
                     <>
                       {/* Row 1: direction / move / trade quality */}
-                      <div className="grid grid-cols-3 gap-2 mb-2">
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-2">
                         {[
                           { label: "AI Forecast",   value: kron.forecast.direction,
                             color: kron.forecast.direction === "Falling" ? "text-red" : kron.forecast.direction === "Rising" ? "text-teal" : "text-amber" },
@@ -594,7 +609,7 @@ export default function Home() {
                         ))}
                       </div>
                       {/* Row 2: target / bull / bear + conviction badges */}
-                      <div className="grid grid-cols-3 gap-2 mb-2">
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-2">
                         <div className="bg-surface-2 rounded-lg border border-border/40 p-3">
                           <div className="text-[9px] font-mono text-text-muted/70 uppercase tracking-wide mb-1">Target Price</div>
                           <div className="text-[14px] font-mono font-black text-text">{fmtPrice(kron.forecast.target_price)}</div>
@@ -884,45 +899,83 @@ export default function Home() {
             </div>
             {/*  end LEFT column  */}
 
-            {/*  RIGHT SIDEBAR  */}
+            {/* RIGHT SIDEBAR */}
             <div>
-              <CSOVerdict sig={sig} kron={kronosHk.data} fearGreed={sig?.fear_greed} />
-              <TopSignals onSelect={(sym) => runAnalysis(sym)} interval={interval} />
-              <TradeSetupCard setup={sig?.trade_setup ?? null} close={sig?.quote?.price ?? 0} />
-              <ConvictionMeter conviction={sig.conviction} />
-              <KeyLevelsCard levels={sig.key_levels} />
-              <WatchlistCard
-                scores={wlScores}
-                loading={wlLoading}
-                onSelect={(sym) => runAnalysis(sym)}
-                currentSymbol={symbol}
-                onAdd={editableWL.add}
-                onRemove={editableWL.remove}
-              />
-              <SubscribeCard />
-              <ExportCard
-                symbol={symbol}
-                interval={interval}
-                onRerun={() => runAnalysis()}
-                onExport={() => exportPdf(reportId, `crypto-sniper-${symbol}-${interval}.pdf`)}
-                exporting={exporting}
-              />
-              <BasketScanner
-                interval={interval}
-                onSelect={(sym) => runAnalysis(sym)}
-              />
-              <ScannerCumulativeCard />
-              <DipScannerCard
-                interval={interval}
-                onSelect={(sym) => runAnalysis(sym)}
-              />
-              <OptionsIntelligenceSection />
+              {/* Signals group */}
+              <div className={isMobile && mobileTab !== "signals" ? "hidden" : ""}>
+                <CSOVerdict sig={sig} kron={kronosHk.data} fearGreed={sig?.fear_greed} />
+                <TopSignals onSelect={(sym) => { runAnalysis(sym); if(isMobile) setMobileTab("analyse"); }} interval={interval} />
+                <TradeSetupCard setup={sig?.trade_setup ?? null} close={sig?.quote?.price ?? 0} />
+                <ConvictionMeter conviction={sig.conviction} />
+                <KeyLevelsCard levels={sig.key_levels} />
+              </div>
+              {/* Watchlist + Tools group */}
+              <div className={isMobile && mobileTab !== "sidebar" ? "hidden" : ""}>
+                <WatchlistCard
+                  scores={wlScores}
+                  loading={wlLoading}
+                  onSelect={(sym) => { runAnalysis(sym); if(isMobile) setMobileTab("analyse"); }}
+                  currentSymbol={symbol}
+                  onAdd={editableWL.add}
+                  onRemove={editableWL.remove}
+                />
+                <SubscribeCard />
+                <ExportCard
+                  symbol={symbol}
+                  interval={interval}
+                  onRerun={() => runAnalysis()}
+                  onExport={() => exportPdf(reportId, `crypto-sniper-${symbol}-${interval}.pdf`)}
+                  exporting={exporting}
+                />
+                <BasketScanner
+                  interval={interval}
+                  onSelect={(sym) => { runAnalysis(sym); if(isMobile) setMobileTab("analyse"); }}
+                />
+                <ScannerCumulativeCard />
+                <DipScannerCard
+                  interval={interval}
+                  onSelect={(sym) => { runAnalysis(sym); if(isMobile) setMobileTab("analyse"); }}
+                />
+                <OptionsIntelligenceSection />
+              </div>
             </div>
-            {/*  end RIGHT sidebar  */}
+            {/* end RIGHT sidebar */}
 
           </div>
         )}
       </div>
+
+      {/* MOBILE BOTTOM TAB BAR */}
+      {isMobile && (
+        <nav
+          className="fixed bottom-0 left-0 right-0 z-50 bg-bg/95 backdrop-blur-xl border-t border-border/60"
+          style={{ paddingBottom: "env(safe-area-inset-bottom, 0px)" }}
+        >
+          <div className="flex items-stretch">
+            {([
+              { key: "analyse",  label: "Analyse",  icon: "◎" },
+              { key: "signals",  label: "Signals",  icon: "▲" },
+              { key: "sidebar",  label: "Tools",    icon: "◈" },
+            ] as const).map(tab => (
+              <button
+                key={tab.key}
+                onClick={() => setMobileTab(tab.key)}
+                className={`flex-1 flex flex-col items-center justify-center gap-0.5 py-2 min-h-[52px] transition-colors ${
+                  mobileTab === tab.key
+                    ? "text-purple"
+                    : "text-text-muted/50 hover:text-text-muted"
+                }`}
+              >
+                <span className="text-[16px] leading-none">{tab.icon}</span>
+                <span className="text-[9px] font-mono font-bold uppercase tracking-wider">{tab.label}</span>
+                {mobileTab === tab.key && (
+                  <span className="absolute bottom-0 left-0 right-0 h-[2px] bg-purple rounded-full" style={{ position: "static", display: "block", width: "24px", height: "2px", background: "#7c3aed", borderRadius: "9999px" }} />
+                )}
+              </button>
+            ))}
+          </div>
+        </nav>
+      )}
 
       {/* AUTH MODAL */}
       <AuthModal

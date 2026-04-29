@@ -222,3 +222,14 @@ p, li { text-wrap: pretty; }
 ::-webkit-scrollbar { width: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--color-border); border-radius: 99px; }
+
+/* ── Mobile / PWA safe area utilities ─────────────────────────────────── */
+.pb-safe   { padding-bottom: env(safe-area-inset-bottom, 0px); }
+.pt-safe   { padding-top:    env(safe-area-inset-top, 0px); }
+.mb-safe   { margin-bottom:  env(safe-area-inset-bottom, 0px); }
+
+/* Bottom tab bar clears content */
+.pb-tab-bar { padding-bottom: calc(56px + env(safe-area-inset-bottom, 0px)); }
+
+/* Prevent horizontal scroll on mobile */
+html, body { overflow-x: hidden; max-width: 100vw; }

@@ -39,13 +39,13 @@ export function TrendingSection({ onSelect }: { onSelect: (sym: string) => void 
       <SectionHeader icon="🔥" title="TRENDING NOW" />
       <div className="p-4">
         {loading ? (
-          <div className="grid grid-cols-5 gap-2">
+          <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
             {Array.from({ length: 5 }).map((_, i) => (
               <div key={i} className="h-20 bg-surface-2 rounded-lg animate-pulse border border-border/30" />
             ))}
           </div>
         ) : (
-          <div className="grid grid-cols-5 gap-2">
+          <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
             {coins.slice(0, 5).map((coin) => (
               <button
                 key={coin.symbol}
@@ -321,7 +321,7 @@ export function MacroSection() {
       <div className="p-4 space-y-4">
 
         {/* Metric tiles */}
-        <div className="grid grid-cols-6 gap-2">
+        <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
           {stats.map(({ label, value, color }) => (
             <div key={label} className="bg-surface-2 rounded-lg border border-border/40 p-2.5">
               <div className="text-[9px] font-mono text-text-muted/70 uppercase tracking-wide mb-1">{label}</div>

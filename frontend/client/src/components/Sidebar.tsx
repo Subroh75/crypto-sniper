@@ -672,7 +672,7 @@ export function SubscribeCard() {
             <span className="text-[9px] font-mono text-text-muted/70 uppercase tracking-[0.1em]">Pay with</span>
             <div className="flex-1 h-px bg-border/40" />
           </div>
-          <div className="grid grid-cols-4 gap-1.5">
+          <div className="grid grid-cols-4 gap-1">
             {COINS.map(({ sym, net, icon }) => (
               <button
                 key={sym}
@@ -1546,7 +1546,7 @@ export function ScannerCumulativeCard() {
             <div className="border-t border-border/30 mb-3" />
 
             {/* Stats row */}
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
               {[
                 { label: "Avg/pick",  value: data!.avg_return_pct != null ? `${data!.avg_return_pct >= 0 ? "+" : ""}${data!.avg_return_pct.toFixed(1)}%` : "—",
                   color: data!.avg_return_pct != null && data!.avg_return_pct >= 0 ? "text-teal" : "text-red" },
