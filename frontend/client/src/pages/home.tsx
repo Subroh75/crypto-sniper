@@ -26,6 +26,7 @@ import { OnChainCard } from "@/components/OnChainCard";
 import { SignalStreakHeatmap } from "@/components/SignalStreakHeatmap";
 import { PriceAlertCard, subscribeAlertBadge, markAlertsRead } from "@/components/PriceAlertCard";
 import type { AlertHistoryEntry } from "@/components/PriceAlertCard";
+import { ScanAlertPoller } from "@/components/ScanAlertPoller";
 import { BacktestInternalCard } from "@/components/BacktestInternalCard";
 import { AuthModal, AuthButton } from "@/components/AuthModal";
 import { PWAInstallBanner } from "@/components/PWAInstallBanner";
@@ -333,6 +334,7 @@ export default function Home() {
   return (
     <div className="min-h-screen bg-bg text-text" id={reportId}>
       {isMobile && <PWAInstallBanner />}
+      <ScanAlertPoller />
 
       {/*  HEADER  */}
       <header className="sticky top-0 z-50 border-b border-border/60 backdrop-blur-xl bg-bg/90" style={{ paddingTop: 'env(safe-area-inset-top, 0px)' }}>

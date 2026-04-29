@@ -28,28 +28,11 @@ export default defineConfig({
           { src: "pwa-512.png", sizes: "512x512", type: "image/png", purpose: "any maskable" },
         ],
       },
-      workbox: {
-        skipWaiting: true,
-        clientsClaim: true,
-        cleanupOutdatedCaches: true,
-        runtimeCaching: [
-          {
-            urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,
-            handler: "CacheFirst",
-            options: {
-              cacheName: "google-fonts-cache",
-              expiration: { maxEntries: 10, maxAgeSeconds: 60 * 60 * 24 * 365 },
-            },
-          },
-          {
-            urlPattern: /^https:\/\/crypto-sniper\.onrender\.com\/.*/i,
-            handler: "NetworkFirst",
-            options: {
-              cacheName: "api-cache",
-              expiration: { maxEntries: 50, maxAgeSeconds: 60 },
-            },
-          },
-        ],
+      strategies: "injectManifest",
+      srcDir: "src",
+      filename: "sw.ts",
+      injectManifest: {
+        injectionPoint: "self.__WB_MANIFEST",
       },
     }),
   ],

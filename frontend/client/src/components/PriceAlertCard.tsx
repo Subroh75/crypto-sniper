@@ -2,6 +2,8 @@
 // Price & score alerts — repeat mode, cooldown, push notifications.
 
 import { useState, useEffect, useCallback } from "react";
+import { subscribeScanSettings, updateScanSettings } from "./ScanAlertPoller";
+import type { ScanAlertSettings } from "./ScanAlertPoller";
 
 const API = (import.meta as Record<string, unknown> & { env?: Record<string, string> })
   .env?.VITE_API_BASE ?? "https://crypto-sniper.onrender.com";
@@ -137,6 +139,7 @@ export function PriceAlertCard({ currentSymbol }: { currentSymbol?: string }) {
   const [pushLoading, setPushLoading] = useState(false);
   const [tab, setTab]           = useState<"active" | "history">("active");
   const [history, setHistory]   = useState<AlertHistoryEntry[]>([]);
+  const [scanSettings, setScanSettings] = useState<ScanAlertSettings>({ enabled: false, threshold: 7, interval: 60, lastTs: 0, lastHits: [] });
 
   // Form state
   const [symbol,    setSymbol]    = useState(currentSymbol ?? "BTC");
@@ -154,6 +157,8 @@ export function PriceAlertCard({ currentSymbol }: { currentSymbol?: string }) {
     if ("Notification" in window) setPushEnabled(Notification.permission === "granted");
     loadAlerts();
     loadHistory();
+    const unsub = subscribeScanSettings(s => setScanSettings({ ...s }));
+    return unsub;
   }, []);
 
   const loadAlerts = useCallback(async () => {
@@ -262,6 +267,100 @@ export function PriceAlertCard({ currentSymbol }: { currentSymbol?: string }) {
             {pushLoading ? "…" : "Enable Push"}
           </button>
         )}
+      </div>
+
+      {/* ── Live Scanner block ────────────────────────────────────────── */}
+      <div style={{ background: "#060b17", border: `1px solid ${scanSettings.enabled ? "#7c3aed44" : "#1e293b"}`, borderRadius: 10, padding: 12, marginBottom: 10 }}>
+        {/* Row 1: title + toggle */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: scanSettings.enabled ? 10 : 0 }}>
+          <div>
+            <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.08em", color: scanSettings.enabled ? "#a78bfa" : "#475569", textTransform: "uppercase" }}>
+              Live Scanner
+            </div>
+            <div style={{ fontSize: 9, color: "#334155", marginTop: 2 }}>
+              {scanSettings.enabled
+                ? `Scanning top 200 every ${scanSettings.interval}m — score ${scanSettings.threshold}+`
+                : "Off — enable to get push alerts when signals fire"}
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={async () => {
+              const next = !scanSettings.enabled;
+              if (next && Notification.permission !== "granted") {
+                const p = await Notification.requestPermission();
+                if (p !== "granted") return;
+                setPushEnabled(true);
+              }
+              updateScanSettings({ enabled: next });
+            }}
+            style={{ width: 36, height: 20, borderRadius: 10, border: "none", cursor: "pointer",
+              background: scanSettings.enabled ? "#7c3aed" : "#1e293b", position: "relative", flexShrink: 0, transition: "background 0.2s" }}
+          >
+            <span style={{ position: "absolute", top: 3, left: scanSettings.enabled ? 17 : 3, width: 14, height: 14,
+              borderRadius: "50%", background: "#f1f5f9", transition: "left 0.2s" }} />
+          </button>
+        </div>
+
+        {/* Expanded settings (only when enabled) */}
+        {scanSettings.enabled && (<>
+          {/* Threshold chips */}
+          <div style={{ marginBottom: 8 }}>
+            <div style={{ fontSize: 9, color: "#475569", marginBottom: 5, letterSpacing: "0.06em", textTransform: "uppercase" }}>Min Score</div>
+            <div style={{ display: "flex", gap: 4 }}>
+              {[5, 7, 9, 11].map(v => (
+                <button key={v} type="button"
+                  onClick={() => updateScanSettings({ threshold: v })}
+                  style={{ fontSize: 10, fontWeight: 700, padding: "4px 10px", borderRadius: 5, cursor: "pointer",
+                    background: scanSettings.threshold === v ? "#7c3aed22" : "transparent",
+                    color: scanSettings.threshold === v ? "#a78bfa" : "#475569",
+                    border: scanSettings.threshold === v ? "1px solid #7c3aed" : "1px solid #1e293b",
+                  }}>{v}+</button>
+              ))}
+            </div>
+          </div>
+
+          {/* Interval chips */}
+          <div style={{ marginBottom: 10 }}>
+            <div style={{ fontSize: 9, color: "#475569", marginBottom: 5, letterSpacing: "0.06em", textTransform: "uppercase" }}>Scan Every</div>
+            <div style={{ display: "flex", gap: 4 }}>
+              {[15, 30, 60].map(v => (
+                <button key={v} type="button"
+                  onClick={() => updateScanSettings({ interval: v })}
+                  style={{ fontSize: 10, fontWeight: 700, padding: "4px 10px", borderRadius: 5, cursor: "pointer",
+                    background: scanSettings.interval === v ? "#7c3aed22" : "transparent",
+                    color: scanSettings.interval === v ? "#a78bfa" : "#475569",
+                    border: scanSettings.interval === v ? "1px solid #7c3aed" : "1px solid #1e293b",
+                  }}>{v}m</button>
+              ))}
+            </div>
+          </div>
+
+          {/* Last scan results */}
+          <div style={{ borderTop: "1px solid #1e293b", paddingTop: 8 }}>
+            <div style={{ fontSize: 9, color: "#334155", marginBottom: scanSettings.lastHits.length ? 6 : 0 }}>
+              {scanSettings.lastTs > 0
+                ? `Last scan: ${new Date(scanSettings.lastTs * 1000).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}`
+                : "Not yet scanned — first scan runs shortly"}
+            </div>
+            {scanSettings.lastHits.length > 0 && (
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                {scanSettings.lastHits.map(h => (
+                  <span key={h.symbol} style={{ fontSize: 9, fontWeight: 700, fontFamily: "monospace",
+                    padding: "2px 7px", borderRadius: 4,
+                    background: h.score >= 9 ? "#0d2212" : "#1a1004",
+                    color: h.score >= 9 ? "#22c55e" : "#f59e0b",
+                    border: `1px solid ${h.score >= 9 ? "#14532d" : "#78350f"}` }}>
+                    {h.symbol} {h.score}/16
+                  </span>
+                ))}
+              </div>
+            )}
+            {scanSettings.lastHits.length === 0 && scanSettings.lastTs > 0 && (
+              <div style={{ fontSize: 9, color: "#22c55e" }}>No signals above {scanSettings.threshold}+ at last scan</div>
+            )}
+          </div>
+        </>)}
       </div>
 
       {/* Tab switcher */}
