@@ -10,14 +10,14 @@ interface StatProps {
 
 function Stat({ label, value, sub }: StatProps) {
   return (
-    <div className="flex flex-col gap-[3px] px-4 py-2.5">
-      <span className="text-[9px] font-mono uppercase tracking-[0.1em] text-text-muted/70">
+    <div className="flex flex-col gap-[3px] px-3 md:px-4 py-2 md:py-2.5 min-w-[110px] md:min-w-0">
+      <span className="text-[8px] md:text-[9px] font-mono uppercase tracking-[0.1em] text-text-muted/70 whitespace-nowrap">
         {label}
       </span>
-      <span className="text-[14px] font-mono font-bold text-text leading-none">
+      <span className="text-[12px] md:text-[14px] font-mono font-bold text-text leading-none whitespace-nowrap">
         {value}
       </span>
-      {sub && <span className="text-[10px] font-mono">{sub}</span>}
+      {sub && <span className="text-[9px] md:text-[10px] font-mono">{sub}</span>}
     </div>
   );
 }
@@ -39,11 +39,11 @@ function FearGreedMeter({ value = 62 }: { value?: number }) {
     : "#ff3d5a";
 
   return (
-    <div className="flex flex-col gap-[3px] px-4 py-2.5">
-      <span className="text-[9px] font-mono uppercase tracking-[0.1em] text-text-muted/70">
+    <div className="flex flex-col gap-[3px] px-3 md:px-4 py-2 md:py-2.5 min-w-[130px] md:min-w-0">
+      <span className="text-[8px] md:text-[9px] font-mono uppercase tracking-[0.1em] text-text-muted/70 whitespace-nowrap">
         Fear &amp; Greed
       </span>
-      <span className="text-[14px] font-mono font-bold leading-none" style={{ color }}>
+      <span className="text-[12px] md:text-[14px] font-mono font-bold leading-none whitespace-nowrap" style={{ color }}>
         {value} — {label}
       </span>
       <div className="relative w-full h-[3px] rounded-full mt-1 overflow-visible"
@@ -65,12 +65,13 @@ export function MarketBar() {
   const fees      = market?.btc_mempool_fees ?? 0;
 
   return (
+    <div className="border-b border-border/60 overflow-x-auto scrollbar-none">
     <div
-      className="grid border-b border-border/60"
+      className="flex md:grid md:w-full"
       style={{ gridTemplateColumns: "repeat(6, 1fr)" }}
     >
       {/* Dividers between cells */}
-      <div className="border-r border-border/40">
+      <div className="border-r border-border/40 flex-shrink-0">
         <Stat
           label="Total Mkt Cap"
           value={market ? fmtBigNum(market.total_market_cap_usd) : "Loading…"}
@@ -84,7 +85,7 @@ export function MarketBar() {
         />
       </div>
 
-      <div className="border-r border-border/40">
+      <div className="border-r border-border/40 flex-shrink-0">
         <Stat
           label="BTC Dominance"
           value={market?.btc_dominance != null ? `${market.btc_dominance.toFixed(1)}%` : "—"}
@@ -92,11 +93,11 @@ export function MarketBar() {
         />
       </div>
 
-      <div className="border-r border-border/40">
+      <div className="border-r border-border/40 flex-shrink-0">
         <FearGreedMeter value={62} />
       </div>
 
-      <div className="border-r border-border/40">
+      <div className="border-r border-border/40 flex-shrink-0">
         <Stat
           label="BTC Mempool"
           value={
@@ -116,7 +117,7 @@ export function MarketBar() {
         />
       </div>
 
-      <div className="border-r border-border/40">
+      <div className="border-r border-border/40 flex-shrink-0">
         <Stat
           label="Fed Rate"
           value={macro?.fed_rate != null ? `${macro.fed_rate}%` : "4.25%"}
@@ -124,7 +125,7 @@ export function MarketBar() {
         />
       </div>
 
-      <div>
+      <div className="flex-shrink-0">
         <Stat
           label="DXY"
           value={
@@ -135,6 +136,7 @@ export function MarketBar() {
           sub={<span className="text-red">▼ Weakening</span>}
         />
       </div>
+    </div>
     </div>
   );
 }

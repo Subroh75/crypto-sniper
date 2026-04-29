@@ -233,3 +233,7 @@ p, li { text-wrap: pretty; }
 
 /* Prevent horizontal scroll on mobile */
 html, body { overflow-x: hidden; max-width: 100vw; }
+
+/* Hide scrollbar for horizontal scroll strips */
+.scrollbar-none { scrollbar-width: none; -ms-overflow-style: none; }
+.scrollbar-none::-webkit-scrollbar { display: none; }
