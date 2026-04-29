@@ -30,8 +30,8 @@ export function TopSignals({ onSelect, interval = "1h", listMode = false }: Prop
   const [signals, setSignals] = useState<Signal[]>([]);
   const [loading, setLoading] = useState(false);
   const [lastScan, setLastScan] = useState<string>("");
-  // listMode starts at 7 to show top 25, ticker mode stays at 9
-  const [minScore, setMinScore] = useState(listMode ? 7 : 9);
+  // always start at 7 so user can always reach the lowest threshold
+  const [minScore, setMinScore] = useState(7);
 
   const scan = useCallback(async () => {
     setLoading(true);
@@ -47,9 +47,8 @@ export function TopSignals({ onSelect, interval = "1h", listMode = false }: Prop
   useEffect(() => { scan(); }, [scan]);
   useEffect(() => { const t = setInterval(scan, 5 * 60 * 1000); return () => clearInterval(t); }, [scan]);
 
-  const nextScore = listMode
-    ? (minScore === 7 ? 9 : minScore === 9 ? 11 : 7)
-    : (minScore === 9 ? 11 : minScore === 11 ? 13 : 9);
+  // cycle 7 → 9 → 11 → 7 in all modes
+  const nextScore = minScore === 7 ? 9 : minScore === 9 ? 11 : 7;
   const isEmpty = !loading && signals.length === 0 && !!lastScan;
   const duration = Math.max(signals.length * 4, 12);
   const displaySignals = listMode ? signals.slice(0, 25) : signals;
