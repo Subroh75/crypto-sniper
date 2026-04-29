@@ -248,6 +248,182 @@ function fmtUsd(n: number | null): string {
   return `$${n.toFixed(0)}`;
 }
 
+// ── Whale tab data ───────────────────────────────────────────────────────────
+interface WhaleState {
+  loading:        boolean;
+  error:          string | null;
+  volume_spike:   number | null;   // current 24h vol vs 7-day avg (x)
+  price_change:   number | null;   // 24h price change %
+  vol_7d:         number[];        // daily volumes for sparkline
+  holders_note:   string | null;   // qualitative note from CG community data
+  supply_on_exch: number | null;   // % supply on exchanges (proxy)
+  large_tx_note:  string | null;   // derived from volume spike
+}
+
+const WHALE_EMPTY: WhaleState = {
+  loading: false, error: null,
+  volume_spike: null, price_change: null,
+  vol_7d: [], holders_note: null,
+  supply_on_exch: null, large_tx_note: null,
+};
+
+function WhaleTab({ symbol }: { symbol: string | null }) {
+  const [state, setState] = useState<WhaleState>({ ...WHALE_EMPTY });
+  const prevSym = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!symbol || symbol === prevSym.current) return;
+    prevSym.current = symbol;
+    const cgId = CG_ID[symbol.toUpperCase()];
+    if (!cgId) { setState({ ...WHALE_EMPTY, error: "Symbol not in CoinGecko map" }); return; }
+
+    setState({ ...WHALE_EMPTY, loading: true });
+
+    // Fetch 7-day daily OHLCV to compute volume spike
+    fetch(
+      `https://api.coingecko.com/api/v3/coins/${cgId}/market_chart?vs_currency=usd&days=7&interval=daily`,
+      { signal: AbortSignal.timeout(10000) }
+    )
+      .then(r => r.json())
+      .then(j => {
+        const volumes: [number, number][] = j?.total_volumes ?? [];
+        const prices:  [number, number][] = j?.prices ?? [];
+        const vols = volumes.map(v => v[1]);
+        const avgVol = vols.length > 1 ? vols.slice(0, -1).reduce((a, b) => a + b, 0) / (vols.length - 1) : 0;
+        const todayVol = vols[vols.length - 1] ?? 0;
+        const spike = avgVol > 0 ? todayVol / avgVol : null;
+
+        // 7-day price change
+        const p0 = prices[0]?.[1] ?? 0;
+        const p1 = prices[prices.length - 1]?.[1] ?? 0;
+        const priceChange = p0 > 0 ? ((p1 - p0) / p0) * 100 : null;
+
+        // Qualitative large tx note based on volume spike
+        let large_tx_note: string | null = null;
+        if (spike != null) {
+          if (spike >= 3)      large_tx_note = "Extreme volume spike — likely large whale activity";
+          else if (spike >= 2) large_tx_note = "Strong volume surge — potential accumulation";
+          else if (spike >= 1.5) large_tx_note = "Above-avg volume — possible institutional interest";
+          else if (spike < 0.5) large_tx_note = "Very low volume — low whale activity";
+          else                 large_tx_note = "Normal volume range";
+        }
+
+        setState({
+          loading: false, error: null,
+          volume_spike:   spike,
+          price_change:   priceChange,
+          vol_7d:         vols,
+          holders_note:   null,
+          supply_on_exch: null,
+          large_tx_note,
+        });
+      })
+      .catch(e => setState({ ...WHALE_EMPTY, error: String(e) }));
+  }, [symbol]);
+
+  if (state.loading) return (
+    <div className="space-y-2 p-4">
+      {[...Array(5)].map((_,i) => <div key={i} className="h-6 bg-surface-2 rounded animate-pulse border border-border/20" />)}
+    </div>
+  );
+
+  if (!symbol) return <div className="text-center py-6 text-[11px] font-mono text-text-muted/60">Run analysis first</div>;
+  if (state.error) return <div className="text-center py-6 text-[11px] font-mono text-text-muted/60">{state.error}</div>;
+
+  const spikeColor = !state.volume_spike ? "#94a3b8"
+    : state.volume_spike >= 2 ? "#22c55e"
+    : state.volume_spike >= 1.5 ? "#f59e0b"
+    : state.volume_spike < 0.7 ? "#ef4444"
+    : "#94a3b8";
+
+  // Mini sparkline for 7d volume
+  const maxVol = Math.max(...state.vol_7d, 1);
+  const sparkH = 28;
+  const sparkW = state.vol_7d.length * 10;
+
+  return (
+    <div className="p-4 space-y-4">
+
+      {/* Volume spike */}
+      <div>
+        <div className="text-[9px] font-mono font-bold uppercase tracking-[0.12em] text-text-muted/50 mb-2">Whale Activity Proxy</div>
+        <div className="space-y-0">
+          <Row
+            label="Volume spike"
+            value={state.volume_spike != null ? `${state.volume_spike.toFixed(2)}x avg` : "—"}
+            valueClass={state.volume_spike != null && state.volume_spike >= 1.5 ? "text-teal" : "text-text"}
+          />
+          <Row
+            label="7d price change"
+            value={state.price_change != null ? `${state.price_change >= 0 ? "+" : ""}${state.price_change.toFixed(2)}%` : "—"}
+            valueClass={state.price_change != null ? (state.price_change >= 0 ? "text-teal" : "text-red") : "text-text-muted"}
+          />
+        </div>
+      </div>
+
+      {/* 7D volume sparkline */}
+      {state.vol_7d.length > 0 && (
+        <div>
+          <div className="text-[9px] font-mono font-bold uppercase tracking-[0.12em] text-text-muted/50 mb-2">7-Day Volume</div>
+          <svg width={sparkW} height={sparkH} style={{ display: "block" }}>
+            {state.vol_7d.map((v, i) => {
+              const barH = Math.max(2, (v / maxVol) * sparkH);
+              const isToday = i === state.vol_7d.length - 1;
+              return (
+                <rect
+                  key={i}
+                  x={i * 10} y={sparkH - barH}
+                  width={8} height={barH}
+                  rx={2}
+                  fill={isToday ? spikeColor : "#1e293b"}
+                  opacity={isToday ? 1 : 0.7}
+                />
+              );
+            })}
+          </svg>
+          <div className="flex justify-between mt-1">
+            <span className="text-[8px] text-text-muted/50 font-mono">7d ago</span>
+            <span className="text-[8px] font-mono" style={{ color: spikeColor }}>Today</span>
+          </div>
+        </div>
+      )}
+
+      {/* Large TX note */}
+      {state.large_tx_note && (
+        <div className="rounded-lg p-3" style={{ background: "rgba(124,58,237,0.06)", border: "1px solid rgba(124,58,237,0.15)" }}>
+          <div className="text-[9px] font-mono font-bold uppercase tracking-[0.12em] text-purple-400/60 mb-1">Assessment</div>
+          <p className="text-[11px] font-mono text-text/80 leading-relaxed">{state.large_tx_note}</p>
+        </div>
+      )}
+
+      {/* Holder note */}
+      <div>
+        <div className="text-[9px] font-mono font-bold uppercase tracking-[0.12em] text-text-muted/50 mb-2">Holder Intelligence</div>
+        <div className="space-y-2">
+          <div className="rounded p-2.5" style={{ background: "#0a0f1e", border: "1px solid #1e293b" }}>
+            <p className="text-[10px] font-mono text-text-muted/70 leading-relaxed">
+              Full holder concentration data (top wallets, exchange flows) requires
+              Etherscan API key. Showing volume-based proxy above.
+            </p>
+          </div>
+          {state.volume_spike != null && state.volume_spike >= 2 && (
+            <div className="flex items-start gap-2">
+              <span style={{ color: "#22c55e", fontSize: 10 }}>▲</span>
+              <span className="text-[10px] font-mono text-teal/80">High volume relative to average — suggests whale accumulation or large institutional move</span>
+            </div>
+          )}
+          {state.volume_spike != null && state.volume_spike < 0.5 && (
+            <div className="flex items-start gap-2">
+              <span style={{ color: "#ef4444", fontSize: 10 }}>▼</span>
+              <span className="text-[10px] font-mono text-red/80">Volume well below average — whales may be sitting out or distributing slowly</span>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 export function OnChainCard({ symbol }: { symbol: string | null }) {
   const [state, setState] = useState<OnChainState>({ ...EMPTY, loading: false });
@@ -314,6 +490,8 @@ export function OnChainCard({ symbol }: { symbol: string | null }) {
     });
   }, [symbol]);
 
+  const [activeTab, setActiveTab] = useState<"fundamentals" | "whales">("fundamentals");
+
   const src = state.sources.join(" · ") || "CoinGecko · DeFiLlama";
   const riskColor = state.risk_score >= 60 ? "#ef4444" : state.risk_score >= 40 ? "#f59e0b" : "#22c55e";
   const riskBg    = state.risk_score >= 60 ? "rgba(239,68,68,0.08)" : state.risk_score >= 40 ? "rgba(245,158,11,0.08)" : "rgba(34,197,94,0.08)";
@@ -336,7 +514,37 @@ export function OnChainCard({ symbol }: { symbol: string | null }) {
         }
       />
 
-      <div className="p-4">
+      {/* Tab switcher */}
+      <div style={{ display: "flex", borderBottom: "1px solid #1e293b", padding: "0 16px" }}>
+        {(["fundamentals", "whales"] as const).map(tab => (
+          <button
+            key={tab}
+            onClick={() => setActiveTab(tab)}
+            style={{
+              padding: "6px 12px",
+              fontSize: 9,
+              fontWeight: 700,
+              letterSpacing: "0.08em",
+              textTransform: "uppercase" as const,
+              color: activeTab === tab ? "#f1f5f9" : "#475569",
+              background: "none",
+              border: "none",
+              borderBottom: activeTab === tab ? "2px solid #7c3aed" : "2px solid transparent",
+              cursor: "pointer",
+              marginBottom: -1,
+              transition: "color 0.15s",
+            }}
+          >
+            {tab === "fundamentals" ? "Fundamentals" : "Whales"}
+          </button>
+        ))}
+      </div>
+
+      {/* Whale tab */}
+      {activeTab === "whales" && <WhaleTab symbol={symbol} />}
+
+      {/* Fundamentals tab */}
+      {activeTab === "fundamentals" && <div className="p-4">
         {/* Loading skeletons */}
         {state.loading && (
           <div className="space-y-2">
@@ -454,7 +662,7 @@ export function OnChainCard({ symbol }: { symbol: string | null }) {
 
           </div>
         )}
-      </div>
+      </div>}
     </Card>
   );
 }

@@ -23,6 +23,8 @@ import { DeepResearchSection } from "@/components/DeepResearch";
 import { MultiTimeframeCard } from "@/components/MultiTimeframe";
 import { BacktestCard } from "@/components/BacktestCard";
 import { OnChainCard } from "@/components/OnChainCard";
+import { SignalStreakHeatmap } from "@/components/SignalStreakHeatmap";
+import { PriceAlertCard } from "@/components/PriceAlertCard";
 import { BacktestInternalCard } from "@/components/BacktestInternalCard";
 import { AuthModal, AuthButton } from "@/components/AuthModal";
 import { PWAInstallBanner } from "@/components/PWAInstallBanner";
@@ -918,6 +920,7 @@ export default function Home() {
               <div className={isMobile && mobileTab !== "signals" ? "hidden" : ""}>
                 <CSOVerdict sig={sig} kron={kronosHk.data} fearGreed={sig?.fear_greed} />
                 <TopSignals onSelect={(sym) => { runAnalysis(sym); if(isMobile) setMobileTab("analyse"); }} interval={interval} listMode={isMobile} />
+                {isMobile && <SignalStreakHeatmap />}
                 <TradeSetupCard setup={sig?.trade_setup ?? null} close={sig?.quote?.price ?? 0} />
                 <ConvictionMeter conviction={sig.conviction} />
                 <KeyLevelsCard levels={sig.key_levels} />
@@ -950,6 +953,8 @@ export default function Home() {
                   onSelect={(sym) => { runAnalysis(sym); if(isMobile) setMobileTab("analyse"); }}
                 />
                 <OptionsIntelligenceSection />
+                <SignalStreakHeatmap />
+                <PriceAlertCard currentSymbol={symbol} />
               </div>
             </div>
             {/* end RIGHT sidebar */}

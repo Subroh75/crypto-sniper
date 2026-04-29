@@ -598,3 +598,119 @@ async def confluence(symbol: str, intervals: str = "1H,4H,1D"):
         "any_strong_buy":    any_strong,
         "timestamp":         int(time.time()),
     }
+
+
+# ── Signal Streak Heatmap ─────────────────────────────────────────────────────
+@app.get("/streak")
+async def signal_streak(days: int = 30, min_score: int = 7):
+    """
+    Return per-symbol, per-day max score for the last N days.
+    Used to render the streak heatmap on the frontend.
+    Response: { dates: [...], symbols: { SYM: [score_or_null, ...] } }
+    """
+    import sqlite3 as _sq
+    from datetime import datetime, timezone, timedelta
+    DB = os.path.join(os.path.dirname(__file__), "data.db")
+    cutoff = int((datetime.now(timezone.utc) - timedelta(days=days)).timestamp())
+
+    try:
+        conn = _sq.connect(DB)
+        conn.row_factory = _sq.Row
+        rows = conn.execute(
+            """SELECT symbol,
+                      date(ts, 'unixepoch') as day,
+                      MAX(score) as max_score
+               FROM signals
+               WHERE ts >= ? AND score >= ?
+               GROUP BY symbol, day
+               ORDER BY day ASC""",
+            (cutoff, min_score),
+        ).fetchall()
+        conn.close()
+    except Exception as e:
+        return {"error": str(e), "dates": [], "symbols": {}}
+
+    # Build date list for last N days
+    today = datetime.now(timezone.utc).date()
+    date_list = [(today - timedelta(days=i)).isoformat() for i in range(days - 1, -1, -1)]
+
+    # Aggregate by symbol
+    sym_map: dict[str, dict[str, int]] = {}
+    for r in rows:
+        sym = r["symbol"]
+        if sym not in sym_map:
+            sym_map[sym] = {}
+        sym_map[sym][r["day"]] = int(r["max_score"])
+
+    # Only include symbols with at least 2 signal days (filter noise)
+    result: dict[str, list] = {}
+    for sym, day_scores in sym_map.items():
+        if len(day_scores) >= 2:
+            result[sym] = [day_scores.get(d) for d in date_list]
+
+    # Sort by total signal days desc
+    result = dict(sorted(result.items(), key=lambda x: sum(1 for v in x[1] if v), reverse=True))
+
+    return {
+        "dates":   date_list,
+        "symbols": result,
+        "min_score": min_score,
+        "days":    days,
+        "timestamp": int(time.time()),
+    }
+
+
+# ── Push Notification Subscriptions ──────────────────────────────────────────
+from pydantic import BaseModel as _BM
+
+class PushSubRequest(_BM):
+    endpoint:   str
+    p256dh:     str
+    auth:       str
+    user_id:    str = "anon"
+
+def _init_push_db():
+    import sqlite3 as _sq
+    DB = os.path.join(os.path.dirname(__file__), "data.db")
+    with _sq.connect(DB) as c:
+        c.executescript("""
+        CREATE TABLE IF NOT EXISTS push_subscriptions (
+            id        INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id   TEXT NOT NULL,
+            endpoint  TEXT NOT NULL UNIQUE,
+            p256dh    TEXT NOT NULL,
+            auth      TEXT NOT NULL,
+            created_ts INTEGER NOT NULL
+        );
+        """)
+
+_init_push_db()
+
+@app.post("/push/subscribe")
+async def push_subscribe(req: PushSubRequest):
+    """Save a Web Push subscription for this user."""
+    import sqlite3 as _sq
+    DB = os.path.join(os.path.dirname(__file__), "data.db")
+    try:
+        with _sq.connect(DB) as c:
+            c.execute(
+                """INSERT INTO push_subscriptions (user_id, endpoint, p256dh, auth, created_ts)
+                   VALUES (?,?,?,?,?)
+                   ON CONFLICT(endpoint) DO UPDATE SET p256dh=excluded.p256dh, auth=excluded.auth""",
+                (req.user_id, req.endpoint, req.p256dh, req.auth, int(time.time())),
+            )
+        return {"ok": True, "message": "Push subscription saved"}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+@app.delete("/push/subscribe")
+async def push_unsubscribe(endpoint: str):
+    """Remove a push subscription by endpoint URL."""
+    import sqlite3 as _sq
+    DB = os.path.join(os.path.dirname(__file__), "data.db")
+    try:
+        with _sq.connect(DB) as c:
+            c.execute("DELETE FROM push_subscriptions WHERE endpoint=?", (endpoint,))
+        return {"ok": True}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
