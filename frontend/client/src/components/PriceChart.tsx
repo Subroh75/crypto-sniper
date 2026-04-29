@@ -5,6 +5,7 @@ import {
 } from "recharts";
 import type { OHLCVBar, MarketStructure } from "@/types/api";
 import { fmtPrice } from "@/lib/api";
+import { useMobile } from "@/hooks/useMobile";
 
 interface Props {
   ohlcv:      OHLCVBar[];
@@ -81,6 +82,7 @@ function Candle(props: any) {
 const TF = ["1m","5m","15m","30m","1H","4H","1D"];
 
 export function PriceChart({ ohlcv, structure, interval, symbol, onTfChange }: Props) {
+  const isMobile = useMobile();
   if (!ohlcv || ohlcv.length < 2) {
     return <div className="flex items-center justify-center h-48 text-text-muted text-sm">No data</div>;
   }
@@ -154,8 +156,8 @@ export function PriceChart({ ohlcv, structure, interval, symbol, onTfChange }: P
         </div>
       )}
       {/* Main candle chart */}
-      <ResponsiveContainer width="100%" height={230}>
-        <ComposedChart data={data} margin={{ top: 4, right: 64, left: 0, bottom: 2 }}>
+      <ResponsiveContainer width="100%" height={isMobile ? 200 : 230}>
+        <ComposedChart data={data} margin={{ top: 4, right: isMobile ? 52 : 64, left: 0, bottom: 2 }}>
           <CartesianGrid strokeDasharray="2 4" stroke="#1e293b" vertical={false} />
           <XAxis dataKey="ts"
             tickFormatter={v => {
@@ -170,7 +172,7 @@ export function PriceChart({ ohlcv, structure, interval, symbol, onTfChange }: P
             domain={[domMin, domMax]}
             tickFormatter={v => fmtPrice(v)}
             tick={{ fontSize: 9, fill: "#475569" }} tickLine={false} axisLine={false}
-            width={72} orientation="right"
+            width={isMobile ? 56 : 72} orientation="right"
           />
           <Tooltip
             contentStyle={{ background: "#0f172a", border: "1px solid #1e293b", borderRadius: 8, fontSize: 11, padding: "6px 10px" }}
@@ -208,7 +210,7 @@ export function PriceChart({ ohlcv, structure, interval, symbol, onTfChange }: P
       </ResponsiveContainer>
       {/* Volume bars */}
       <ResponsiveContainer width="100%" height={40}>
-        <ComposedChart data={data} margin={{ top: 0, right: 64, left: 0, bottom: 0 }}>
+        <ComposedChart data={data} margin={{ top: 0, right: isMobile ? 52 : 64, left: 0, bottom: 0 }}>
           <YAxis hide domain={[0, 100]} />
           <Bar dataKey="vol" isAnimationActive={false} maxBarSize={12}>
             {data.map((d, i) => (

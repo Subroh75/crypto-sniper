@@ -1,4 +1,5 @@
 // ─── MarketBar.tsx — 6-stat strip: mkt cap, BTC dom, F&G, fees, Fed, DXY ────
+import { useState, useEffect } from "react";
 import { useMarketOverview, useMacro } from "@/hooks/useApi";
 import { fmtBigNum, fmtPct } from "@/lib/api";
 
@@ -61,8 +62,31 @@ export function MarketBar() {
   const { data: market } = useMarketOverview();
   const { data: macro }  = useMacro();
 
-  const capChange = market?.market_cap_change_24h ?? 0;
-  const fees      = market?.btc_mempool_fees ?? 0;
+  // Fallback: fetch global data directly from CoinGecko if Render returns 0
+  const [cgGlobal, setCgGlobal] = useState<{ cap: number; capChange: number; btcDom: number } | null>(null);
+  useEffect(() => {
+    if (market?.total_market_cap_usd && market.total_market_cap_usd > 0) return;
+    fetch("https://api.coingecko.com/api/v3/global", { signal: AbortSignal.timeout(8000) })
+      .then(r => r.json())
+      .then(j => {
+        const d = j?.data;
+        if (!d) return;
+        setCgGlobal({
+          cap:       d.total_market_cap?.usd ?? 0,
+          capChange: d.market_cap_change_percentage_24h_usd ?? 0,
+          btcDom:    d.market_cap_percentage?.btc ?? 0,
+        });
+      })
+      .catch(() => {});
+  }, [market?.total_market_cap_usd]);
+
+  const totalCap    = (market?.total_market_cap_usd && market.total_market_cap_usd > 0)
+    ? market.total_market_cap_usd : (cgGlobal?.cap ?? 0);
+  const capChange   = (market?.market_cap_change_24h && market.market_cap_change_24h !== 0)
+    ? market.market_cap_change_24h : (cgGlobal?.capChange ?? 0);
+  const btcDom      = (market?.btc_dominance && market.btc_dominance > 0)
+    ? market.btc_dominance : (cgGlobal?.btcDom ?? 0);
+  const fees        = market?.btc_mempool_fees ?? 0;
 
   return (
     <div className="border-b border-border/60 overflow-x-auto scrollbar-none">
@@ -74,11 +98,11 @@ export function MarketBar() {
       <div className="border-r border-border/40 flex-shrink-0">
         <Stat
           label="Total Mkt Cap"
-          value={market ? fmtBigNum(market.total_market_cap_usd) : "Loading…"}
+          value={totalCap > 0 ? fmtBigNum(totalCap) : "Loading…"}
           sub={
-            market ? (
+            totalCap > 0 ? (
               <span className={capChange >= 0 ? "text-teal" : "text-red"}>
-                {capChange != null ? (capChange >= 0 ? "▲" : "▼") + " " + Math.abs(capChange).toFixed(2) + "% today" : ""}
+                {capChange >= 0 ? "▲" : "▼"} {Math.abs(capChange).toFixed(2)}% today
               </span>
             ) : null
           }
@@ -88,8 +112,8 @@ export function MarketBar() {
       <div className="border-r border-border/40 flex-shrink-0">
         <Stat
           label="BTC Dominance"
-          value={market?.btc_dominance != null ? `${market.btc_dominance.toFixed(1)}%` : "—"}
-          sub={<span className="text-text-muted/60">→ Holding</span>}
+          value={btcDom > 0 ? `${btcDom.toFixed(1)}%` : "—"}
+          sub={btcDom > 0 ? <span className="text-text-muted/60">→ {btcDom > 55 ? "Strong" : btcDom > 50 ? "Holding" : "Weakening"}</span> : null}
         />
       </div>
 
