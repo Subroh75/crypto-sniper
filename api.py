@@ -30,7 +30,7 @@ from auth import (
 )
 from alerts import (
     AlertRequest, register_alert, get_alerts, delete_alert,
-    check_and_fire_alerts,
+    check_and_fire_alerts, get_alert_history, get_unread_count,
 )
 from onchain import get_onchain
 from backtest_internal import run_backtest as run_internal_backtest
@@ -441,6 +441,20 @@ async def remove_alert(alert_id: int):
     """Delete an alert by ID."""
     ok = delete_alert(alert_id)
     return {"deleted": ok, "alert_id": alert_id}
+
+
+@app.get("/alerts/history")
+async def alert_history(email: str, limit: int = 50):
+    """Return fired alert history for badge/bell dropdown."""
+    rows = get_alert_history(email, limit)
+    return {"history": rows, "count": len(rows), "timestamp": int(time.time())}
+
+
+@app.get("/alerts/unread")
+async def alert_unread(email: str, since_ts: int = 0):
+    """Return count of alerts fired after since_ts (for badge polling)."""
+    count = get_unread_count(email, since_ts)
+    return {"unread": count, "since_ts": since_ts, "timestamp": int(time.time())}
 
 
 # ── Backtest ─────────────────────────────────────────────────────────────────

@@ -24,7 +24,8 @@ import { MultiTimeframeCard } from "@/components/MultiTimeframe";
 import { BacktestCard } from "@/components/BacktestCard";
 import { OnChainCard } from "@/components/OnChainCard";
 import { SignalStreakHeatmap } from "@/components/SignalStreakHeatmap";
-import { PriceAlertCard } from "@/components/PriceAlertCard";
+import { PriceAlertCard, subscribeAlertBadge, markAlertsRead } from "@/components/PriceAlertCard";
+import type { AlertHistoryEntry } from "@/components/PriceAlertCard";
 import { BacktestInternalCard } from "@/components/BacktestInternalCard";
 import { AuthModal, AuthButton } from "@/components/AuthModal";
 import { PWAInstallBanner } from "@/components/PWAInstallBanner";
@@ -53,6 +54,105 @@ const VERDICT_BG: Record<string, string> = {
   "MODERATE":   "bg-amber/8 border-amber/20",
   "NO SIGNAL":  "bg-surface-2 border-border/50",
 };
+
+// ── Alert Bell ────────────────────────────────────────────────────────────
+function AlertBell() {
+  const [count, setCount]     = useState(0);
+  const [history, setHistory] = useState<AlertHistoryEntry[]>([]);
+  const [open, setOpen]       = useState(false);
+  const bellRef               = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    return subscribeAlertBadge((c, h) => { setCount(c); setHistory(h); });
+  }, []);
+
+  // Close on outside click
+  useEffect(() => {
+    if (!open) return;
+    function handleClick(e: MouseEvent) {
+      if (bellRef.current && !bellRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [open]);
+
+  function handleOpen() {
+    setOpen(p => !p);
+    if (!open && count > 0) markAlertsRead();
+  }
+
+  function fmtTs(ts: number) {
+    const d = new Date(ts * 1000);
+    return d.toLocaleDateString(undefined, { month: "short", day: "numeric" }) +
+      " " + d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+  }
+
+  return (
+    <div ref={bellRef} style={{ position: "relative" }}>
+      <button
+        onClick={handleOpen}
+        aria-label="Alert notifications"
+        style={{ background: "transparent", border: "1px solid #1e293b", borderRadius: 8,
+          padding: "6px 8px", cursor: "pointer", display: "flex", alignItems: "center",
+          color: count > 0 ? "#f59e0b" : "#475569", position: "relative", minHeight: 36 }}
+      >
+        {/* Bell SVG */}
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+          <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+        </svg>
+        {/* Badge */}
+        {count > 0 && (
+          <span style={{ position: "absolute", top: -4, right: -4, minWidth: 16, height: 16,
+            borderRadius: 8, background: "#ef4444", color: "#fff",
+            fontSize: 9, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center",
+            padding: "0 3px", lineHeight: 1 }}>
+            {count > 9 ? "9+" : count}
+          </span>
+        )}
+      </button>
+
+      {/* Dropdown */}
+      {open && (
+        <div style={{ position: "absolute", top: "calc(100% + 8px)", right: 0, zIndex: 200,
+          width: 280, background: "#0c1225", border: "1px solid #1e293b", borderRadius: 12,
+          boxShadow: "0 8px 32px #00000080", overflow: "hidden" }}>
+          <div style={{ padding: "10px 14px", borderBottom: "1px solid #1e293b",
+            fontSize: 10, fontWeight: 700, letterSpacing: "0.08em", color: "#94a3b8", textTransform: "uppercase" }}>
+            Alert History
+          </div>
+          {history.length === 0 ? (
+            <div style={{ padding: "16px 14px", fontSize: 11, color: "#334155", textAlign: "center" }}>
+              No alerts fired yet
+            </div>
+          ) : (
+            <div style={{ maxHeight: 320, overflowY: "auto" }}>
+              {history.slice(0, 10).map(h => (
+                <div key={h.id} style={{ padding: "9px 14px", borderBottom: "1px solid #0f172a",
+                  display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                  <div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 2 }}>
+                      <span style={{ fontSize: 11, fontWeight: 800, color: "#22c55e", fontFamily: "monospace" }}>{h.symbol}</span>
+                      <span style={{ fontSize: 9, color: "#475569" }}>{h.alert_type} {h.direction} {h.threshold}</span>
+                    </div>
+                    <div style={{ fontSize: 10, color: "#64748b" }}>
+                      {h.alert_type === "score" ? `Score ${h.score}/16` : `$${h.price.toFixed(6)}`}
+                    </div>
+                  </div>
+                  <div style={{ fontSize: 9, color: "#334155", whiteSpace: "nowrap", marginLeft: 8 }}>
+                    {fmtTs(h.fired_ts)}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 //  Shared card primitives 
 function Card({ children, className = "", id }: {
@@ -249,6 +349,7 @@ export default function Home() {
               <span className="hidden sm:inline">LIVE</span>
             </div>
             <AuthButton user={auth.user} onClick={() => setAuthOpen(true)} />
+            <AlertBell />
             <button
               className="text-[11px] font-mono font-bold text-white px-2.5 md:px-3 py-1.5 rounded transition-all min-h-[36px]"
               style={{ background: "#7c3aed" }}
