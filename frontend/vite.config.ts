@@ -13,8 +13,8 @@ export default defineConfig({
       registerType: "autoUpdate",
       includeAssets: ["favicon.svg", "apple-touch-icon.png"],
       manifest: {
-        name: "crypto.guru",
-        short_name: "crypto.guru",
+        name: "Crypto Sniper",
+        short_name: "Crypto Sniper",
         description: "Real-Time Crypto Signal Engine — V/P/R/T scoring, Kronos AI forecast & multi-agent debate",
         theme_color: "#060912",
         background_color: "#060912",
