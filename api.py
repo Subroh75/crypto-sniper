@@ -12,6 +12,7 @@ from data import (
     get_ohlcv, get_quote, get_indicators, get_trending,
     get_gainers_losers, get_market_overview, get_btc_onchain,
     get_news, get_macro, get_watchlist_scores, get_fear_greed, get_crypto_panic, health_check,
+    get_social_delta, get_coinpaprika_meta,
 )
 from signals import calculate_signals, get_key_levels
 from agents import run_agent_council
@@ -91,16 +92,17 @@ async def analyse(req: AnalyseRequest):
     symbol = req.symbol.upper().strip()
     t_start = time.time()
     try:
-        ohlcv      = get_ohlcv(symbol, req.interval)
-        quote      = get_quote(symbol)
-        indicators = get_indicators(symbol, req.interval)
-        fear_greed = get_fear_greed()
-        cp_news    = get_crypto_panic(symbol)
+        ohlcv        = get_ohlcv(symbol, req.interval)
+        quote        = get_quote(symbol)
+        indicators   = get_indicators(symbol, req.interval)
+        fear_greed   = get_fear_greed()
+        cp_news      = get_crypto_panic(symbol)
+        social_delta = get_social_delta(symbol)  # CryptoCompare — unlocks S-score 3rd point
     except Exception as e:
         raise HTTPException(status_code=502, detail=str(e))
     if not ohlcv:
         raise HTTPException(status_code=404, detail=f"No data for {symbol}")
-    sig = calculate_signals(ohlcv, quote, indicators, fear_greed=fear_greed, cp_news=cp_news)
+    sig = calculate_signals(ohlcv, quote, indicators, fear_greed=fear_greed, cp_news=cp_news, social_delta=social_delta)
     levels = get_key_levels(sig)
     # Background: record signal + check price alerts
     import asyncio, threading
@@ -125,7 +127,17 @@ async def analyse(req: AnalyseRequest):
         "fear_greed":fear_greed,"cp_news":cp_news[:3],"key_levels":levels,
         "ohlcv":ohlcv[-48:],
         "derivatives": get_derivatives(symbol),
+        "social_delta": social_delta,
     }
+
+@app.get("/fundamentals/{symbol}")
+async def fundamentals(symbol: str):
+    """Richer coin fundamentals from Coinpaprika: ATH, rank, supply, tags, description."""
+    sym  = symbol.upper().strip()
+    meta = get_coinpaprika_meta(sym)
+    if not meta:
+        raise HTTPException(status_code=404, detail=f"No fundamentals data for {sym}")
+    return meta
 
 @app.post("/kronos")
 async def kronos(req: KronosRequest):

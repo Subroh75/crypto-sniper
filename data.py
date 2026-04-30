@@ -23,6 +23,8 @@ CG_KEY     = os.getenv("COINGECKO_API_KEY", "")          # demo or pro
 TD_KEY     = os.getenv("TWELVEDATA_API_KEY", "") or os.getenv("TWELVE_DATA_API_KEY", "")  # free tier
 MAUX_KEY   = os.getenv("MARKETAUX_API_KEY", "")          # free tier
 ETHSCAN_KEY= os.getenv("ETHERSCAN_API_KEY", "")          # free tier
+FH_KEY     = os.getenv("FINNHUB_API_KEY", "")             # free at finnhub.io
+CC_KEY     = os.getenv("CRYPTOCOMPARE_API_KEY", "")       # free at cryptocompare.com
 
 # ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ Base URLs ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ
 CG_BASE  = "https://api.coingecko.com/api/v3"  # demo key works on public API with x_cg_demo_api_key param
@@ -35,6 +37,8 @@ FNG_BASE   = "https://api.alternative.me"           # fear & greed, no key
 CPANIC_BASE= "https://cryptopanic.com/api/free/v1"  # news sentiment, no key
 MPOOL    = "https://mempool.space/api/v1"
 ETHSCAN  = "https://api.etherscan.io/api"
+FH_BASE  = "https://finnhub.io/api/v1"                  # crypto OHLCV fallback
+CC_BASE  = "https://min-api.cryptocompare.com"           # social_delta for S-score
 MAUX     = "https://api.marketaux.com/v1"
 ECONDB   = "https://www.econdb.com/api/series"
 
@@ -114,6 +118,11 @@ def get_ohlcv(symbol: str, interval: str = "1H") -> list[list]:
         bars = _twelve_data_ohlcv(symbol, interval, outputsize=300)
         if len(bars) >= 20:
             return bars
+    # Fallback: Finnhub (keyed, real OHLCV candles)
+    if FH_KEY:
+        bars = _finnhub_ohlcv(symbol, interval, bars=300)
+        if len(bars) >= 20:
+            return bars
 
     coin_id = CG_ID.get(symbol.upper(), symbol.lower())
     days    = DAYS_MAP.get(interval, 14)
@@ -163,6 +172,41 @@ def _twelve_data_ohlcv(symbol: str, interval: str = "1h", outputsize: int = 300)
     return bars
 
 
+def _finnhub_ohlcv(symbol: str, interval: str = "1H", bars: int = 300) -> list[list]:
+    """
+    Finnhub crypto candles — OHLCV fallback after Twelve Data.
+    Endpoint: GET /crypto/candle?symbol=BINANCE:{SYM}USDT&resolution=60&from=...&to=...&token=KEY
+    Returns [[ts_ms, open, high, low, close], ...] newest last.
+    """
+    if not FH_KEY:
+        return []
+    # Map interval codes to Finnhub resolution
+    res_map = {"1m":"1","5m":"5","15m":"15","30m":"30","1H":"60","4H":"240","1D":"D"}
+    res = res_map.get(interval, "60")
+    # How many seconds back to fetch
+    seconds_per_bar = {"1":60,"5":300,"15":900,"30":1800,"60":3600,"240":14400,"D":86400}
+    secs = seconds_per_bar.get(res, 3600)
+    to_ts   = int(time.time())
+    from_ts = to_ts - secs * bars
+    fh_sym  = f"BINANCE:{symbol.upper()}USDT"
+    data = _get(f"{FH_BASE}/crypto/candle", {
+        "symbol": fh_sym, "resolution": res,
+        "from": from_ts, "to": to_ts, "token": FH_KEY,
+    }, timeout=12)
+    if not data or data.get("s") != "ok" or "c" not in data:
+        return []
+    timestamps = data["t"]
+    opens      = data["o"]
+    highs      = data["h"]
+    lows       = data["l"]
+    closes     = data["c"]
+    result = []
+    for i in range(len(closes)):
+        ts_ms = int(timestamps[i]) * 1000
+        result.append([ts_ms, float(opens[i]), float(highs[i]), float(lows[i]), float(closes[i])])
+    return result
+
+
 def _binance_ohlcv(symbol: str, interval: str = "1h", limit: int = 300) -> list:
     """Binance klines — no API key needed, up to 1000 candles."""
     iv_map = {"1m":"1m","5m":"5m","15m":"15m","30m":"30m","1H":"1h","4H":"4h","1D":"1d"}
@@ -192,17 +236,72 @@ def _binance_quote(symbol: str) -> dict:
     }
 
 
+# Extended Coinpaprika ID map (used by both _coinpaprika_quote and get_coinpaprika_meta)
+_CPP_IDS = {
+    "BTC":"btc-bitcoin","ETH":"eth-ethereum","SOL":"sol-solana",
+    "BNB":"bnb-binance-coin","XRP":"xrp-xrp","ADA":"ada-cardano",
+    "DOGE":"doge-dogecoin","AVAX":"avax-avalanche","DOT":"dot-polkadot",
+    "MATIC":"matic-polygon","LINK":"link-chainlink","ATOM":"atom-cosmos",
+    "LTC":"ltc-litecoin","PEPE":"pepe-pepe","WIF":"wif-dogwifcoin",
+    "KAVA":"kava-kava","SUI":"sui-sui","APT":"apt-aptos",
+    "ARB":"arb-arbitrum","OP":"op-optimism","INJ":"inj-injective-protocol",
+    "TIA":"tia-celestia","SEI":"sei-sei-network","BONK":"bonk-bonk",
+    "HYPE":"hype-hyperliquid","RENDER":"rndr-render-token",
+    "UNI":"uni-uniswap","LUNC":"lunc-terra-luna","ICP":"icp-internet-computer",
+    "FIL":"fil-filecoin","HBAR":"hbar-hedera-hashgraph","ALGO":"algo-algorand",
+    "XLM":"xlm-stellar","ETC":"etc-ethereum-classic",
+}
+
+
+def get_coinpaprika_meta(symbol: str) -> dict:
+    """
+    Returns richer coin fundamentals from Coinpaprika (free, no key).
+    Feeds the Fundamentals tab: ATH, market cap rank, circulating supply,
+    sector tags, website, and description snippet.
+    Returns {} on failure so callers can handle gracefully.
+    """
+    coin_id = _CPP_IDS.get(symbol.upper(), "")
+    if not coin_id:
+        return {}
+    # Fetch ticker (price data + market cap)
+    ticker = _get(f"{CPP_BASE}/tickers/{coin_id}", {"quotes": "USD"})
+    # Fetch coin info (metadata)
+    info   = _get(f"{CPP_BASE}/coins/{coin_id}")
+    if not ticker or "quotes" not in ticker:
+        return {}
+    q = ticker["quotes"].get("USD", {})
+    out = {
+        "symbol":            symbol.upper(),
+        "name":              ticker.get("name", ""),
+        "rank":              ticker.get("rank", 0),
+        "price":             float(q.get("price", 0)),
+        "market_cap":        float(q.get("market_cap", 0)),
+        "volume_24h":        float(q.get("volume_24h", 0)),
+        "change_24h":        float(q.get("percent_change_24h", 0)),
+        "change_7d":         float(q.get("percent_change_7d", 0)),
+        "change_30d":        float(q.get("percent_change_30d", 0)),
+        "ath_price":         float(q.get("ath_price", 0) or 0),
+        "ath_date":          q.get("ath_date", ""),
+        "ath_distance_pct":  round(
+            ((float(q.get("price", 0)) / float(q.get("ath_price", 1) or 1)) - 1) * 100, 1
+        ) if q.get("ath_price") else None,
+        "circulating_supply": float(ticker.get("circulating_supply", 0) or 0),
+        "total_supply":       float(ticker.get("total_supply", 0) or 0),
+        "max_supply":         float(ticker.get("max_supply", 0) or 0),
+    }
+    if info:
+        out["description"] = (info.get("description", "") or "")[:280]
+        out["tags"]        = [t.get("name", "") for t in (info.get("tags") or [])[:6]]
+        out["website"]     = (info.get("links", {}) or {}).get("website", [""])[0] if info.get("links") else ""
+        out["whitepaper"]  = (info.get("whitepaper", {}) or {}).get("link", "")
+        out["started_at"]  = info.get("started_at", "")
+    return out
+
+
 def _coinpaprika_quote(symbol: str) -> dict:
     """Coinpaprika free ticker — no key needed."""
     # Map common symbols to Coinpaprika IDs
-    cpp_ids = {
-        "BTC":"btc-bitcoin","ETH":"eth-ethereum","SOL":"sol-solana",
-        "BNB":"bnb-binance-coin","XRP":"xrp-xrp","ADA":"ada-cardano",
-        "DOGE":"doge-dogecoin","AVAX":"avax-avalanche","DOT":"dot-polkadot",
-        "MATIC":"matic-polygon","LINK":"link-chainlink","ATOM":"atom-cosmos",
-        "LTC":"ltc-litecoin","PEPE":"pepe-pepe","WIF":"wif-dogwifcoin",
-        "KAVA":"kava-kava","SUI":"sui-sui","APT":"apt-aptos",
-    }
+    cpp_ids = _CPP_IDS
     coin_id = cpp_ids.get(symbol.upper(), "")
     if not coin_id:
         return {}
@@ -257,6 +356,78 @@ def get_crypto_panic(symbol: str) -> list:
             "url":       p.get("url", ""),
         })
     return out
+
+
+# ── CryptoCompare social delta ────────────────────────────────────────────────
+# Maps ticker symbols to CryptoCompare coin IDs (numeric) for the social endpoint.
+# Populated lazily via /data/all/coinlist
+_CC_COIN_ID_CACHE: dict = {}
+
+def _cc_get_coin_id(symbol: str) -> str:
+    """Return CryptoCompare numeric coinId for a ticker symbol, or '' on failure."""
+    sym = symbol.upper()
+    if sym in _CC_COIN_ID_CACHE:
+        return _CC_COIN_ID_CACHE[sym]
+    # Known common mappings to avoid an extra API call
+    known = {
+        "BTC":"1182","ETH":"7605","SOL":"5426","BNB":"1376",
+        "XRP":"328244","ADA":"321992","DOGE":"4432","DOT":"596515",
+        "AVAX":"392516","MATIC":"699851","LINK":"725504","UNI":"395282",
+        "ATOM":"314902","LTC":"3808","PEPE":"608380","WIF":"951999",
+        "SUI":"948960","APT":"944866","ARB":"950892","OP":"931803",
+        "SEI":"951503","INJ":"931481","TIA":"951680","BONK":"892946",
+    }
+    if sym in known:
+        _CC_COIN_ID_CACHE[sym] = known[sym]
+        return known[sym]
+    # Fallback: search coinlist
+    try:
+        headers = {"authorization": f"Apikey {CC_KEY}"} if CC_KEY else {}
+        r = requests.get(
+            "https://min-api.cryptocompare.com/data/all/coinlist",
+            params={"summary": "true"}, headers=headers, timeout=10
+        )
+        r.raise_for_status()
+        coins = r.json().get("Data", {})
+        if sym in coins:
+            cid = str(coins[sym].get("Id", ""))
+            _CC_COIN_ID_CACHE[sym] = cid
+            return cid
+    except Exception as e:
+        logger.warning(f"CC coinlist lookup failed for {sym}: {e}")
+    return ""
+
+
+def get_social_delta(symbol: str) -> float:
+    """
+    Returns % change in CryptoCompare social score over the past day.
+    Used as the `social_delta` parameter in calculate_signals() to unlock
+    the third point of the S-score component (currently always 0).
+
+    Returns a float (positive = social momentum growing, negative = fading).
+    Returns 0.0 on any error so scoring gracefully degrades.
+    """
+    coin_id = _cc_get_coin_id(symbol)
+    if not coin_id:
+        return 0.0
+    try:
+        headers = {"authorization": f"Apikey {CC_KEY}"} if CC_KEY else {}
+        r = requests.get(
+            f"{CC_BASE}/data/social/coin/histo/day",
+            params={"coinId": coin_id, "limit": 2},
+            headers=headers, timeout=8
+        )
+        r.raise_for_status()
+        data = r.json().get("Data", [])
+        if len(data) >= 2:
+            prev  = data[-2].get("points", 0)
+            curr  = data[-1].get("points", 0)
+            if prev and prev != 0:
+                delta = round(((curr - prev) / abs(prev)) * 100, 2)
+                return delta
+    except Exception as e:
+        logger.warning(f"CryptoCompare social_delta failed for {symbol}: {e}")
+    return 0.0
 
 
 def _coincap_ohlcv(symbol: str, days: int = 1) -> list[list]:
@@ -756,5 +927,25 @@ def health_check() -> dict:
 
     # MarketAux
     results["marketaux"] = "ok" if MAUX_KEY else "no_key"
+
+    # Finnhub
+    if FH_KEY:
+        fh = _get(f"{FH_BASE}/crypto/exchange", {"token": FH_KEY}, timeout=8)
+        results["finnhub"] = "ok" if fh and isinstance(fh, list) else "error"
+    else:
+        results["finnhub"] = "no_key"
+
+    # CryptoCompare
+    if CC_KEY:
+        cc = _get(f"{CC_BASE}/data/price",
+                  {"fsym": "BTC", "tsyms": "USD"},
+                  timeout=8)
+        results["cryptocompare"] = "ok" if cc and "USD" in cc else "error"
+    else:
+        # Social endpoint works without key at reduced rate limit
+        cc = _get(f"{CC_BASE}/data/price",
+                  {"fsym": "BTC", "tsyms": "USD"},
+                  timeout=8)
+        results["cryptocompare"] = "ok" if cc and "USD" in cc else "no_key"
 
     return results
