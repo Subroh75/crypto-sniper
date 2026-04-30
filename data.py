@@ -398,35 +398,130 @@ def _cc_get_coin_id(symbol: str) -> str:
     return ""
 
 
+def _cryptopanic_social_delta(symbol: str) -> float:
+    """
+    Derives a social momentum proxy from CryptoPanic vote ratios.
+    No API key needed — uses the same free public endpoint as get_crypto_panic().
+
+    Logic:
+      - Fetch up to 20 hot posts for the symbol (4 pages of 5)
+      - Compute bullish_ratio = bullish_posts / total_posts
+      - Map to a delta score:
+          bullish_ratio >= 0.7  → +10  (strong positive sentiment)
+          bullish_ratio >= 0.55 → +5   (mild positive)
+          bullish_ratio >= 0.45 → 0    (neutral)
+          bullish_ratio >= 0.3  → -5   (mild negative)
+          below 0.3             → -10  (strong negative)
+      - Also factor in total engagement: if total likes+dislikes > 50,
+        scale the delta up by 1.5x (more votes = more conviction)
+    """
+    try:
+        data = _get(f"{CPANIC_BASE}/posts/", {
+            "currencies": symbol.upper(),
+            "filter": "hot",
+            "kind": "news",
+            "public": "true",
+        })
+        if not data or "results" not in data:
+            return 0.0
+        posts = data["results"]
+        if not posts:
+            return 0.0
+
+        bullish = 0
+        bearish = 0
+        neutral = 0
+        total_likes    = 0
+        total_dislikes = 0
+
+        for p in posts:
+            votes = p.get("votes", {})
+            liked    = int(votes.get("liked",    0) or 0)
+            disliked = int(votes.get("disliked", 0) or 0)
+            total_likes    += liked
+            total_dislikes += disliked
+            if liked > disliked:
+                bullish += 1
+            elif disliked > liked:
+                bearish += 1
+            else:
+                neutral += 1
+
+        total_posts = bullish + bearish + neutral
+        if total_posts == 0:
+            return 0.0
+
+        bullish_ratio = bullish / total_posts
+        total_votes   = total_likes + total_dislikes
+
+        # Map ratio to a delta signal
+        if bullish_ratio >= 0.70:
+            delta = 10.0
+        elif bullish_ratio >= 0.55:
+            delta = 5.0
+        elif bullish_ratio >= 0.45:
+            delta = 0.0
+        elif bullish_ratio >= 0.30:
+            delta = -5.0
+        else:
+            delta = -10.0
+
+        # Boost conviction when community engagement is high
+        if total_votes > 50 and delta != 0.0:
+            delta = round(delta * 1.5, 1)
+
+        logger.debug(
+            f"CryptoPanic social proxy {symbol}: {bullish}B/{bearish}Be/{neutral}N "
+            f"ratio={bullish_ratio:.2f} votes={total_votes} → delta={delta}"
+        )
+        return delta
+
+    except Exception as e:
+        logger.warning(f"CryptoPanic social proxy failed for {symbol}: {e}")
+        return 0.0
+
+
 def get_social_delta(symbol: str) -> float:
     """
-    Returns % change in CryptoCompare social score over the past day.
-    Used as the `social_delta` parameter in calculate_signals() to unlock
-    the third point of the S-score component (currently always 0).
+    Returns a social momentum score used as the `social_delta` parameter
+    in calculate_signals() to unlock the 3rd point of the S-score component.
 
-    Returns a float (positive = social momentum growing, negative = fading).
-    Returns 0.0 on any error so scoring gracefully degrades.
+    Tier 1: CryptoCompare daily social histo (keyed, accurate % change)
+    Tier 2: CryptoPanic vote-ratio proxy (no key, always available)
+    Tier 3: 0.0 (graceful degradation — S-score capped at 2/3)
+
+    Positive values ≥ 5.0 award the extra S-score point.
     """
-    coin_id = _cc_get_coin_id(symbol)
-    if not coin_id:
-        return 0.0
-    try:
-        headers = {"authorization": f"Apikey {CC_KEY}"} if CC_KEY else {}
-        r = requests.get(
-            f"{CC_BASE}/data/social/coin/histo/day",
-            params={"coinId": coin_id, "limit": 2},
-            headers=headers, timeout=8
-        )
-        r.raise_for_status()
-        data = r.json().get("Data", [])
-        if len(data) >= 2:
-            prev  = data[-2].get("points", 0)
-            curr  = data[-1].get("points", 0)
-            if prev and prev != 0:
-                delta = round(((curr - prev) / abs(prev)) * 100, 2)
-                return delta
-    except Exception as e:
-        logger.warning(f"CryptoCompare social_delta failed for {symbol}: {e}")
+    # Tier 1 — CryptoCompare (works until key expires / plan ends)
+    if CC_KEY:
+        coin_id = _cc_get_coin_id(symbol)
+        if coin_id:
+            try:
+                headers = {"authorization": f"Apikey {CC_KEY}"}
+                r = requests.get(
+                    f"{CC_BASE}/data/social/coin/histo/day",
+                    params={"coinId": coin_id, "limit": 2},
+                    headers=headers, timeout=8
+                )
+                r.raise_for_status()
+                data = r.json().get("Data", [])
+                if len(data) >= 2:
+                    prev = data[-2].get("points", 0)
+                    curr = data[-1].get("points", 0)
+                    if prev and prev != 0:
+                        delta = round(((curr - prev) / abs(prev)) * 100, 2)
+                        logger.debug(f"CryptoCompare social_delta {symbol}: {delta}%")
+                        return delta
+            except Exception as e:
+                logger.warning(f"CryptoCompare social_delta failed for {symbol}: {e}")
+                # Fall through to Tier 2
+
+    # Tier 2 — CryptoPanic vote proxy (no key, always available)
+    delta = _cryptopanic_social_delta(symbol)
+    if delta != 0.0:
+        return delta
+
+    # Tier 3 — graceful zero
     return 0.0
 
 
