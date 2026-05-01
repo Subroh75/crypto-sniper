@@ -1536,3 +1536,212 @@ def health_check() -> dict:
         results["santiment"] = "no_key"
 
     return results
+
+
+# ── Volume Surge Scanner ───────────────────────────────────────────────────────
+# Scans the entire Binance USDT universe (~400-500 pairs), computes RVOL against
+# a rolling 20-bar baseline stored in SQLite, and returns coins where volume is
+# surging but price hasn't moved much yet (pre-breakout setups).
+
+import sqlite3 as _vs_sqlite
+import threading as _vs_threading
+
+_VS_DB_PATH = os.path.join(os.path.dirname(__file__), "data.db")
+_vs_baseline_lock = _vs_threading.Lock()
+
+def _vs_db_init():
+    """Create volume_baseline table if it doesn't exist."""
+    with _vs_sqlite.connect(_VS_DB_PATH) as c:
+        c.executescript("""
+        CREATE TABLE IF NOT EXISTS volume_baseline (
+            symbol      TEXT PRIMARY KEY,
+            avg_vol_20  REAL NOT NULL,
+            updated_ts  INTEGER NOT NULL
+        );
+        """)
+
+_vs_db_init()
+
+def build_volume_baseline(max_coins: int = 500, interval: str = "1h") -> dict:
+    """
+    Pull 21 bars of klines for every Binance USDT pair and store the
+    20-bar average volume in SQLite. Called on startup + every 24h.
+    Returns {"updated": N, "errors": M, "timestamp": ts}
+    """
+    import time as _time
+    from concurrent.futures import ThreadPoolExecutor, as_completed as _asc
+
+    iv = interval.lower()
+    coins = get_binance_universe(min_volume_usd=50_000, max_coins=max_coins)
+    logger.info(f"build_volume_baseline: {len(coins)} coins, interval={iv}")
+
+    def _baseline_one(coin):
+        sym = coin["symbol"]
+        try:
+            bnc_sym = BNC_SYM.get(sym.upper(), sym.upper() + "USDT")
+            r = requests.get(
+                f"{BNC_BASE}/klines",
+                params={"symbol": bnc_sym, "interval": iv, "limit": 21},
+                timeout=10,
+            )
+            if r.status_code != 200:
+                return None
+            bars = r.json()
+            if not bars or len(bars) < 5:
+                return None
+            # Use bars[:-1] (exclude the still-forming current bar)
+            vols = [float(b[5]) for b in bars[:-1]]
+            avg = sum(vols) / len(vols) if vols else 0
+            if avg <= 0:
+                return None
+            return (sym, avg)
+        except Exception:
+            return None
+
+    updated, errors = 0, 0
+    now_ts = int(__import__("time").time())
+
+    with ThreadPoolExecutor(max_workers=20) as ex:
+        futures = {ex.submit(_baseline_one, c): c for c in coins}
+        rows = []
+        for fut in _asc(futures):
+            res = fut.result()
+            if res:
+                rows.append(res)
+                updated += 1
+            else:
+                errors += 1
+
+    if rows:
+        with _vs_sqlite.connect(_VS_DB_PATH) as c:
+            c.executemany(
+                """INSERT INTO volume_baseline (symbol, avg_vol_20, updated_ts)
+                   VALUES (?,?,?)
+                   ON CONFLICT(symbol) DO UPDATE SET
+                     avg_vol_20=excluded.avg_vol_20,
+                     updated_ts=excluded.updated_ts""",
+                [(sym, avg, now_ts) for sym, avg in rows],
+            )
+    logger.info(f"build_volume_baseline done: {updated} updated, {errors} errors")
+    return {"updated": updated, "errors": errors, "timestamp": now_ts}
+
+
+def get_volume_surge(
+    min_rvol: float = 3.0,
+    max_price_chg: float = 5.0,
+    min_volume_usd: float = 50_000,
+    top_n: int = 20,
+    interval: str = "1h",
+) -> list[dict]:
+    """
+    Return coins where current bar volume is >= min_rvol × 20-bar baseline
+    AND price change is within ±max_price_chg% (pre-breakout filter).
+
+    Steps:
+      1. Read baselines from SQLite
+      2. Fetch all Binance USDT 24hr tickers (single call)
+      3. For each coin with a baseline, get current 1h kline volume (last closed bar)
+      4. Compute RVOL = current_vol / baseline_avg
+      5. Filter + rank by RVOL desc
+    """
+    import time as _time
+    from concurrent.futures import ThreadPoolExecutor, as_completed as _asc
+
+    iv = interval.lower()
+
+    # ── Load baselines from SQLite ────────────────────────────────────────────
+    baselines: dict[str, float] = {}
+    max_age = 26 * 3600  # accept baselines up to 26h old
+    now_ts = int(_time.time())
+    try:
+        with _vs_sqlite.connect(_VS_DB_PATH) as c:
+            rows = c.execute(
+                "SELECT symbol, avg_vol_20, updated_ts FROM volume_baseline"
+            ).fetchall()
+        for sym, avg, ts in rows:
+            if now_ts - ts < max_age and avg > 0:
+                baselines[sym] = avg
+    except Exception as e:
+        logger.warning(f"get_volume_surge: baseline read error: {e}")
+
+    if not baselines:
+        logger.warning("get_volume_surge: no baselines in DB — run build_volume_baseline first")
+        return []
+
+    # ── Fetch all Binance 24hr tickers (one call) ─────────────────────────────
+    try:
+        r = requests.get(f"{BNC_BASE}/ticker/24hr", timeout=12)
+        r.raise_for_status()
+        all_tickers = {t["symbol"]: t for t in r.json()}
+    except Exception as e:
+        logger.error(f"get_volume_surge: Binance ticker error: {e}")
+        return []
+
+    # ── For each coin with a baseline, fetch current bar volume ───────────────
+    candidates = [s for s in baselines if s + "USDT" in all_tickers]
+
+    def _current_vol(sym: str):
+        try:
+            bnc_sym = sym + "USDT"
+            r = requests.get(
+                f"{BNC_BASE}/klines",
+                params={"symbol": bnc_sym, "interval": iv, "limit": 2},
+                timeout=8,
+            )
+            if r.status_code != 200:
+                return None
+            bars = r.json()
+            if not bars:
+                return None
+            # Use the last CLOSED bar (index -2 if 2 bars returned, else -1)
+            bar = bars[-2] if len(bars) >= 2 else bars[-1]
+            vol = float(bar[5])
+            return vol
+        except Exception:
+            return None
+
+    results = []
+    with ThreadPoolExecutor(max_workers=24) as ex:
+        future_map = {ex.submit(_current_vol, sym): sym for sym in candidates}
+        for fut in _asc(future_map):
+            sym = future_map[fut]
+            cur_vol = fut.result()
+            if cur_vol is None or cur_vol <= 0:
+                continue
+
+            ticker = all_tickers.get(sym + "USDT", {})
+            price_chg = float(ticker.get("priceChangePercent", 0))
+            price = float(ticker.get("lastPrice", 0))
+            vol_24h_usd = float(ticker.get("quoteVolume", 0))
+
+            if vol_24h_usd < min_volume_usd:
+                continue
+
+            baseline = baselines[sym]
+            rvol = cur_vol / baseline if baseline > 0 else 0
+
+            if rvol < min_rvol:
+                continue
+
+            # Label based on price direction + RVOL intensity
+            abs_chg = abs(price_chg)
+            if abs_chg <= 1.0:
+                label = "PRE-BREAKOUT"
+            elif price_chg > 0:
+                label = "BREAKOUT"
+            else:
+                label = "DISTRIBUTION"
+
+            results.append({
+                "symbol":     sym,
+                "rvol":       round(rvol, 2),
+                "price":      price,
+                "change":     round(price_chg, 2),
+                "vol_24h":    round(vol_24h_usd, 0),
+                "baseline":   round(baseline, 2),
+                "cur_vol":    round(cur_vol, 2),
+                "label":      label,
+            })
+
+    results.sort(key=lambda x: x["rvol"], reverse=True)
+    return results[:top_n]

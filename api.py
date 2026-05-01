@@ -1238,3 +1238,89 @@ async def push_unsubscribe(endpoint: str):
         return {"ok": True}
     except Exception as e:
         return {"ok": False, "error": str(e)}
+
+
+# ── Volume Surge ──────────────────────────────────────────────────────────────
+from data import build_volume_baseline, get_volume_surge as _get_volume_surge
+
+_VS_CACHE: dict = {}
+_VS_TTL = 300  # 5 min cache for surge results
+_VS_BASELINE_TS: dict = {"ts": 0}
+_VS_BASELINE_TTL = 23 * 3600  # rebuild baseline once per ~day
+
+def _maybe_build_baseline():
+    """Trigger baseline build in background if >23h old or missing."""
+    import threading, time as _t
+    now = int(_t.time())
+    if now - _VS_BASELINE_TS.get("ts", 0) < _VS_BASELINE_TTL:
+        return
+    _VS_BASELINE_TS["ts"] = now  # optimistic lock — prevent double-fire
+
+    def _run():
+        try:
+            result = build_volume_baseline(max_coins=500, interval="1h")
+            logger.info(f"Volume baseline rebuilt: {result}")
+        except Exception as e:
+            logger.error(f"Volume baseline build error: {e}")
+            _VS_BASELINE_TS["ts"] = 0  # allow retry
+
+    threading.Thread(target=_run, daemon=True).start()
+
+# Kick off baseline build on startup
+_maybe_build_baseline()
+
+
+@app.get("/volume-surge")
+def volume_surge(
+    min_rvol:       float = Query(3.0,  description="Min relative volume (e.g. 3.0 = 3x baseline)"),
+    max_price_chg:  float = Query(5.0,  description="Max abs price change % to include"),
+    min_volume_usd: float = Query(50_000, description="Min 24h volume USD"),
+    top_n:          int   = Query(20,   ge=1, le=100),
+    interval:       str   = Query("1h"),
+):
+    """
+    Return coins surging on volume vs their 20-bar baseline.
+    Sorted by RVOL descending. PRE-BREAKOUT = high vol, muted price.
+    """
+    import time as _t
+    now = int(_t.time())
+    cache_key = f"{min_rvol}:{max_price_chg}:{min_volume_usd}:{top_n}:{interval}"
+
+    # Maybe trigger background baseline rebuild
+    _maybe_build_baseline()
+
+    if _VS_CACHE.get("key") == cache_key and now - _VS_CACHE.get("ts", 0) < _VS_TTL:
+        return {**_VS_CACHE["data"], "cached": True}
+
+    results = _get_volume_surge(
+        min_rvol=min_rvol,
+        max_price_chg=max_price_chg,
+        min_volume_usd=min_volume_usd,
+        top_n=top_n,
+        interval=interval,
+    )
+
+    payload = {
+        "coins":      results,
+        "count":      len(results),
+        "min_rvol":   min_rvol,
+        "interval":   interval,
+        "timestamp":  now,
+        "cached":     False,
+    }
+    _VS_CACHE.update({"key": cache_key, "ts": now, "data": payload})
+    return payload
+
+
+@app.post("/volume-baseline/rebuild")
+async def rebuild_baseline(interval: str = "1h", max_coins: int = 500):
+    """Manually trigger a volume baseline rebuild (runs in background)."""
+    import threading
+    def _run():
+        try:
+            result = build_volume_baseline(max_coins=max_coins, interval=interval)
+            logger.info(f"Manual baseline rebuild: {result}")
+        except Exception as e:
+            logger.error(f"Manual baseline rebuild error: {e}")
+    threading.Thread(target=_run, daemon=True).start()
+    return {"ok": True, "message": "Baseline rebuild started in background"}

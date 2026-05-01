@@ -31,6 +31,7 @@ import { BacktestInternalCard } from "@/components/BacktestInternalCard";
 import { ScorePerformanceCard } from "@/components/ScorePerformanceCard";
 import { DipBacktestCard } from "@/components/DipBacktestCard";
 import { ScanBacktestCard } from "@/components/ScanBacktestCard";
+import { VolumeSurgeCard } from "@/components/VolumeSurgeCard";
 import { AuthModal, AuthButton } from "@/components/AuthModal";
 import { PWAInstallBanner } from "@/components/PWAInstallBanner";
 import {
@@ -552,7 +553,12 @@ export default function Home() {
                 </div>
               </Card>
 
-              {/* 02b: Price Chart */}
+              {/* 02b: Volume Surge — coins with unusual volume vs baseline */}
+              <VolumeSurgeCard
+                onSelect={(sym) => { runAnalysis(sym); if (isMobile) setMobileTab("analyse"); }}
+              />
+
+              {/* 02c: Price Chart */}
               <PriceChart
                 ohlcv={sig.ohlcv}
                 structure={sig.structure}
