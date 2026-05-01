@@ -29,6 +29,7 @@ import type { AlertHistoryEntry } from "@/components/PriceAlertCard";
 import { ScanAlertPoller } from "@/components/ScanAlertPoller";
 import { BacktestInternalCard } from "@/components/BacktestInternalCard";
 import { ScorePerformanceCard } from "@/components/ScorePerformanceCard";
+import { DipBacktestCard } from "@/components/DipBacktestCard";
 import { AuthModal, AuthButton } from "@/components/AuthModal";
 import { PWAInstallBanner } from "@/components/PWAInstallBanner";
 import {
@@ -1023,6 +1024,9 @@ export default function Home() {
 
               {/* 15: Score → Performance (scan-based backtest by score band) */}
               <ScorePerformanceCard />
+
+              {/* 16: Dip Scanner Backtest — recovery after dip by score band */}
+              <DipBacktestCard />
 
             </div>
             {/*  end LEFT column  */}

@@ -554,6 +554,163 @@ async def alert_unread(email: str, since_ts: int = 0):
 # ── Backtest ─────────────────────────────────────────────────────────────────
 
 
+
+@app.get("/dip-performance", tags=["Signal"])
+def dip_performance(
+    min_dip: float = Query(5.0, ge=1.0, le=50.0, description="Min 24h drop % (absolute)"),
+    top_n:   int   = Query(20, ge=5, le=40, description="Number of dip coins to backtest"),
+):
+    """
+    Dip score-band performance report.
+
+    For each bar where a coin was down >= min_dip% AND scored in a given band,
+    measures the next 1D / 3D / 7D recovery.
+
+    Answers: "If I bought every coin that was down 10% AND scored 9/16, what happened?"
+
+    Groups results into score bands: 1-4, 5-6, 7-8, 9-10, 11-13, 14-16
+    """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    from backtest_internal import get_daily_ohlcv, _score_bar, _hold_return, MIN_BARS_CONTEXT
+
+    # Step 1: Get dip coins — either from dip cache or current Binance snapshot
+    dip_symbols: list[str] = []
+
+    # Try dip cache first
+    for key, val in _dip_cache.items():
+        if key == "data" and isinstance(val, list):
+            dip_symbols = [s["symbol"] for s in val[:top_n]]
+            break
+
+    # If no dip cache, use global Binance to find red coins right now
+    if not dip_symbols:
+        try:
+            import requests as _req
+            resp = _req.get("https://api.binance.com/api/v3/ticker/24hr", timeout=10)
+            tickers = resp.json()
+            dips = [
+                t["symbol"].replace("USDT", "")
+                for t in tickers
+                if t.get("symbol", "").endswith("USDT")
+                and float(t.get("quoteVolume", 0)) > 1_000_000
+                and float(t.get("priceChangePercent", 0)) <= -min_dip
+            ]
+            dips.sort(key=lambda s: s)
+            dip_symbols = dips[:top_n]
+        except Exception as e:
+            logger.warning(f"dip_performance: Binance fetch failed: {e}")
+
+    # Fallback to a broad set of mid-caps that dip regularly
+    if not dip_symbols:
+        dip_symbols = ["SOL","ADA","DOT","AVAX","LINK","ATOM","NEAR","FIL","ALGO",
+                       "HBAR","XLM","ICP","ETC","DOGE","LTC","XRP","BCH","TRX",
+                       "MATIC","UNI","AAVE","CRV","INJ","ARB","OP"][:top_n]
+
+    # Step 2: Bar-by-bar backtest — only enter on bars where 24h change <= -min_dip
+    all_pairs: list[dict] = []
+
+    def backtest_dip_coin(symbol: str):
+        try:
+            ohlcv = get_daily_ohlcv(symbol)
+            if not ohlcv or len(ohlcv) < MIN_BARS_CONTEXT + 2:
+                return []
+            pairs = []
+            for i in range(MIN_BARS_CONTEXT, len(ohlcv) - 1):
+                # 24h change proxy: (close[i] - close[i-1]) / close[i-1] * 100
+                prev_close = ohlcv[i - 1][4]
+                curr_close = ohlcv[i][4]
+                if prev_close <= 0:
+                    continue
+                change_pct = (curr_close - prev_close) / prev_close * 100
+
+                # Only consider bars that ARE a dip (down >= min_dip%)
+                if change_pct > -min_dip:
+                    continue
+
+                sig = _score_bar(ohlcv, i)
+                if sig.total < 1:
+                    continue
+
+                ret_1d = _hold_return(ohlcv, i, 1)
+                ret_3d = _hold_return(ohlcv, i, 3)
+                ret_7d = _hold_return(ohlcv, i, 7)
+
+                if ret_1d is None:
+                    continue
+
+                pairs.append({
+                    "symbol":     symbol,
+                    "score":      sig.total,
+                    "change_pct": round(change_pct, 2),
+                    "ret_1d":     round(ret_1d, 3),
+                    "ret_3d":     round(ret_3d, 3) if ret_3d is not None else None,
+                    "ret_7d":     round(ret_7d, 3) if ret_7d is not None else None,
+                })
+            return pairs
+        except Exception as e:
+            logger.warning(f"dip_performance: {symbol} failed: {e}")
+            return []
+
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        futures = {ex.submit(backtest_dip_coin, sym): sym for sym in dip_symbols}
+        for fut in as_completed(futures):
+            all_pairs.extend(fut.result())
+
+    if not all_pairs:
+        return {
+            "bands": [], "coins_used": dip_symbols,
+            "total_bars": 0, "min_dip": min_dip,
+            "error": "No backtest data — try lowering min_dip or run dip scan first"
+        }
+
+    # Step 3: Group by score band
+    BANDS = [
+        {"label": "1–4",   "min": 1,  "max": 4,  "color": "#64748b"},
+        {"label": "5–6",   "min": 5,  "max": 6,  "color": "#f59e0b"},
+        {"label": "7–8",   "min": 7,  "max": 8,  "color": "#f59e0b"},
+        {"label": "9–10",  "min": 9,  "max": 10, "color": "#22c55e"},
+        {"label": "11–13", "min": 11, "max": 13, "color": "#22c55e"},
+        {"label": "14–16", "min": 14, "max": 16, "color": "#7c3aed"},
+    ]
+
+    def band_stats(pairs):
+        r1 = [p["ret_1d"] for p in pairs if p["ret_1d"] is not None]
+        r3 = [p["ret_3d"] for p in pairs if p.get("ret_3d") is not None]
+        r7 = [p["ret_7d"] for p in pairs if p.get("ret_7d") is not None]
+        if not r1:
+            return None
+        avg_dip = sum(p["change_pct"] for p in pairs) / len(pairs)
+        equity  = 100.0
+        for r in r1:
+            equity *= (1 + r / 100)
+        return {
+            "n":        len(r1),
+            "avg_dip":  round(avg_dip, 2),
+            "avg_1d":   round(sum(r1) / len(r1), 2),
+            "avg_3d":   round(sum(r3) / len(r3), 2) if r3 else None,
+            "avg_7d":   round(sum(r7) / len(r7), 2) if r7 else None,
+            "win_rate": round(sum(1 for r in r1 if r >= 2) / len(r1) * 100, 1),
+            "wins":     sum(1 for r in r1 if r >= 2),
+            "equity":   round(equity, 2),
+        }
+
+    result_bands = []
+    for band in BANDS:
+        matches = [p for p in all_pairs if band["min"] <= p["score"] <= band["max"]]
+        stats = band_stats(matches)
+        if stats:
+            result_bands.append({"label": band["label"], "color": band["color"],
+                                  "min": band["min"], "max": band["max"], **stats})
+
+    return {
+        "bands":      result_bands,
+        "coins_used": dip_symbols,
+        "total_bars": len(all_pairs),
+        "min_dip":    min_dip,
+        "timestamp":  int(time.time()),
+    }
+
+
 @app.get("/score-performance", tags=["Signal"])
 def score_performance(
     top_n: int = Query(15, ge=5, le=30, description="Number of top green coins to backtest"),
