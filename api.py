@@ -922,6 +922,133 @@ async def backtest_internal(symbol: str):
     return result
 
 
+# ── Multi-Symbol Scan Backtest ──────────────────────────────────────────────
+
+@app.post("/backtest-multi")
+async def backtest_multi(payload: dict):
+    """
+    Run backtest for a list of symbols (e.g. today's BUY signals) and return
+    combined portfolio stats + per-symbol breakdown.
+    Body: { symbols: ["TOMO","MEGA",...] }
+    """
+    import asyncio
+    from concurrent.futures import ThreadPoolExecutor
+    import math
+
+    raw_symbols = payload.get("symbols", [])
+    symbols = [str(s).upper().strip() for s in raw_symbols if s][:20]  # cap at 20
+
+    if not symbols:
+        return {"error": "No symbols provided", "results": [], "portfolio": {}}
+
+    def _run(sym: str) -> dict:
+        try:
+            r = run_internal_backtest(sym)
+            r["symbol"] = sym
+            return r
+        except Exception as e:
+            return {"symbol": sym, "error": str(e), "trades": [], "equity": [], "summary": {}}
+
+    loop = asyncio.get_event_loop()
+    with ThreadPoolExecutor(max_workers=min(len(symbols), 8)) as ex:
+        futures = [loop.run_in_executor(ex, _run, sym) for sym in symbols]
+        results = await asyncio.gather(*futures)
+
+    # ── Merge all trades into a portfolio view ───────────────────────────────
+    all_trades = []
+    for r in results:
+        for t in (r.get("trades") or []):
+            all_trades.append({**t, "symbol": r["symbol"]})
+
+    # Sort chronologically
+    all_trades.sort(key=lambda t: t.get("date", ""))
+
+    # Portfolio equity: compound across all trades in time order
+    equity = 100.0
+    equity_curve = []
+    wins_1d = losses_1d = 0
+    sum_ret_1d = sum_ret_3d = sum_ret_5d = 0.0
+    peak = 100.0
+    max_dd = 0.0
+    ret_list = []
+
+    # Build daily equity curve
+    dates_seen: dict = {}
+    for t in all_trades:
+        d = t.get("date", "")
+        r1 = t.get("ret_1d", 0) or 0
+        r3 = t.get("ret_3d", 0) or 0
+        r5 = t.get("ret_5d", 0) or 0
+        equity *= (1 + r1 / 100)
+        peak = max(peak, equity)
+        dd = (peak - equity) / peak * 100
+        max_dd = max(max_dd, dd)
+        if r1 > 0: wins_1d += 1
+        elif r1 < 0: losses_1d += 1
+        sum_ret_1d += r1
+        sum_ret_3d += r3
+        sum_ret_5d += r5
+        ret_list.append(r1)
+        equity_curve.append({
+            "date": d, "symbol": t["symbol"],
+            "equity": round(equity, 2),
+            "ret_1d": round(r1, 2),
+            "signal": t.get("signal", ""),
+        })
+
+    n = len(all_trades)
+    avg_ret_1d = round(sum_ret_1d / n, 2) if n else None
+    avg_ret_3d = round(sum_ret_3d / n, 2) if n else None
+    avg_ret_5d = round(sum_ret_5d / n, 2) if n else None
+    total_trades_with_ret = wins_1d + losses_1d
+    win_rate = round(wins_1d / total_trades_with_ret * 100, 1) if total_trades_with_ret else None
+    total_return = round(equity - 100, 2) if n else None
+
+    # Sharpe proxy
+    if len(ret_list) > 1:
+        mean_r = sum(ret_list) / len(ret_list)
+        var_r  = sum((x - mean_r) ** 2 for x in ret_list) / len(ret_list)
+        std_r  = math.sqrt(var_r)
+        sharpe = round(mean_r / std_r * math.sqrt(252), 2) if std_r > 0 else None
+    else:
+        sharpe = None
+
+    # Per-symbol summary
+    per_symbol = []
+    for r in results:
+        s = r.get("summary") or {}
+        per_symbol.append({
+            "symbol":       r["symbol"],
+            "total_trades": s.get("total_trades", 0),
+            "win_rate_1d":  s.get("win_rate_1d"),
+            "avg_ret_1d":   s.get("avg_ret_1d"),
+            "avg_ret_3d":   s.get("avg_ret_3d"),
+            "avg_ret_5d":   s.get("avg_ret_5d"),
+            "total_return": s.get("total_return"),
+            "max_drawdown": s.get("max_drawdown"),
+            "error":        r.get("error"),
+        })
+
+    return {
+        "symbols":  symbols,
+        "results":  per_symbol,
+        "trades":   all_trades[-30:],   # last 30 trades for display
+        "equity":   equity_curve,
+        "portfolio": {
+            "total_trades":  n,
+            "wins_1d":       wins_1d,
+            "losses_1d":     losses_1d,
+            "win_rate_1d":   win_rate,
+            "avg_ret_1d":    avg_ret_1d,
+            "avg_ret_3d":    avg_ret_3d,
+            "avg_ret_5d":    avg_ret_5d,
+            "total_return":  total_return,
+            "max_drawdown":  round(max_dd, 2),
+            "sharpe_proxy":  sharpe,
+        },
+    }
+
+
 # ── On-Chain Intelligence ────────────────────────────────────────────────────
 
 @app.get("/onchain/{symbol}")

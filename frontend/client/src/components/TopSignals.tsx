@@ -13,7 +13,8 @@ interface Signal {
   rsi: number; adx: number; rel_vol?: number;
 }
 
-interface Props { onSelect: (symbol: string) => void; interval?: string; listMode?: boolean; }
+interface BuySignal { symbol: string; score: number; change: number; }
+interface Props { onSelect: (symbol: string) => void; interval?: string; listMode?: boolean; onBuySignalsChange?: (signals: BuySignal[]) => void; }
 
 function scoreColor(score: number, max: number): string {
   if (score === 0) return "#4a5470";
@@ -35,7 +36,7 @@ const TH: React.CSSProperties = {
 type FilterTab = "buy" | "wait" | "all";
 type SortCol   = "score" | "change" | "rsi";
 
-export function TopSignals({ onSelect, interval = "1h" }: Props) {
+export function TopSignals({ onSelect, interval = "1h", onBuySignalsChange }: Props) {
   const [signals,  setSignals]  = useState<Signal[]>([]);
   const [loading,  setLoading]  = useState(false);
   const [lastScan, setLastScan] = useState<string>("");
@@ -99,6 +100,13 @@ export function TopSignals({ onSelect, interval = "1h" }: Props) {
         setUniverse(data.universe ?? all.length);
         setLastScan(new Date().toLocaleTimeString());
         setError(null);
+        if (onBuySignalsChange) {
+          const buyList = all
+            .filter(s => s.score >= BUY_THRESHOLD)
+            .sort((a, b) => b.score - a.score)
+            .map(s => ({ symbol: s.symbol, score: s.score, change: s.change }));
+          onBuySignalsChange(buyList);
+        }
       }
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);

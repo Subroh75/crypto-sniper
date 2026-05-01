@@ -30,6 +30,7 @@ import { ScanAlertPoller } from "@/components/ScanAlertPoller";
 import { BacktestInternalCard } from "@/components/BacktestInternalCard";
 import { ScorePerformanceCard } from "@/components/ScorePerformanceCard";
 import { DipBacktestCard } from "@/components/DipBacktestCard";
+import { ScanBacktestCard } from "@/components/ScanBacktestCard";
 import { AuthModal, AuthButton } from "@/components/AuthModal";
 import { PWAInstallBanner } from "@/components/PWAInstallBanner";
 import {
@@ -243,6 +244,7 @@ export default function Home() {
   const [alertDirection, setAlertDirection] = useState<"above"|"below">("above");
   const [alertMsg,     setAlertMsg]     = useState("");
   const [authOpen,     setAuthOpen]     = useState(false);
+  const [buySignals,   setBuySignals]   = useState<{ symbol: string; score: number; change: number }[]>([]);
 
   // Auth
   const auth = useAuth();
@@ -1028,6 +1030,12 @@ export default function Home() {
               {/* 16: Dip Scanner Backtest — recovery after dip by score band */}
               <DipBacktestCard />
 
+              {/* 17: Scan → Backtest — portfolio backtest of today's BUY signals */}
+              <ScanBacktestCard
+                buySignals={buySignals}
+                onSelectSymbol={(sym) => { runAnalysis(sym); if (isMobile) setMobileTab("analyse"); }}
+              />
+
             </div>
             {/*  end LEFT column  */}
 
@@ -1036,7 +1044,12 @@ export default function Home() {
               {/* Signals group */}
               <div className={isMobile && mobileTab !== "signals" ? "hidden" : ""}>
                 <CSOVerdict sig={sig} kron={kronosHk.data} fearGreed={sig?.fear_greed} />
-                <TopSignals onSelect={(sym) => { runAnalysis(sym); if(isMobile) setMobileTab("analyse"); }} interval={interval} listMode={isMobile} />
+                <TopSignals
+                  onSelect={(sym) => { runAnalysis(sym); if(isMobile) setMobileTab("analyse"); }}
+                  interval={interval}
+                  listMode={isMobile}
+                  onBuySignalsChange={setBuySignals}
+                />
                 {isMobile && <SignalStreakHeatmap />}
                 <TradeSetupCard setup={sig?.trade_setup ?? null} close={sig?.quote?.price ?? 0} />
                 <ConvictionMeter conviction={sig.conviction} />
