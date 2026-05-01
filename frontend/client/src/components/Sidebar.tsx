@@ -1719,9 +1719,9 @@ const API_BASE_URL =
 
 // Source display names & descriptions
 const SOURCE_META: Record<string, { label: string; desc: string }> = {
-  coingecko:     { label: "CoinGecko",      desc: "OHLCV, market data"        },
+  binance:       { label: "Binance",        desc: "OHLCV, universe (primary)"  },
+  coingecko:     { label: "CoinGecko",      desc: "Trending, market data"      },
   twelve_data:   { label: "Twelve Data",    desc: "RSI, MACD, EMA, ADX"       },
-  coincap:       { label: "CoinCap",        desc: "Live price fallback"        },
   mempool:       { label: "Mempool",        desc: "BTC on-chain fees"          },
   marketaux:     { label: "MarketAux",      desc: "News sentiment"             },
   finnhub:       { label: "Finnhub",        desc: "OHLCV fallback"             },
@@ -1731,15 +1731,17 @@ const SOURCE_META: Record<string, { label: string; desc: string }> = {
 };
 
 const SOURCE_ORDER = [
-  "coingecko","twelve_data","coincap","mempool",
+  "binance","coingecko","twelve_data","mempool",
   "finnhub","cryptocompare","santiment","coindar","marketaux",
 ];
 
 function StatusDot({ status }: { status: string }) {
   const color =
-    status === "ok"     ? "#22c55e" :
-    status === "no_key" ? "#f59e0b" :
-                          "#ef4444";
+    status === "ok"           ? "#22c55e" :
+    status === "no_key"       ? "#f59e0b" :
+    status === "rate_limited" ? "#f59e0b" :
+    status === "deprecated"   ? "#475569" :
+                                "#ef4444";
   const pulse = status === "ok";
   return (
     <span style={{ position: "relative", display: "inline-flex", alignItems: "center", justifyContent: "center", width: 10, height: 10, flexShrink: 0 }}>
@@ -1757,9 +1759,11 @@ function StatusDot({ status }: { status: string }) {
 
 function StatusBadge({ status }: { status: string }) {
   const [label, color] =
-    status === "ok"     ? ["OK",     "#22c55e"] :
-    status === "no_key" ? ["NO KEY", "#f59e0b"] :
-                          ["ERROR",  "#ef4444"];
+    status === "ok"           ? ["OK",           "#22c55e"] :
+    status === "no_key"       ? ["NO KEY",       "#f59e0b"] :
+    status === "rate_limited" ? ["RATE LIMITED", "#f59e0b"] :
+    status === "deprecated"   ? ["DEPRECATED",   "#475569"] :
+                                ["ERROR",        "#ef4444"];
   return (
     <span style={{
       fontSize: 8, fontWeight: 800, fontFamily: "monospace",
@@ -1840,7 +1844,8 @@ export function APIStatusCard() {
 
   const sources = health?.sources ?? {};
   const okCount  = Object.values(sources).filter(s => s === "ok").length;
-  const allCount = Object.keys(sources).length;
+  // Exclude deprecated sources from the denominator — they're intentionally removed
+  const allCount = Object.values(sources).filter(s => s !== "deprecated").length;
   const overallOk = !error && health?.status === "ok";
 
   return (

@@ -1381,9 +1381,20 @@ def health_check() -> dict:
     """Check all data sources are reachable."""
     results = {}
 
-    # CoinGecko ping
-    cg = _cg_headers_requests(f"{CG_BASE}/ping", {})
-    results["coingecko"] = "ok" if cg and "gecko_says" in cg else "error"
+    # CoinGecko ping — may 429 on Render (rate-limited IP), not a real outage
+    try:
+        import requests as _req
+        _cg_r = _req.get(f"{CG_BASE}/ping",
+                          params={"x_cg_demo_api_key": CG_KEY} if CG_KEY else {},
+                          headers={"accept": "application/json"}, timeout=8)
+        if _cg_r.status_code == 429:
+            results["coingecko"] = "rate_limited"
+        elif _cg_r.ok and "gecko_says" in _cg_r.json():
+            results["coingecko"] = "ok"
+        else:
+            results["coingecko"] = "error"
+    except Exception:
+        results["coingecko"] = "error"
 
     # Twelve Data ping
     if TD_KEY:
@@ -1392,9 +1403,16 @@ def health_check() -> dict:
     else:
         results["twelve_data"] = "no_key"
 
-    # CoinCap ping
-    cap = _get(f"{CAP_BASE}/assets/bitcoin")
-    results["coincap"] = "ok" if cap and "data" in cap else "error"
+    # CoinCap v2 is shut down (api.coincap.io dead, v3 requires paid key)
+    # Mark as deprecated — Binance handles all fallbacks now
+    results["coincap"] = "deprecated"
+
+    # Binance ping — primary data source
+    try:
+        bnc_ping = _get(f"{BNC_BASE}/ping", {})
+        results["binance"] = "ok" if bnc_ping is not None else "error"
+    except Exception:
+        results["binance"] = "error"
 
     # Mempool ping
     mp = _get(f"{MPOOL}/fees/recommended")
