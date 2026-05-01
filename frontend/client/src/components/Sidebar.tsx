@@ -1709,3 +1709,324 @@ export function DipScannerCard({ interval = "1h", onSelect }: { interval?: strin
     </SideCard>
   );
 }
+
+
+// ── APIStatusCard — live health + data-source status panel ───────────────────
+
+const API_BASE_URL =
+  (import.meta as Record<string, unknown> & { env?: Record<string, string> })
+    .env?.VITE_API_BASE ?? "https://crypto-sniper.onrender.com";
+
+// Source display names & descriptions
+const SOURCE_META: Record<string, { label: string; desc: string }> = {
+  coingecko:     { label: "CoinGecko",      desc: "OHLCV, market data"        },
+  twelve_data:   { label: "Twelve Data",    desc: "RSI, MACD, EMA, ADX"       },
+  coincap:       { label: "CoinCap",        desc: "Live price fallback"        },
+  mempool:       { label: "Mempool",        desc: "BTC on-chain fees"          },
+  marketaux:     { label: "MarketAux",      desc: "News sentiment"             },
+  finnhub:       { label: "Finnhub",        desc: "OHLCV fallback"             },
+  cryptocompare: { label: "CryptoCompare",  desc: "Social momentum (Tier 2)"   },
+  coindar:       { label: "Coindar",        desc: "Crypto events calendar"     },
+  santiment:     { label: "Santiment",      desc: "Social / dev / on-chain"    },
+};
+
+const SOURCE_ORDER = [
+  "coingecko","twelve_data","coincap","mempool",
+  "finnhub","cryptocompare","santiment","coindar","marketaux",
+];
+
+function StatusDot({ status }: { status: string }) {
+  const color =
+    status === "ok"     ? "#22c55e" :
+    status === "no_key" ? "#f59e0b" :
+                          "#ef4444";
+  const pulse = status === "ok";
+  return (
+    <span style={{ position: "relative", display: "inline-flex", alignItems: "center", justifyContent: "center", width: 10, height: 10, flexShrink: 0 }}>
+      {pulse && (
+        <span style={{
+          position: "absolute", inset: 0, borderRadius: "50%",
+          background: color, opacity: 0.35,
+          animation: "ping 1.6s cubic-bezier(0,0,0.2,1) infinite",
+        }} />
+      )}
+      <span style={{ width: 7, height: 7, borderRadius: "50%", background: color, flexShrink: 0 }} />
+    </span>
+  );
+}
+
+function StatusBadge({ status }: { status: string }) {
+  const [label, color] =
+    status === "ok"     ? ["OK",     "#22c55e"] :
+    status === "no_key" ? ["NO KEY", "#f59e0b"] :
+                          ["ERROR",  "#ef4444"];
+  return (
+    <span style={{
+      fontSize: 8, fontWeight: 800, fontFamily: "monospace",
+      letterSpacing: "0.08em", padding: "1px 5px", borderRadius: 4,
+      background: color + "18", color, border: `1px solid ${color}44`,
+    }}>
+      {label}
+    </span>
+  );
+}
+
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  function copy() {
+    navigator.clipboard?.writeText(text).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1800);
+    });
+  }
+  return (
+    <button
+      onClick={copy}
+      title="Copy API URL"
+      style={{
+        background: copied ? "#22c55e18" : "#7c3aed0d",
+        border: `1px solid ${copied ? "#22c55e44" : "#7c3aed33"}`,
+        borderRadius: 6, padding: "2px 7px", cursor: "pointer",
+        fontSize: 9, fontWeight: 700, fontFamily: "monospace",
+        color: copied ? "#22c55e" : "#a78bfa", transition: "all 0.2s",
+        flexShrink: 0,
+      }}
+    >
+      {copied ? "COPIED" : "COPY"}
+    </button>
+  );
+}
+
+export function APIStatusCard() {
+  const [health, setHealth]     = useState<{ status: string; version: string; latency_ms: number; sources: Record<string, string> } | null>(null);
+  const [loading, setLoading]   = useState(false);
+  const [error, setError]       = useState<string | null>(null);
+  const [checkedAt, setCheckedAt] = useState<Date | null>(null);
+  const [collapsed, setCollapsed] = useState(false);
+
+  const fetchHealth = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const r = await fetch(`${API_BASE_URL}/health`, { cache: "no-store" });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const data = await r.json();
+      setHealth(data);
+      setCheckedAt(new Date());
+    } catch (e: unknown) {
+      setError((e as Error).message ?? "Unreachable");
+      setHealth(null);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  // Auto-fetch on mount
+  useEffect(() => { fetchHealth(); }, [fetchHealth]);
+
+  // Auto-refresh every 5 minutes
+  useEffect(() => {
+    const id = setInterval(fetchHealth, 5 * 60 * 1000);
+    return () => clearInterval(id);
+  }, [fetchHealth]);
+
+  // Format checked-at as relative time
+  function fmtAge(d: Date): string {
+    const secs = Math.floor((Date.now() - d.getTime()) / 1000);
+    if (secs < 60) return `${secs}s ago`;
+    if (secs < 3600) return `${Math.floor(secs / 60)}m ago`;
+    return `${Math.floor(secs / 3600)}h ago`;
+  }
+
+  const sources = health?.sources ?? {};
+  const okCount  = Object.values(sources).filter(s => s === "ok").length;
+  const allCount = Object.keys(sources).length;
+  const overallOk = !error && health?.status === "ok";
+
+  return (
+    <SideCard>
+      {/* Header */}
+      <div style={{
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+        padding: "10px 14px", borderBottom: collapsed ? "none" : "1px solid rgba(30,41,59,0.7)",
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+          <StatusDot status={error ? "error" : health ? "ok" : "no_key"} />
+          <span style={{ fontSize: 10, fontWeight: 800, fontFamily: "monospace", letterSpacing: "0.1em", textTransform: "uppercase", color: "#94a3b8" }}>
+            API Status
+          </span>
+          {health && !error && (
+            <span style={{ fontSize: 8, fontWeight: 700, fontFamily: "monospace", padding: "1px 6px", borderRadius: 4, background: "#22c55e14", color: "#22c55e", border: "1px solid #22c55e33" }}>
+              {okCount}/{allCount} OK
+            </span>
+          )}
+          {error && (
+            <span style={{ fontSize: 8, fontWeight: 700, fontFamily: "monospace", padding: "1px 6px", borderRadius: 4, background: "#ef444414", color: "#ef4444", border: "1px solid #ef444433" }}>
+              UNREACHABLE
+            </span>
+          )}
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          {checkedAt && (
+            <span style={{ fontSize: 8, fontFamily: "monospace", color: "#334155" }}>
+              {fmtAge(checkedAt)}
+            </span>
+          )}
+          <button
+            onClick={fetchHealth}
+            disabled={loading}
+            title="Refresh"
+            style={{
+              background: "transparent", border: "1px solid #1e293b", borderRadius: 6,
+              padding: "3px 7px", cursor: loading ? "not-allowed" : "pointer",
+              fontSize: 10, color: loading ? "#334155" : "#64748b",
+              transition: "all 0.2s", opacity: loading ? 0.5 : 1,
+            }}
+          >
+            {loading ? "…" : "↺"}
+          </button>
+          <button
+            onClick={() => setCollapsed(c => !c)}
+            style={{ background: "transparent", border: "none", cursor: "pointer", color: "#334155", fontSize: 12, padding: "2px 4px" }}
+          >
+            {collapsed ? "▾" : "▴"}
+          </button>
+        </div>
+      </div>
+
+      {!collapsed && (
+        <div style={{ padding: "12px 14px" }}>
+
+          {/* API endpoint row */}
+          <div style={{
+            display: "flex", alignItems: "center", justifyContent: "space-between",
+            background: "#060912", border: "1px solid #1e293b", borderRadius: 8,
+            padding: "8px 10px", marginBottom: 10, gap: 8,
+          }}>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 8, fontWeight: 700, fontFamily: "monospace", letterSpacing: "0.1em", color: "#475569", textTransform: "uppercase", marginBottom: 2 }}>
+                API Endpoint
+              </div>
+              <div style={{ fontSize: 10, fontFamily: "monospace", color: "#7c3aed", wordBreak: "break-all", fontWeight: 600 }}>
+                {API_BASE_URL}
+              </div>
+            </div>
+            <CopyButton text={API_BASE_URL} />
+          </div>
+
+          {/* Latency + version row */}
+          {health && (
+            <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+              <div style={{
+                flex: 1, background: "#060912", border: "1px solid #1e293b",
+                borderRadius: 8, padding: "7px 10px", textAlign: "center",
+              }}>
+                <div style={{ fontSize: 8, fontFamily: "monospace", color: "#475569", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 2 }}>Latency</div>
+                <div style={{ fontSize: 14, fontFamily: "monospace", fontWeight: 800, color: health.latency_ms < 500 ? "#22c55e" : health.latency_ms < 1500 ? "#f59e0b" : "#ef4444" }}>
+                  {health.latency_ms}ms
+                </div>
+              </div>
+              <div style={{
+                flex: 1, background: "#060912", border: "1px solid #1e293b",
+                borderRadius: 8, padding: "7px 10px", textAlign: "center",
+              }}>
+                <div style={{ fontSize: 8, fontFamily: "monospace", color: "#475569", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 2 }}>Version</div>
+                <div style={{ fontSize: 14, fontFamily: "monospace", fontWeight: 800, color: "#a78bfa" }}>
+                  v{health.version}
+                </div>
+              </div>
+              <div style={{
+                flex: 1, background: "#060912", border: "1px solid #1e293b",
+                borderRadius: 8, padding: "7px 10px", textAlign: "center",
+              }}>
+                <div style={{ fontSize: 8, fontFamily: "monospace", color: "#475569", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 2 }}>Status</div>
+                <div style={{ fontSize: 11, fontFamily: "monospace", fontWeight: 800, color: overallOk ? "#22c55e" : "#ef4444" }}>
+                  {overallOk ? "LIVE" : "DOWN"}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Error state */}
+          {error && (
+            <div style={{
+              background: "#ef444410", border: "1px solid #ef444430",
+              borderRadius: 8, padding: "10px 12px", marginBottom: 10, textAlign: "center",
+            }}>
+              <div style={{ fontSize: 10, fontWeight: 700, fontFamily: "monospace", color: "#ef4444", marginBottom: 3 }}>
+                API Unreachable
+              </div>
+              <div style={{ fontSize: 9, fontFamily: "monospace", color: "#7f1d1d" }}>
+                {error}
+              </div>
+              <div style={{ fontSize: 8, fontFamily: "monospace", color: "#7f1d1d", marginTop: 4 }}>
+                Render may be cold-starting — try again in ~30s
+              </div>
+            </div>
+          )}
+
+          {/* Data sources list */}
+          {allCount > 0 && (
+            <div>
+              <div style={{ fontSize: 8, fontWeight: 700, fontFamily: "monospace", letterSpacing: "0.1em", color: "#334155", textTransform: "uppercase", marginBottom: 6 }}>
+                Data Sources
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
+                {SOURCE_ORDER.filter(k => k in sources || Object.keys(sources).includes(k)).map(key => {
+                  const status = sources[key];
+                  if (!status) return null;
+                  const meta = SOURCE_META[key] ?? { label: key, desc: "" };
+                  return (
+                    <div
+                      key={key}
+                      style={{
+                        display: "flex", alignItems: "center", justifyContent: "space-between",
+                        padding: "5px 8px", borderRadius: 6,
+                        background: status === "ok" ? "#22c55e06" : status === "no_key" ? "#f59e0b06" : "#ef444406",
+                        border: `1px solid ${status === "ok" ? "#22c55e15" : status === "no_key" ? "#f59e0b15" : "#ef444415"}`,
+                      }}
+                    >
+                      <div style={{ display: "flex", alignItems: "center", gap: 7, minWidth: 0 }}>
+                        <StatusDot status={status} />
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontSize: 10, fontWeight: 700, fontFamily: "monospace", color: "#cbd5e1", lineHeight: 1 }}>
+                            {meta.label}
+                          </div>
+                          <div style={{ fontSize: 8, fontFamily: "monospace", color: "#475569", marginTop: 1 }}>
+                            {meta.desc}
+                          </div>
+                        </div>
+                      </div>
+                      <StatusBadge status={status} />
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Footer link */}
+          <div style={{ marginTop: 10, paddingTop: 8, borderTop: "1px solid #0f172a", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <a
+              href={`${API_BASE_URL}/docs`}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ fontSize: 9, fontFamily: "monospace", color: "#7c3aed", textDecoration: "none", fontWeight: 600 }}
+            >
+              API Docs ↗
+            </a>
+            <a
+              href={`${API_BASE_URL}/health`}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ fontSize: 9, fontFamily: "monospace", color: "#334155", textDecoration: "none" }}
+            >
+              /health ↗
+            </a>
+          </div>
+
+        </div>
+      )}
+    </SideCard>
+  );
+}

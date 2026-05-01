@@ -12,7 +12,7 @@ import { PriceChart } from "@/components/PriceChart";
 import {
   TradeSetupCard, ConvictionMeter, KeyLevelsCard,
   WatchlistCard, SubscribeCard, ExportCard, BasketScanner,
-  ScannerCumulativeCard, DipScannerCard,
+  ScannerCumulativeCard, DipScannerCard, APIStatusCard,
 } from "@/components/Sidebar";
 import { TopSignals } from "@/components/TopSignals";
 import { CSOVerdict } from "@/components/CSOVerdict";
@@ -431,8 +431,17 @@ export default function Home() {
       <div className="max-w-[1380px] mx-auto px-3 md:px-4 pb-tab-bar md:pb-20">
 
         {!sig && !loading && (
-          <div className="text-center py-10 text-text-muted text-[13px] font-mono">
-            Enter a coin symbol above to analyse
+          <div
+            className={isMobile ? "flex flex-col gap-3" : "grid gap-3"}
+            style={isMobile ? undefined : { gridTemplateColumns: "1fr 320px" }}
+          >
+            <div className="text-center py-10 text-text-muted text-[13px] font-mono">
+              Enter a coin symbol above to analyse
+            </div>
+            {/* API Status always visible in empty state on desktop / Tools tab on mobile */}
+            <div className={isMobile && mobileTab !== "sidebar" ? "hidden" : ""}>
+              <APIStatusCard />
+            </div>
           </div>
         )}
 
@@ -1019,6 +1028,10 @@ export default function Home() {
 
             {/* RIGHT SIDEBAR */}
             <div>
+              {/* API Status — always visible, top of sidebar */}
+              <div className={isMobile && mobileTab !== "sidebar" ? "hidden" : ""}>
+                <APIStatusCard />
+              </div>
               {/* Signals group */}
               <div className={isMobile && mobileTab !== "signals" ? "hidden" : ""}>
                 <CSOVerdict sig={sig} kron={kronosHk.data} fearGreed={sig?.fear_greed} />
