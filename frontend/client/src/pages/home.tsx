@@ -21,15 +21,12 @@ import {
 } from "@/components/BottomSections";
 import { DeepResearchSection } from "@/components/DeepResearch";
 import { MultiTimeframeCard } from "@/components/MultiTimeframe";
-import { BacktestCard } from "@/components/BacktestCard";
 import { OnChainCard } from "@/components/OnChainCard";
 import { SignalStreakHeatmap } from "@/components/SignalStreakHeatmap";
 import { PriceAlertCard, subscribeAlertBadge, markAlertsRead } from "@/components/PriceAlertCard";
 import type { AlertHistoryEntry } from "@/components/PriceAlertCard";
 import { ScanAlertPoller } from "@/components/ScanAlertPoller";
-import { BacktestInternalCard } from "@/components/BacktestInternalCard";
 import { ScorePerformanceCard } from "@/components/ScorePerformanceCard";
-import { DipBacktestCard } from "@/components/DipBacktestCard";
 import { ScanBacktestCard } from "@/components/ScanBacktestCard";
 import { VolumeSurgeCard } from "@/components/VolumeSurgeCard";
 import { AuthModal, AuthButton } from "@/components/AuthModal";
@@ -1018,23 +1015,14 @@ export default function Home() {
                 </Card>
               )}
 
-              {/* 11: Backtest */}
-              <BacktestCard symbol={symbol} />
-
               {/* 12: Multi-Timeframe Confluence */}
               <MultiTimeframeCard symbol={symbol} />
 
               {/* 13: On-Chain Intelligence */}
               <OnChainCard symbol={symbol} />
 
-              {/* 14: Internal Signal Backtest */}
-              <BacktestInternalCard symbol={symbol} />
-
               {/* 15: Score → Performance (scan-based backtest by score band) */}
               <ScorePerformanceCard />
-
-              {/* 16: Dip Scanner Backtest — recovery after dip by score band */}
-              <DipBacktestCard />
 
               {/* 17: Scan → Backtest — portfolio backtest of today's BUY signals */}
               <ScanBacktestCard
