@@ -14,6 +14,7 @@ from data import (
     get_news, get_macro, get_watchlist_scores, get_fear_greed, get_crypto_panic, health_check,
     get_social_delta, get_coinpaprika_meta,
     get_coindar_events, get_santiment_signals,
+    get_binance_universe,
 )
 from signals import calculate_signals, get_key_levels
 from agents import run_agent_council
@@ -227,77 +228,55 @@ async def macro():
 def scan_top_signals(
     interval: str = Query("1h", description="Candle interval e.g. 1h 4h 1d"),
     min_score: int = Query(9, ge=1, le=16),
+    max_coins: int = Query(500, ge=50, le=500, description="Universe size (default 500)"),
+    min_volume: float = Query(1_000_000, description="Min 24h volume USD to include"),
 ):
     """
-    Scan top 200 coins by market cap, score each, return those >= min_score.
-    Universe: CoinGecko top-200 by market cap (symbols intersected with Binance USDT pairs).
-    Cached 5 minutes.
+    Scan the full Binance USDT universe (~400 coins), score each, return those >= min_score.
+
+    Universe strategy (no CoinGecko dependency):
+      1. All active Binance USDT pairs with 24h volume >= min_volume
+      2. Sorted by 24h volume (most liquid first)
+      3. Trending coins boosted to front (narrative momentum)
+      4. Stablecoins / wrapped tokens excluded automatically
+
+    This covers ~2x more coins than the old CoinGecko top-200 and is
+    faster (1 Binance call vs 2 paginated CoinGecko calls).
     """
-    import time, requests as _req
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
     interval = interval.lower()
     now = int(time.time())
-    cache_key = f"{interval}:{min_score}"
+    cache_key = f"{interval}:{min_score}:{max_coins}:{int(min_volume)}"
     if _scan_cache.get("key") == cache_key and now - _scan_cache.get("ts", 0) < _SCAN_TTL:
-        return {"signals": _scan_cache["data"], "cached": True, "timestamp": _scan_cache["ts"]}
+        return {
+            "signals":  _scan_cache["data"],
+            "cached":   True,
+            "universe": _scan_cache.get("universe", 0),
+            "timestamp": _scan_cache["ts"],
+        }
 
-    # ── Step 1: Get top-200 symbols by market cap from CoinGecko ──────────────
-    top200_syms: list[str] = []
-    try:
-        for page in range(1, 3):
-            cg = _req.get(
-                "https://api.coingecko.com/api/v3/coins/markets"
-                "?vs_currency=usd&order=market_cap_desc"
-                f"&per_page=100&page={page}&sparkline=false",
-                timeout=12,
-            )
-            if cg.status_code == 200:
-                for coin in cg.json():
-                    sym = coin.get("symbol", "").upper().strip()
-                    if sym and sym not in top200_syms:
-                        top200_syms.append(sym)
-            time.sleep(0.3)
-    except Exception:
-        pass  # fall back to Binance volume ordering if CoinGecko fails
-
-    # ── Step 2: Get Binance 24h tickers for price/volume data ─────────────────
-    try:
-        resp = _req.get("https://api.binance.com/api/v3/ticker/24hr", timeout=10)
-        tickers = resp.json()
-    except Exception:
+    # ── Step 1: Get full Binance universe ──────────────────────────────────────────
+    universe = get_binance_universe(min_volume_usd=min_volume, max_coins=max_coins)
+    if not universe:
         return {"signals": [], "error": "Binance unavailable", "timestamp": now}
 
-    # Build symbol→ticker map from all USDT pairs with meaningful volume
-    ticker_map: dict[str, dict] = {}
-    for t in tickers:
-        s = t.get("symbol", "")
-        if s.endswith("USDT") and float(t.get("quoteVolume", 0)) > 500_000:
-            sym = s.replace("USDT", "")
-            ticker_map[sym] = t
+    universe_size = len(universe)
+    logger.info(f"/scan: universe={universe_size} coins, interval={interval}, min_score={min_score}")
 
-    # ── Step 3: Build scan list — top-200 market cap ∩ Binance USDT pairs ─────
-    if top200_syms:
-        # Preserve market-cap order, only include symbols tradeable on Binance
-        scan_list = [ticker_map[s] for s in top200_syms if s in ticker_map]
-    else:
-        # CoinGecko unavailable — fall back to top-100 by Binance volume
-        all_usdt = list(ticker_map.values())
-        all_usdt.sort(key=lambda t: float(t.get("quoteVolume", 0)), reverse=True)
-        scan_list = all_usdt[:100]
-
-    def score_coin(ticker):
-        sym = ticker["symbol"].replace("USDT", "")
+    # ── Step 2: Score every coin in parallel ───────────────────────────────────
+    def score_coin(coin: dict):
+        sym = coin["symbol"]
         try:
             ohlcv = get_ohlcv(sym, interval)
             if not ohlcv or len(ohlcv) < 10:
                 return None
             quote = {
-                "price":      float(ticker["lastPrice"]),
-                "change_24h": float(ticker["priceChangePercent"]),
-                "volume_24h": float(ticker["quoteVolume"]),
-                "high_24h":   float(ticker["highPrice"]),
-                "low_24h":    float(ticker["lowPrice"]),
+                "price":      coin["price"],
+                "change_24h": coin["change_24h"],
+                "volume_24h": coin["volume_24h"],
+                "high_24h":   coin["high_24h"],
+                "low_24h":    coin["low_24h"],
             }
             indicators = get_indicators(sym, interval)
             sig = calculate_signals(ohlcv, quote, indicators)
@@ -307,12 +286,14 @@ def scan_top_signals(
                 "symbol":    sym,
                 "price":     quote["price"],
                 "change":    quote["change_24h"],
+                "volume_24h": quote["volume_24h"],
                 "score":     sig.total,
                 "max_score": 16,
-                "signal":    sig.signal,
+                "signal":    sig.signal_label,
                 "direction": sig.direction,
-                "rsi":       sig.rsi,
-                "adx":       sig.adx,
+                "rsi":       round(sig.rsi, 1),
+                "adx":       round(sig.adx, 1),
+                "rel_vol":   round(sig.rel_volume, 2),
                 "v":         sig.v_score,
                 "p":         sig.p_score,
                 "r":         sig.r_score,
@@ -323,16 +304,23 @@ def scan_top_signals(
             return None
 
     signals = []
-    with ThreadPoolExecutor(max_workers=10) as ex:
-        futures = {ex.submit(score_coin, t): t for t in scan_list}
+    # 16 workers: Binance klines is the bottleneck, each call ~120ms
+    # 500 coins / 16 workers ≈ 32 batches ≈ ~4s total
+    with ThreadPoolExecutor(max_workers=16) as ex:
+        futures = {ex.submit(score_coin, coin): coin for coin in universe}
         for fut in as_completed(futures):
             result = fut.result()
             if result:
                 signals.append(result)
 
-    signals.sort(key=lambda s: s["score"], reverse=True)
-    _scan_cache.update({"key": cache_key, "ts": now, "data": signals})
-    return {"signals": signals, "cached": False, "timestamp": now}
+    signals.sort(key=lambda s: (s["score"], s["volume_24h"]), reverse=True)
+    _scan_cache.update({"key": cache_key, "ts": now, "data": signals, "universe": universe_size})
+    return {
+        "signals":   signals,
+        "cached":    False,
+        "universe":  universe_size,
+        "timestamp": now,
+    }
 
 
 @app.post("/watchlist")
@@ -402,9 +390,10 @@ def dip_scan(
                 "change":    quote["change_24h"],
                 "score":     sig.total,
                 "max_score": 16,
-                "signal":    sig.signal,
-                "rsi":       sig.rsi,
-                "adx":       sig.adx,
+                "signal":    sig.signal_label,
+                "rsi":       round(sig.rsi, 1),
+                "adx":       round(sig.adx, 1),
+                "rel_vol":   round(sig.rel_volume, 2),
             }
         except Exception:
             return None

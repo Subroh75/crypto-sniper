@@ -107,6 +107,91 @@ BNC_SYM = {
 
 DAYS_MAP = {"1m":1,"5m":1,"15m":2,"30m":5,"1H":14,"4H":60,"1D":365}
 
+# ── Binance universe cache ────────────────────────────────────────────────────
+_BNC_UNIVERSE_CACHE: list = []
+_BNC_UNIVERSE_TS: float = 0.0
+_BNC_UNIVERSE_TTL: float = 300.0   # refresh every 5 minutes
+
+# Stablecoins and derivative tokens to exclude from scan universe
+_EXCLUDE_SYMBOLS = {
+    "USDC","USDT","BUSD","DAI","TUSD","USDP","FDUSD","PYUSD","USDD",
+    "FRAX","LUSD","GUSD","CEUR","CUSD","EURS","AGEUR",
+    "WBTC","WETH","WBNB","STETH","CBETH","RETH","FRXETH",
+    "BTTC","BTT","NFT",
+}
+
+def get_binance_universe(
+    min_volume_usd: float = 1_000_000,
+    max_coins: int = 500,
+) -> list[dict]:
+    """
+    Returns the full Binance USDT-pair universe, sorted by 24h quote volume.
+    Each entry: { symbol, price, change_24h, volume_24h, high_24h, low_24h }
+
+    Strategy:
+      1. Fetch all Binance /ticker/24hr USDT pairs (no key, unlimited)
+      2. Filter out stablecoins / wrapped tokens / ultra-low volume
+      3. Sort by 24h quote volume descending
+      4. Boost CoinGecko trending coins to the front (narrative momentum)
+      5. Cache for 5 minutes
+
+    This gives ~350-450 coins vs CoinGecko's 200 cap, with real-time
+    volume-based ordering rather than static market-cap ranking.
+    """
+    global _BNC_UNIVERSE_CACHE, _BNC_UNIVERSE_TS
+    now = time.time()
+    if _BNC_UNIVERSE_CACHE and (now - _BNC_UNIVERSE_TS) < _BNC_UNIVERSE_TTL:
+        return _BNC_UNIVERSE_CACHE
+
+    try:
+        r = requests.get(f"{BNC_BASE}/ticker/24hr", timeout=12)
+        r.raise_for_status()
+        tickers = r.json()
+    except Exception as e:
+        logger.warning(f"Binance universe fetch failed: {e}")
+        return _BNC_UNIVERSE_CACHE  # return stale on error
+
+    coins = []
+    for t in tickers:
+        sym_pair = t.get("symbol", "")
+        if not sym_pair.endswith("USDT"):
+            continue
+        sym = sym_pair[:-4]  # strip USDT
+        if sym in _EXCLUDE_SYMBOLS:
+            continue
+        vol = float(t.get("quoteVolume", 0))
+        if vol < min_volume_usd:
+            continue
+        coins.append({
+            "symbol":     sym,
+            "price":      float(t.get("lastPrice", 0)),
+            "change_24h": float(t.get("priceChangePercent", 0)),
+            "volume_24h": vol,
+            "high_24h":   float(t.get("highPrice", 0)),
+            "low_24h":    float(t.get("lowPrice", 0)),
+            "count":      int(t.get("count", 0)),   # trade count — proxy for activity
+        })
+
+    # Sort by 24h volume descending (most liquid first)
+    coins.sort(key=lambda c: c["volume_24h"], reverse=True)
+
+    # Boost CoinGecko trending coins to front of list (narrative momentum signal)
+    # These are fetched from the existing cached trending function — no extra calls
+    try:
+        trending_syms = {t.get("symbol", "").upper() for t in _trending_cached(int(now // 300))}
+        if trending_syms:
+            front = [c for c in coins if c["symbol"] in trending_syms]
+            rest  = [c for c in coins if c["symbol"] not in trending_syms]
+            coins = front + rest
+    except Exception:
+        pass  # trending boost is best-effort
+
+    result = coins[:max_coins]
+    _BNC_UNIVERSE_CACHE = result
+    _BNC_UNIVERSE_TS    = now
+    logger.info(f"Binance universe: {len(result)} coins (from {len(coins)} USDT pairs)")
+    return result
+
 def get_ohlcv(symbol: str, interval: str = "1H") -> list[list]:
     """
     Returns [[timestamp, open, high, low, close], ...] newest last.
