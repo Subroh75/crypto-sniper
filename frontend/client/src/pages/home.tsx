@@ -21,19 +21,16 @@ import {
 } from "@/components/BottomSections";
 import { DeepResearchSection } from "@/components/DeepResearch";
 import { MultiTimeframeCard } from "@/components/MultiTimeframe";
-import { OnChainCard } from "@/components/OnChainCard";
 import { SignalStreakHeatmap } from "@/components/SignalStreakHeatmap";
 import { PriceAlertCard, subscribeAlertBadge, markAlertsRead } from "@/components/PriceAlertCard";
 import type { AlertHistoryEntry } from "@/components/PriceAlertCard";
 import { ScanAlertPoller } from "@/components/ScanAlertPoller";
-import { ScorePerformanceCard } from "@/components/ScorePerformanceCard";
-import { ScanBacktestCard } from "@/components/ScanBacktestCard";
 import { VolumeSurgeCard } from "@/components/VolumeSurgeCard";
 import { AuthModal, AuthButton } from "@/components/AuthModal";
 import { PWAInstallBanner } from "@/components/PWAInstallBanner";
 import {
   useAnalyse, useKronos, useWatchlist, usePdfExport,
-  useHitRate, useScannerPerformance, useAlerts,
+  useHitRate, useAlerts,
   useEditableWatchlist, useAuth,
 } from "@/hooks/useApi";
 import { fmtPrice, fmtPct } from "@/lib/api";
@@ -242,7 +239,6 @@ export default function Home() {
   const [alertDirection, setAlertDirection] = useState<"above"|"below">("above");
   const [alertMsg,     setAlertMsg]     = useState("");
   const [authOpen,     setAuthOpen]     = useState(false);
-  const [buySignals,   setBuySignals]   = useState<{ symbol: string; score: number; change: number }[]>([]);
 
   // Auth
   const auth = useAuth();
@@ -258,7 +254,6 @@ export default function Home() {
 
   const { exporting, exportPdf } = usePdfExport();
   const hitRate = useHitRate(null, 30);
-  const scanPerf = useScannerPerformance(7);
   const alertsHk = useAlerts(alertEmail || null);
 
   const inputRef = useRef<HTMLInputElement>(null);
@@ -956,79 +951,9 @@ export default function Home() {
               {/* 09: Perplexity Deep Research */}
               <DeepResearchSection symbol={symbol} analyseData={sig} />
 
-              {/* 10: Scanner Performance */}
-              {scanPerf.data && (
-                <Card>
-                  <CardHeader num="10" title="SCANNER PERFORMANCE" badge="HISTORY"
-                    right={
-                      scanPerf.data.summary.win_rate_pct != null ? (
-                        <span className="text-[9px] font-mono font-bold text-teal px-2 py-0.5 rounded bg-teal/5 border border-teal/20">
-                          {scanPerf.data.summary.win_rate_pct}% win rate
-                        </span>
-                      ) : undefined
-                    }
-                  />
-                  <div className="p-4">
-                    {scanPerf.data.picks.length === 0 ? (
-                      <div className="text-center py-6 text-[11px] font-mono text-text-muted/60">
-                        No scanner picks yet — the daily cron will populate this after the first scan.
-                      </div>
-                    ) : (
-                      <>
-                        {/* Summary row */}
-                        {scanPerf.data.summary.avg_return_pct != null && (
-                          <div className="flex gap-4 mb-3 px-1 text-[11px] font-mono">
-                            <span className="text-text-muted/60">Avg return</span>
-                            <span className={scanPerf.data.summary.avg_return_pct >= 0 ? "text-teal font-bold" : "text-red font-bold"}>
-                              {scanPerf.data.summary.avg_return_pct >= 0 ? "+" : ""}{scanPerf.data.summary.avg_return_pct.toFixed(2)}%
-                            </span>
-                            <span className="text-text-muted/60">{scanPerf.data.summary.checked} picks checked</span>
-                          </div>
-                        )}
-                        {/* Table */}
-                        <div className="space-y-1">
-                          {scanPerf.data.picks.slice(0, 10).map((pick, i) => (
-                            <div key={`${pick.symbol}-${pick.scan_date}-${i}`}
-                              className="flex items-center gap-2 py-1.5 border-b border-border/20 last:border-none">
-                              <span className="text-[10px] font-mono text-text-muted/50 w-8">{i + 1}.</span>
-                              <button
-                                onClick={() => runAnalysis(pick.symbol)}
-                                className="text-[11px] font-mono font-bold text-purple hover:text-teal transition-colors w-14"
-                              >{pick.symbol}</button>
-                              <span className="text-[10px] font-mono text-text-muted/60 flex-1">{pick.scan_date}</span>
-                              <span className="text-[10px] font-mono text-teal/80">{pick.score}/16</span>
-                              {pick.outcome_pct != null ? (
-                                <span className={`text-[11px] font-mono font-bold ${
-                                  pick.outcome_pct >= 2 ? "text-teal" : pick.outcome_pct <= -2 ? "text-red" : "text-text-muted"
-                                }`}>
-                                  {pick.outcome_pct >= 0 ? "+" : ""}{pick.outcome_pct.toFixed(2)}%
-                                </span>
-                              ) : (
-                                <span className="text-[10px] font-mono text-text-muted/40">pending</span>
-                              )}
-                            </div>
-                          ))}
-                        </div>
-                      </>
-                    )}
-                  </div>
-                </Card>
-              )}
-
               {/* 12: Multi-Timeframe Confluence */}
               <MultiTimeframeCard symbol={symbol} />
 
-              {/* 13: On-Chain Intelligence */}
-              <OnChainCard symbol={symbol} />
-
-              {/* 15: Score → Performance (scan-based backtest by score band) */}
-              <ScorePerformanceCard />
-
-              {/* 17: Scan → Backtest — portfolio backtest of today's BUY signals */}
-              <ScanBacktestCard
-                buySignals={buySignals}
-                onSelectSymbol={(sym) => { runAnalysis(sym); if (isMobile) setMobileTab("analyse"); }}
-              />
 
             </div>
             {/*  end LEFT column  */}
@@ -1042,7 +967,6 @@ export default function Home() {
                   onSelect={(sym) => { runAnalysis(sym); if(isMobile) setMobileTab("analyse"); }}
                   interval={interval}
                   listMode={isMobile}
-                  onBuySignalsChange={setBuySignals}
                 />
                 {isMobile && <SignalStreakHeatmap />}
                 <TradeSetupCard setup={sig?.trade_setup ?? null} close={sig?.quote?.price ?? 0} />
