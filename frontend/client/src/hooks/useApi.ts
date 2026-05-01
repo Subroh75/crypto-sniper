@@ -465,15 +465,26 @@ export function useConfluence(symbol: string | null, intervals = "1H,4H,1D") {
 }
 
 /** Editable watchlist persisted to backend DB */
+const WATCHLIST_DEFAULTS = ["BTC","ETH","SOL","BNB","XRP","DOGE","AVAX","LINK","PEPE","TAO"];
+
 export function useEditableWatchlist(userId: string) {
   const [symbols, setSymbols] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
+  const seededRef = useRef(false);
 
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
       const res = await getWatchlistItems(userId);
-      setSymbols(res.symbols ?? []);
+      const syms = res.symbols ?? [];
+      // Seed defaults on very first load if watchlist is empty
+      if (syms.length === 0 && !seededRef.current) {
+        seededRef.current = true;
+        await Promise.allSettled(WATCHLIST_DEFAULTS.map(s => addWatchlistItem(userId, s)));
+        setSymbols(WATCHLIST_DEFAULTS);
+      } else {
+        setSymbols(syms);
+      }
     } catch { /* silent */ }
     finally { setLoading(false); }
   }, [userId]);

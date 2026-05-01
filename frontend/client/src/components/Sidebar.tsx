@@ -1047,36 +1047,53 @@ export function BasketScanner({
       change: 0, price: 0, done: false, error: false,
     })));
 
-    await Promise.allSettled(
-      b.symbols.map(async (sym) => {
-        try {
-          const res = await fetch(`${RENDER_BASE}/analyse`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ symbol: sym, interval }),
-            signal: ctrl.signal,
-          });
-          if (!res.ok) throw new Error();
-          const data = await res.json();
-          const score  = data?.signal?.total    ?? 0;
-          const max    = data?.signal?.max      ?? 16;
-          const label  = data?.signal?.label    ?? "—";
-          const change = data?.quote?.change_24h ?? 0;
-          const price  = data?.quote?.price      ?? 0;
+    // Concurrency-limited scan — max 3 parallel to avoid overwhelming Render
+    const CONCURRENCY = 3;
+    const COIN_TIMEOUT_MS = 20_000;
+
+    const scoreCoin = async (sym: string) => {
+      if (ctrl.signal.aborted) return;
+      // Per-coin timeout via race
+      const timeoutCtrl = new AbortController();
+      const timer = setTimeout(() => timeoutCtrl.abort(), COIN_TIMEOUT_MS);
+      // Merge parent abort into timeout ctrl
+      ctrl.signal.addEventListener("abort", () => timeoutCtrl.abort(), { once: true });
+      try {
+        const res = await fetch(`${RENDER_BASE}/analyse`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ symbol: sym, interval }),
+          signal: timeoutCtrl.signal,
+        });
+        if (!res.ok) throw new Error();
+        const data = await res.json();
+        const score  = data?.signal?.total    ?? 0;
+        const max    = data?.signal?.max      ?? 16;
+        const label  = data?.signal?.label    ?? "—";
+        const change = data?.quote?.change_24h ?? 0;
+        const price  = data?.quote?.price      ?? 0;
+        setResults(prev => prev.map(r =>
+          r.symbol === sym
+            ? { ...r, score, max, label, change, price, done: true, error: false }
+            : r
+        ));
+      } catch {
+        if (!ctrl.signal.aborted) {
           setResults(prev => prev.map(r =>
-            r.symbol === sym
-              ? { ...r, score, max, label, change, price, done: true, error: false }
-              : r
+            r.symbol === sym ? { ...r, done: true, error: true } : r
           ));
-        } catch {
-          if (!ctrl.signal.aborted) {
-            setResults(prev => prev.map(r =>
-              r.symbol === sym ? { ...r, done: true, error: true } : r
-            ));
-          }
         }
-      })
-    );
+      } finally {
+        clearTimeout(timer);
+      }
+    };
+
+    // Process in batches of CONCURRENCY
+    const syms = [...b.symbols];
+    for (let i = 0; i < syms.length; i += CONCURRENCY) {
+      if (ctrl.signal.aborted) break;
+      await Promise.allSettled(syms.slice(i, i + CONCURRENCY).map(scoreCoin));
+    }
 
     if (!ctrl.signal.aborted) {
       setScanning(false);
