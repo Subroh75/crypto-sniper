@@ -438,6 +438,8 @@ import {
   requestMagicLink, verifyMagicLink, getMe,
   getOnchain,
   getBacktestInternal,
+  getScorePerformance,
+  type ScorePerformanceData,
 } from "@/lib/api";
 import type {
   BacktestData, ConfluenceData,
@@ -524,6 +526,14 @@ export function useBacktestInternal(symbol: string | null) {
   );
 }
 
+
+export function useScorePerformance(topN = 15) {
+  return useAsync<ScorePerformanceData>(
+    () => getScorePerformance(topN),
+    [topN],
+    true,
+  );
+}
 export function useAuth() {
   const [user, setUser]           = useState<AuthUser | null>(null);
   const [sessionToken, setToken]  = useState<string | null>(() => {

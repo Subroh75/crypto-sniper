@@ -28,6 +28,7 @@ import { PriceAlertCard, subscribeAlertBadge, markAlertsRead } from "@/component
 import type { AlertHistoryEntry } from "@/components/PriceAlertCard";
 import { ScanAlertPoller } from "@/components/ScanAlertPoller";
 import { BacktestInternalCard } from "@/components/BacktestInternalCard";
+import { ScorePerformanceCard } from "@/components/ScorePerformanceCard";
 import { AuthModal, AuthButton } from "@/components/AuthModal";
 import { PWAInstallBanner } from "@/components/PWAInstallBanner";
 import {
@@ -1019,6 +1020,9 @@ export default function Home() {
 
               {/* 14: Internal Signal Backtest */}
               <BacktestInternalCard symbol={symbol} />
+
+              {/* 15: Score → Performance (scan-based backtest by score band) */}
+              <ScorePerformanceCard />
 
             </div>
             {/*  end LEFT column  */}

@@ -239,3 +239,31 @@ export function getOnchain(symbol: string): Promise<import("@/types/api").OnChai
 export function getBacktestInternal(symbol: string): Promise<import("@/types/api").BacktestInternalData> {
   return get(`/backtest-internal/${encodeURIComponent(symbol.toUpperCase())}`, 1);
 }
+
+// ── Score Performance ──────────────────────────────────────────────────────
+export interface ScoreBand {
+  label:    string;
+  color:    string;
+  min:      number;
+  max:      number;
+  n:        number;
+  avg_1d:   number;
+  avg_3d:   number | null;
+  avg_7d:   number | null;
+  win_rate: number;
+  wins:     number;
+  equity:   number;  // compounded $100
+}
+
+export interface ScorePerformanceData {
+  bands:       ScoreBand[];
+  coins_used:  string[];
+  total_bars:  number;
+  timestamp:   number;
+  error?:      string;
+}
+
+export function getScorePerformance(topN = 15): Promise<ScorePerformanceData> {
+  return get(`/score-performance?top_n=${topN}`, 1);
+}
+

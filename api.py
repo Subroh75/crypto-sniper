@@ -553,6 +553,138 @@ async def alert_unread(email: str, since_ts: int = 0):
 
 # ── Backtest ─────────────────────────────────────────────────────────────────
 
+
+@app.get("/score-performance", tags=["Signal"])
+def score_performance(
+    top_n: int = Query(15, ge=5, le=30, description="Number of top green coins to backtest"),
+    interval: str = Query("1h", description="Interval for scan cache lookup"),
+):
+    """
+    Score-band performance report.
+
+    Takes the current top green coins from the /scan cache,
+    runs bar-by-bar backtest on daily data for each,
+    groups all (score → next-day return) pairs by score bucket,
+    and returns avg return + win rate per bucket.
+
+    Buckets: 1-4 (Weak), 5-6 (Moderate), 7-8 (Good), 9-10 (Strong Buy),
+             11-13 (Strong+), 14-16 (Elite)
+    """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    from backtest_internal import get_daily_ohlcv, _score_bar, _hold_return, MIN_BARS_CONTEXT
+
+    # ── Step 1: Get green coins from scan cache ───────────────────────────
+    cache_key = f"1h:1:{500}:{int(1_000_000)}"  # matches default /scan params
+    # Try in-memory first, then SQLite
+    coins: list[str] = []
+    if _scan_cache.get("key", "").startswith("1h:"):
+        coins = [s["symbol"] for s in _scan_cache.get("data", [])[:top_n]]
+    if not coins:
+        db_row = _scan_db_read(cache_key)
+        if db_row:
+            coins = [s["symbol"] for s in db_row["data"][:top_n]]
+
+    # If still nothing, use a small set of majors to give some data
+    if not coins:
+        coins = ["BTC","ETH","SOL","BNB","XRP","ADA","AVAX","LINK","DOGE","DOT"]
+
+    # ── Step 2: Run daily backtest per coin in parallel ───────────────────
+    # Collect all bar-score → next-bar-return pairs
+    all_pairs: list[dict] = []   # {"score": int, "ret_1d": float, "symbol": str}
+
+    def backtest_coin(symbol: str):
+        try:
+            ohlcv = get_daily_ohlcv(symbol)
+            if not ohlcv or len(ohlcv) < MIN_BARS_CONTEXT + 2:
+                return []
+            pairs = []
+            for i in range(MIN_BARS_CONTEXT, len(ohlcv) - 1):
+                sig = _score_bar(ohlcv, i)
+                if sig.total < 1:
+                    continue
+                close_entry = ohlcv[i][4]
+                close_exit  = ohlcv[i + 1][4]
+                if close_entry <= 0:
+                    continue
+                ret_1d = (close_exit - close_entry) / close_entry * 100
+                ret_3d = _hold_return(ohlcv, i, 3)
+                ret_7d = _hold_return(ohlcv, i, 7)
+                pairs.append({
+                    "symbol": symbol,
+                    "score":  sig.total,
+                    "ret_1d": round(ret_1d, 3),
+                    "ret_3d": round(ret_3d, 3) if ret_3d is not None else None,
+                    "ret_7d": round(ret_7d, 3) if ret_7d is not None else None,
+                })
+            return pairs
+        except Exception as e:
+            logger.warning(f"score_performance: backtest_coin {symbol} failed: {e}")
+            return []
+
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        futures = {ex.submit(backtest_coin, sym): sym for sym in coins}
+        for fut in as_completed(futures):
+            all_pairs.extend(fut.result())
+
+    if not all_pairs:
+        return {"bands": [], "coins_used": coins, "total_bars": 0, "error": "No backtest data available"}
+
+    # ── Step 3: Group by score bucket ────────────────────────────────────
+    BANDS = [
+        {"label": "1–4",  "min": 1,  "max": 4,  "color": "#64748b"},
+        {"label": "5–6",  "min": 5,  "max": 6,  "color": "#f59e0b"},
+        {"label": "7–8",  "min": 7,  "max": 8,  "color": "#f59e0b"},
+        {"label": "9–10", "min": 9,  "max": 10, "color": "#22c55e"},
+        {"label": "11–13","min": 11, "max": 13, "color": "#22c55e"},
+        {"label": "14–16","min": 14, "max": 16, "color": "#7c3aed"},
+    ]
+
+    def band_stats(pairs):
+        rets_1d = [p["ret_1d"] for p in pairs if p["ret_1d"] is not None]
+        rets_3d = [p["ret_3d"] for p in pairs if p.get("ret_3d") is not None]
+        rets_7d = [p["ret_7d"] for p in pairs if p.get("ret_7d") is not None]
+        if not rets_1d:
+            return None
+        avg_1d   = round(sum(rets_1d) / len(rets_1d), 2)
+        avg_3d   = round(sum(rets_3d) / len(rets_3d), 2) if rets_3d else None
+        avg_7d   = round(sum(rets_7d) / len(rets_7d), 2) if rets_7d else None
+        wins     = sum(1 for r in rets_1d if r >= 2)
+        win_rate = round(wins / len(rets_1d) * 100, 1)
+        # $100 invested in every bar at this score level (compounded)
+        equity = 100.0
+        for r in rets_1d:
+            equity *= (1 + r / 100)
+        return {
+            "n":        len(rets_1d),
+            "avg_1d":   avg_1d,
+            "avg_3d":   avg_3d,
+            "avg_7d":   avg_7d,
+            "win_rate": win_rate,
+            "wins":     wins,
+            "equity":   round(equity, 2),   # compounded $100 start
+        }
+
+    result_bands = []
+    for band in BANDS:
+        matches = [p for p in all_pairs if band["min"] <= p["score"] <= band["max"]]
+        stats = band_stats(matches)
+        if stats:
+            result_bands.append({
+                "label":    band["label"],
+                "color":    band["color"],
+                "min":      band["min"],
+                "max":      band["max"],
+                **stats,
+            })
+
+    return {
+        "bands":       result_bands,
+        "coins_used":  coins,
+        "total_bars":  len(all_pairs),
+        "timestamp":   int(time.time()),
+    }
+
+
 @app.get("/backtest")
 async def backtest(symbol: Optional[str] = None, days: int = 30):
     """Simple backtest of STRONG BUY signals from history DB."""
