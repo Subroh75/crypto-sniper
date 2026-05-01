@@ -3,14 +3,75 @@ import { useState, useEffect, useCallback, useRef } from "react";
 const API = (import.meta as Record<string, unknown> & { env?: Record<string, string> })
   .env?.VITE_API_BASE ?? "https://crypto-sniper.onrender.com";
 
+// Binance US — no geo-restrictions for browser requests
+const BNC = "https://api.binance.us/api/v3";
+
+// Stablecoins / wrapped tokens to exclude
+const EXCLUDE = new Set([
+  "USDC","USDT","BUSD","DAI","TUSD","USDP","FDUSD","PYUSD","USDD","FRAX","LUSD",
+  "GUSD","EURS","AGEUR","WBTC","WETH","WBNB","STETH","CBETH","RETH","FRXETH","NFT",
+]);
+
 interface Signal {
   symbol: string; score: number; max_score: number; signal: string;
   v: number; p: number; r: number; t: number; s: number;
-  price: number;
-  change: number;
-  change_24h?: number;
-  rsi: number; adx: number;
+  price: number; change: number; change_24h?: number;
+  rsi: number; adx: number; rel_vol?: number;
 }
+
+// Lightweight pre-score from Binance ticker data (no API call to Render)
+// V (0-5): relative volume via trade count proxy
+// P (0-3): 24h price change %
+// R (0-2): position in 24h high/low range
+// Returns pre_score (0-10) — used to rank candidates before deep scoring
+interface Ticker {
+  symbol: string;
+  priceChangePercent: string;
+  lastPrice: string;
+  highPrice: string;
+  lowPrice: string;
+  quoteVolume: string;
+  weightedAvgPrice: string;
+  count: number;
+}
+
+function preScore(t: Ticker): { sym: string; pre: number; v: number; p: number; r: number; chg: number; vol: number; price: number } {
+  const chg  = parseFloat(t.priceChangePercent);
+  const close = parseFloat(t.lastPrice);
+  const high  = parseFloat(t.highPrice);
+  const low   = parseFloat(t.lowPrice);
+  const vol   = parseFloat(t.quoteVolume);
+  const vwap  = parseFloat(t.weightedAvgPrice);
+
+  // V: use quote volume tiers (no baseline, so use absolute $M thresholds)
+  let v = 0;
+  if      (vol >= 500_000_000) v = 5;
+  else if (vol >= 200_000_000) v = 4;
+  else if (vol >= 100_000_000) v = 3;
+  else if (vol >=  50_000_000) v = 2;
+  else if (vol >=  20_000_000) v = 1;
+
+  // P: momentum from 24h change %
+  let p = 0;
+  if      (chg >= 5) p = 3;
+  else if (chg >= 3) p = 2;
+  else if (chg >= 1) p = 1;
+
+  // R: price position in 24h range
+  let r = 0;
+  const range = high - low;
+  if (range > 0) {
+    const pos = (close - low) / range;
+    if      (pos >= 0.75) r = 2;
+    else if (pos >= 0.50) r = 1;
+  }
+
+  // Bonus: price above VWAP (trend proxy, no EMAs available)
+  const aboveVwap = close > vwap ? 1 : 0;
+
+  return { sym: t.symbol.replace("USDT", ""), pre: v + p + r + aboveVwap, v, p, r, chg, vol, price: close };
+}
+
 interface Props { onSelect: (symbol: string) => void; interval?: string; listMode?: boolean; }
 
 const btnStyle: React.CSSProperties = {
@@ -25,18 +86,24 @@ function scoreColor(score: number, max: number): string {
   return r >= 0.67 ? "#22c55e" : r >= 0.34 ? "#f59e0b" : "#ef4444";
 }
 
-const SCAN_TIMEOUT_MS = 90_000; // 90 seconds
+// How many candidates to deep-score via /analyse
+const DEEP_SCORE_TOP_N  = 30;
+const DEEP_CONCURRENCY  = 5;
+const COIN_TIMEOUT_MS   = 18_000;
+const MIN_VOL_USD       = 5_000_000; // $5M min daily vol
 
 export function TopSignals({ onSelect, interval = "1h", listMode = false }: Props) {
-  const [signals, setSignals] = useState<Signal[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [lastScan, setLastScan] = useState<string>("");
-  const [elapsed, setElapsed] = useState(0);          // seconds since scan started
-  const [error, setError] = useState<string | null>(null);
-  const [universe, setUniverse] = useState<number>(0);
-  const minScore = 7; // fixed — always show from 7 upwards, user filters in UI
+  const [signals,     setSignals]     = useState<Signal[]>([]);
+  const [loading,     setLoading]     = useState(false);
+  const [lastScan,    setLastScan]    = useState<string>("");
+  const [elapsed,     setElapsed]     = useState(0);
+  const [phase,       setPhase]       = useState<"idle"|"fetching"|"scoring"|"done">("idle");
+  const [scored,      setScored]      = useState(0);   // how many deep-scored so far
+  const [candidates,  setCandidates]  = useState(0);   // total going to deep-score
+  const [universe,    setUniverse]    = useState(0);   // total green coins found
+  const [error,       setError]       = useState<string | null>(null);
+  const [filterScore, setFilterScore] = useState(9);
 
-  const [filterScore, setFilterScore] = useState(9);  // UI filter (doesn't re-fetch)
   const elapsedRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const abortRef   = useRef<AbortController | null>(null);
 
@@ -45,71 +112,139 @@ export function TopSignals({ onSelect, interval = "1h", listMode = false }: Prop
   };
 
   const scan = useCallback(async () => {
-    // Cancel any in-flight request
-    if (abortRef.current) abortRef.current.abort();
-    abortRef.current = new AbortController();
+    abortRef.current?.abort();
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
 
     setLoading(true);
     setError(null);
     setElapsed(0);
+    setScored(0);
+    setCandidates(0);
+    setPhase("fetching");
 
-    // Tick elapsed every second
     stopElapsed();
     const start = Date.now();
     elapsedRef.current = setInterval(() => {
       setElapsed(Math.floor((Date.now() - start) / 1000));
     }, 1000);
 
-    // Timeout after 90s
-    const timeout = setTimeout(() => {
-      abortRef.current?.abort();
-    }, SCAN_TIMEOUT_MS);
-
     try {
-      const r = await fetch(
-        `${API}/scan?interval=${interval.toLowerCase()}&min_score=${minScore}&max_coins=500`,
-        { signal: abortRef.current.signal }
-      );
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      const j = await r.json();
-      setSignals(j.signals || []);
-      setUniverse(j.universe || 0);
-      setLastScan(new Date().toLocaleTimeString());
-      setError(null);
+      // ── Phase 1: Fetch all Binance USDT tickers directly (browser → Binance, ~200ms) ──
+      const tickerRes = await fetch(`${BNC}/ticker/24hr`, { signal: ctrl.signal });
+      if (!tickerRes.ok) throw new Error(`Binance ${tickerRes.status}`);
+      const tickers: Ticker[] = await tickerRes.json();
+
+      // ── Phase 2: Filter to green coins only, exclude stables, min volume ──
+      const greens = tickers.filter(t => {
+        const sym = t.symbol;
+        if (!sym.endsWith("USDT")) return false;
+        const base = sym.replace("USDT", "");
+        if (EXCLUDE.has(base)) return false;
+        const chg = parseFloat(t.priceChangePercent);
+        const vol = parseFloat(t.quoteVolume);
+        return chg > 0 && vol >= MIN_VOL_USD;
+      });
+
+      setUniverse(greens.length);
+
+      // ── Phase 3: Pre-score all green coins client-side (instant, no API) ──
+      const prescored = greens
+        .map(preScore)
+        .sort((a, b) => b.pre - a.pre)          // highest pre-score first
+        .slice(0, DEEP_SCORE_TOP_N);             // take top N candidates
+
+      setCandidates(prescored.length);
+      setPhase("scoring");
+
+      // ── Phase 4: Deep-score top candidates via /analyse (Render) ──
+      // Concurrency-limited to avoid hammering Render
+      const deepResults: Signal[] = [];
+
+      const deepScore = async (c: ReturnType<typeof preScore>) => {
+        if (ctrl.signal.aborted) return;
+        const coinCtrl = new AbortController();
+        const timer = setTimeout(() => coinCtrl.abort(), COIN_TIMEOUT_MS);
+        ctrl.signal.addEventListener("abort", () => coinCtrl.abort(), { once: true });
+        try {
+          const res = await fetch(`${API}/analyse`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ symbol: c.sym, interval }),
+            signal: coinCtrl.signal,
+          });
+          if (!res.ok) return;
+          const d = await res.json();
+          // /analyse returns nested structure
+          const score  = d?.score   ?? d?.signal?.total ?? 0;
+          const max    = d?.max_score ?? d?.signal?.max ?? 16;
+          const sig    = d?.signal   ?? d?.signal?.label ?? "—";
+          const sigLabel = typeof sig === "string" ? sig : (sig?.label ?? "—");
+          const mkt    = d?.market   ?? {};
+          const timing = d?.timing   ?? {};
+          const comp   = d?.components ?? {};
+          deepResults.push({
+            symbol:   c.sym,
+            score,
+            max_score: max,
+            signal:   sigLabel,
+            v:        comp?.V?.score ?? c.v,
+            p:        comp?.P?.score ?? c.p,
+            r:        comp?.R?.score ?? c.r,
+            t:        comp?.T?.score ?? 0,
+            s:        comp?.S?.score ?? 0,
+            price:    mkt?.close     ?? c.price,
+            change:   mkt?.pct       ?? c.chg,
+            rsi:      timing?.rsi14  ?? 0,
+            adx:      timing?.adx14  ?? 0,
+            rel_vol:  comp?.V?.rv    ?? 0,
+          });
+          setScored(prev => prev + 1);
+        } catch { /* timed out or network error — skip coin */ }
+        finally { clearTimeout(timer); }
+      };
+
+      // Batch in groups of DEEP_CONCURRENCY
+      for (let i = 0; i < prescored.length; i += DEEP_CONCURRENCY) {
+        if (ctrl.signal.aborted) break;
+        await Promise.allSettled(prescored.slice(i, i + DEEP_CONCURRENCY).map(deepScore));
+      }
+
+      if (!ctrl.signal.aborted) {
+        deepResults.sort((a, b) => b.score - a.score);
+        setSignals(deepResults);
+        setLastScan(new Date().toLocaleTimeString());
+        setPhase("done");
+        setError(null);
+      }
+
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
-      if (msg.includes("abort") || msg.includes("AbortError")) {
-        setError("Scan timed out — Render may be waking up. Try again in 30s.");
-      } else {
-        setError("Scan failed — check API status.");
+      if (!ctrl.signal.aborted) {
+        setError(msg.includes("abort") || msg.includes("AbortError")
+          ? "Scan cancelled."
+          : `Scan failed: ${msg}`);
       }
     } finally {
-      clearTimeout(timeout);
       stopElapsed();
       setLoading(false);
     }
   }, [interval]);
 
-  // Initial scan + auto-refresh every 5 min
   useEffect(() => { scan(); }, [scan]);
   useEffect(() => {
     const t = setInterval(scan, 5 * 60 * 1000);
     return () => clearInterval(t);
   }, [scan]);
-
-  // Cleanup on unmount
   useEffect(() => () => { stopElapsed(); abortRef.current?.abort(); }, []);
 
-  // Progress status message
+  // Progress message
   const progressMsg = (() => {
-    if (!loading) return null;
-    if (elapsed < 5)  return "Waking Render...";
-    if (elapsed < 15) return "Fetching Binance universe...";
-    if (elapsed < 30) return `Scoring coins... (${elapsed}s)`;
-    return `Still scanning — ${elapsed}s elapsed. Render is warming up.`;
+    if (phase === "fetching") return "Fetching Binance tickers...";
+    if (phase === "scoring")  return `Deep-scoring ${scored}/${candidates} candidates... (${elapsed}s)`;
+    return null;
   })();
 
-  // Filtered view (client-side) — no extra fetch
   const nextFilter  = filterScore === 7 ? 9 : filterScore === 9 ? 11 : 7;
   const filtered    = signals.filter(s => s.score >= filterScore);
   const displaySigs = listMode ? filtered.slice(0, 25) : filtered;
@@ -129,17 +264,14 @@ export function TopSignals({ onSelect, interval = "1h", listMode = false }: Prop
           <span style={{ fontSize: 9, color: "#22c55e", background: "#0d2212", padding: "1px 5px", borderRadius: 3, border: "1px solid #14532d", fontWeight: 700 }}>
             STRONG
           </span>
-          {universe > 0 && !loading && (
-            <span style={{ fontSize: 8, color: "#334155", marginLeft: 2 }}>{universe} coins</span>
+          {universe > 0 && (
+            <span style={{ fontSize: 8, color: "#334155", marginLeft: 2 }}>
+              {universe} green
+            </span>
           )}
         </div>
         <div style={{ display: "flex", gap: 5, alignItems: "center" }}>
-          {/* Score filter — client side, no refetch */}
-          <button
-            onClick={() => setFilterScore(nextFilter)}
-            style={btnStyle}
-            title="Filter score threshold (client-side)"
-          >
+          <button onClick={() => setFilterScore(nextFilter)} style={btnStyle} title="Filter threshold">
             {">="}{filterScore}
           </button>
           <button
@@ -157,16 +289,17 @@ export function TopSignals({ onSelect, interval = "1h", listMode = false }: Prop
         </div>
       </div>
 
-      {/* Timestamp row */}
+      {/* Status row */}
       {(lastScan || loading) && (
         <div style={{ fontSize: 9, color: "#334155", marginBottom: 6, display: "flex", alignItems: "center", gap: 6 }}>
-          {lastScan && !loading && <span>Last scan: {lastScan}</span>}
-          {loading && (
+          {lastScan && !loading && (
+            <span>Last scan: {lastScan} · {universe} green coins · top {candidates} deep-scored</span>
+          )}
+          {loading && progressMsg && (
             <span style={{ color: "#475569", display: "flex", alignItems: "center", gap: 5 }}>
               <span style={{
                 display: "inline-block", width: 6, height: 6, borderRadius: "50%",
-                background: "#7c3aed",
-                animation: "topsig-pulse 1s ease-in-out infinite",
+                background: "#7c3aed", animation: "topsig-pulse 1s ease-in-out infinite",
               }} />
               {progressMsg}
             </span>
@@ -174,74 +307,63 @@ export function TopSignals({ onSelect, interval = "1h", listMode = false }: Prop
         </div>
       )}
 
-      {/* Error state */}
+      {/* Progress bar during deep-scoring */}
+      {loading && phase === "scoring" && candidates > 0 && (
+        <div style={{ height: 2, background: "#1e293b", borderRadius: 1, marginBottom: 8, overflow: "hidden" }}>
+          <div style={{
+            height: "100%", background: "#7c3aed", borderRadius: 1,
+            width: `${Math.round((scored / candidates) * 100)}%`,
+            transition: "width 0.3s ease",
+          }} />
+        </div>
+      )}
+
+      {/* Error */}
       {error && (
-        <div style={{
-          padding: "10px 12px", borderRadius: 6, background: "#1a0a0a",
-          border: "1px solid #7f1d1d", marginBottom: 8,
-        }}>
+        <div style={{ padding: "10px 12px", borderRadius: 6, background: "#1a0a0a", border: "1px solid #7f1d1d", marginBottom: 8 }}>
           <div style={{ fontSize: 10, color: "#ef4444", fontWeight: 700, marginBottom: 4 }}>Scan Error</div>
           <div style={{ fontSize: 9, color: "#94a3b8", lineHeight: 1.5 }}>{error}</div>
-          <button
-            onClick={scan}
-            style={{ marginTop: 8, fontSize: 9, color: "#7c3aed", background: "none", border: "1px solid #7c3aed", borderRadius: 4, padding: "2px 8px", cursor: "pointer" }}
-          >
+          <button onClick={scan} style={{ marginTop: 8, fontSize: 9, color: "#7c3aed", background: "none", border: "1px solid #7c3aed", borderRadius: 4, padding: "2px 8px", cursor: "pointer" }}>
             Retry
           </button>
         </div>
       )}
 
-      {/* Empty filter message */}
       {isEmpty && (
         <div style={{ padding: "6px 0", fontSize: 9, color: "#475569" }}>
-          No signals at &gt;={filterScore} — {signals.length} results at &gt;={minScore}. Lower the filter.
+          No signals at &gt;={filterScore} — {signals.length} results at lower threshold. Try &gt;=7.
         </div>
       )}
-
-      {/* No results */}
       {noResults && !error && (
         <div style={{ padding: "10px 0", textAlign: "center" as const, fontSize: 10, color: "#475569" }}>
-          No strong signals found across {universe > 0 ? universe : "200+"} coins.
+          No strong signals in {universe} green coins today.
         </div>
       )}
 
-      {/* LIST MODE — ranked rows for mobile signals tab */}
+      {/* LIST MODE */}
       {listMode && displaySigs.length > 0 && (
         <div style={{ borderRadius: 8, overflow: "hidden", border: "1px solid #1e293b", opacity: loading ? 0.6 : 1, transition: "opacity 0.3s" }}>
-          {/* Column headers */}
           <div style={{
-            display: "grid",
-            gridTemplateColumns: "28px 1fr 52px 44px 44px 44px 44px 44px",
-            gap: 2, padding: "5px 8px",
-            background: "#0a0f1e", borderBottom: "1px solid #1e293b",
+            display: "grid", gridTemplateColumns: "28px 1fr 52px 44px 44px 44px 44px 44px",
+            gap: 2, padding: "5px 8px", background: "#0a0f1e", borderBottom: "1px solid #1e293b",
           }}>
-            {["#", "SYM", "SCORE", "V", "P", "R", "T", "S"].map(h => (
+            {["#","SYM","SCORE","V","P","R","T","S"].map(h => (
               <span key={h} style={{ fontSize: 8, fontWeight: 700, letterSpacing: "0.08em", color: "#334155", textTransform: "uppercase" as const, textAlign: h === "#" ? "center" as const : "left" as const }}>{h}</span>
             ))}
           </div>
-
           {displaySigs.map((sig, i) => {
             const chg = sig.change ?? sig.change_24h ?? 0;
             const chgColor = chg >= 0 ? "#22c55e" : "#ef4444";
-            const overallColor = scoreColor(sig.score, sig.max_score ?? 16);
-            const vColor = scoreColor(sig.v, 5);
-            const pColor = scoreColor(sig.p, 3);
-            const rColor = scoreColor(sig.r, 2);
-            const tColor = scoreColor(sig.t, 3);
-            const sColor = scoreColor(sig.s ?? 0, 3);
             return (
               <button
                 key={sig.symbol}
                 onClick={() => onSelect(sig.symbol)}
                 style={{
-                  display: "grid",
-                  gridTemplateColumns: "28px 1fr 52px 44px 44px 44px 44px 44px",
-                  gap: 2, padding: "8px 8px",
-                  width: "100%",
+                  display: "grid", gridTemplateColumns: "28px 1fr 52px 44px 44px 44px 44px 44px",
+                  gap: 2, padding: "8px 8px", width: "100%",
                   background: i % 2 === 0 ? "#060b17" : "#080e1c",
                   border: "none", borderBottom: "1px solid #0f172a",
-                  cursor: "pointer", textAlign: "left" as const,
-                  alignItems: "center", transition: "background 0.15s",
+                  cursor: "pointer", textAlign: "left" as const, alignItems: "center", transition: "background 0.15s",
                 }}
                 onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = "#0d1a2e"; }}
                 onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = i % 2 === 0 ? "#060b17" : "#080e1c"; }}
@@ -255,17 +377,14 @@ export function TopSignals({ onSelect, interval = "1h", listMode = false }: Prop
                     {chg >= 0 ? "+" : ""}{chg.toFixed(1)}%
                   </span>
                 </div>
-                <span style={{ fontSize: 11, fontWeight: 800, color: overallColor, fontFamily: "monospace" }}>
+                <span style={{ fontSize: 11, fontWeight: 800, color: scoreColor(sig.score, sig.max_score ?? 16), fontFamily: "monospace" }}>
                   {sig.score}/{sig.max_score ?? 16}
                 </span>
                 {[
-                  { val: sig.v, max: 5, color: vColor },
-                  { val: sig.p, max: 3, color: pColor },
-                  { val: sig.r, max: 2, color: rColor },
-                  { val: sig.t, max: 3, color: tColor },
-                  { val: sig.s ?? 0, max: 3, color: sColor },
-                ].map(({ val, max, color }, ci) => (
-                  <span key={ci} style={{ fontSize: 10, fontWeight: 700, color, fontFamily: "monospace" }}>
+                  { val: sig.v, max: 5 }, { val: sig.p, max: 3 },
+                  { val: sig.r, max: 2 }, { val: sig.t, max: 3 }, { val: sig.s ?? 0, max: 3 },
+                ].map(({ val, max }, ci) => (
+                  <span key={ci} style={{ fontSize: 10, fontWeight: 700, color: scoreColor(val, max), fontFamily: "monospace" }}>
                     {val}/{max}
                   </span>
                 ))}
@@ -275,18 +394,12 @@ export function TopSignals({ onSelect, interval = "1h", listMode = false }: Prop
         </div>
       )}
 
-      {/* Scrolling ticker — desktop / non-listMode */}
+      {/* Scrolling ticker — desktop */}
       {!listMode && displaySigs.length > 0 && (
         <div style={{ overflow: "hidden", position: "relative", borderRadius: 6, background: "#060b17", border: "1px solid #1e293b", opacity: loading ? 0.7 : 1, transition: "opacity 0.3s" }}>
           <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 24, background: "linear-gradient(to right, #060b17, transparent)", zIndex: 2, pointerEvents: "none" }} />
           <div style={{ position: "absolute", right: 0, top: 0, bottom: 0, width: 24, background: "linear-gradient(to left, #060b17, transparent)", zIndex: 2, pointerEvents: "none" }} />
-          <div
-            style={{
-              display: "flex", gap: 8, padding: "8px 12px",
-              width: "max-content",
-              animation: `topsig-scroll ${duration}s linear infinite`,
-            }}
-          >
+          <div style={{ display: "flex", gap: 8, padding: "8px 12px", width: "max-content", animation: `topsig-scroll ${duration}s linear infinite` }}>
             {[...displaySigs, ...displaySigs].map((sig, i) => (
               <button
                 key={`${sig.symbol}-${i}`}
@@ -295,16 +408,15 @@ export function TopSignals({ onSelect, interval = "1h", listMode = false }: Prop
                   display: "inline-flex", alignItems: "center", gap: 6,
                   background: "transparent", border: "1px solid #1e293b",
                   borderRadius: 20, padding: "4px 12px", cursor: "pointer",
-                  whiteSpace: "nowrap" as const, flexShrink: 0,
-                  transition: "border-color 0.2s, background 0.2s",
+                  whiteSpace: "nowrap" as const, flexShrink: 0, transition: "border-color 0.2s, background 0.2s",
                 }}
                 onMouseEnter={e => { e.currentTarget.style.borderColor = "#22c55e"; e.currentTarget.style.background = "#0d2212"; }}
                 onMouseLeave={e => { e.currentTarget.style.borderColor = "#1e293b"; e.currentTarget.style.background = "transparent"; }}
               >
                 <span style={{ fontSize: 11, fontWeight: 700, color: "#f1f5f9", fontFamily: "monospace" }}>{sig.symbol}</span>
                 <span style={{ fontSize: 10, fontWeight: 700, color: "#22c55e" }}>{sig.score}/{sig.max_score}</span>
-                <span style={{ fontSize: 10, color: (sig.change ?? sig.change_24h ?? 0) >= 0 ? "#22c55e" : "#ef4444" }}>
-                  {(sig.change ?? sig.change_24h ?? 0) >= 0 ? "+" : ""}{(sig.change ?? sig.change_24h ?? 0).toFixed(1)}%
+                <span style={{ fontSize: 10, color: (sig.change ?? 0) >= 0 ? "#22c55e" : "#ef4444" }}>
+                  {(sig.change ?? 0) >= 0 ? "+" : ""}{(sig.change ?? 0).toFixed(1)}%
                 </span>
               </button>
             ))}
@@ -312,13 +424,13 @@ export function TopSignals({ onSelect, interval = "1h", listMode = false }: Prop
         </div>
       )}
 
-      {/* Initial loading state — only when no cached results yet */}
+      {/* Initial loading — no results yet */}
       {loading && signals.length === 0 && !error && (
         <div style={{ padding: "16px 0", textAlign: "center" as const }}>
-          <div style={{ fontSize: 10, color: "#475569", marginBottom: 6 }}>{progressMsg}</div>
-          {elapsed >= 5 && (
+          <div style={{ fontSize: 10, color: "#475569", marginBottom: 4 }}>{progressMsg}</div>
+          {phase === "scoring" && (
             <div style={{ fontSize: 9, color: "#334155" }}>
-              Scanning ~500 Binance pairs — this takes 20-40s cold start.
+              Scoring top {candidates} green coins from {universe} — usually 5-10s.
             </div>
           )}
         </div>
