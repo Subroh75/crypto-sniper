@@ -90,7 +90,8 @@ function scoreColor(score: number, max: number): string {
 const DEEP_SCORE_TOP_N  = 30;
 const DEEP_CONCURRENCY  = 5;
 const COIN_TIMEOUT_MS   = 18_000;
-const MIN_VOL_USD       = 5_000_000; // $5M min daily vol
+// BinanceUS volumes are tiny (~$663K BTC/day max) — use $50K floor instead of $5M
+const MIN_VOL_USD       = 50_000; // $50K min daily vol (BinanceUS-friendly)
 
 export function TopSignals({ onSelect, interval = "1h", listMode = false }: Props) {
   const [signals,     setSignals]     = useState<Signal[]>([]);
@@ -147,6 +148,42 @@ export function TopSignals({ onSelect, interval = "1h", listMode = false }: Prop
       });
 
       setUniverse(greens.length);
+
+      // ── Fallback: if BinanceUS returned 0 green coins, use Render /scan cache ──
+      if (greens.length === 0) {
+        setPhase("scoring");
+        try {
+          const scanRes = await fetch(`${API}/scan?min_score=1&interval=${interval}`, { signal: ctrl.signal });
+          if (scanRes.ok) {
+            const scanData = await scanRes.json();
+            const fallbackSignals: Signal[] = (scanData.signals ?? []).map((s: Record<string, unknown>) => ({
+              symbol:   String(s.symbol ?? ""),
+              score:    Number(s.score ?? 0),
+              max_score: Number(s.max_score ?? 16),
+              signal:   String(s.signal ?? ""),
+              v:        Number(s.v ?? 0),
+              p:        Number(s.p ?? 0),
+              r:        Number(s.r ?? 0),
+              t:        Number(s.t ?? 0),
+              s:        Number(s.s ?? 0),
+              price:    Number(s.price ?? 0),
+              change:   Number(s.change ?? 0),
+              rsi:      Number(s.rsi ?? 0),
+              adx:      Number(s.adx ?? 0),
+              rel_vol:  Number(s.rel_vol ?? 0),
+            }));
+            if (!ctrl.signal.aborted) {
+              setSignals(fallbackSignals);
+              setUniverse(scanData.universe ?? fallbackSignals.length);
+              setLastScan(new Date().toLocaleTimeString());
+              setPhase("done");
+            }
+          }
+        } catch { /* fallback failed silently */ }
+        stopElapsed();
+        setLoading(false);
+        return;
+      }
 
       // ── Phase 3: Pre-score all green coins client-side (instant, no API) ──
       const prescored = greens
@@ -232,8 +269,9 @@ export function TopSignals({ onSelect, interval = "1h", listMode = false }: Prop
   }, [interval]);
 
   useEffect(() => { scan(); }, [scan]);
+  // Hourly auto-refresh — matches backend 1-hour scan cache TTL
   useEffect(() => {
-    const t = setInterval(scan, 5 * 60 * 1000);
+    const t = setInterval(scan, 60 * 60 * 1000);
     return () => clearInterval(t);
   }, [scan]);
   useEffect(() => () => { stopElapsed(); abortRef.current?.abort(); }, []);

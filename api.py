@@ -77,7 +77,71 @@ class WatchlistRequest(BaseModel):
 
 # ── Scan cache ───────────────────────────────────────────────────────────────
 _scan_cache: dict = {}
-_SCAN_TTL  = 300  # 5-minute cache
+_SCAN_TTL  = 3600  # 1-hour cache (matches frontend auto-refresh interval)
+
+# ── SQLite persistence for scan cache (survives Render sleep/restart) ─────────
+_SCAN_DB_PATH = os.path.join(os.path.dirname(__file__), "data.db")
+import sqlite3 as _sqlite3, json as _json
+
+def _scan_db_init():
+    """Create scan_cache table if not exists."""
+    try:
+        with _sqlite3.connect(_SCAN_DB_PATH) as c:
+            c.execute("""
+                CREATE TABLE IF NOT EXISTS scan_cache_v2 (
+                    cache_key TEXT PRIMARY KEY,
+                    data_json TEXT NOT NULL,
+                    universe  INTEGER NOT NULL DEFAULT 0,
+                    ts        INTEGER NOT NULL
+                )
+            """)
+    except Exception as _e:
+        logger.warning(f"scan_db_init: {_e}")
+
+def _scan_db_write(cache_key: str, data: list, universe: int, ts: int):
+    """Persist scan result to SQLite."""
+    try:
+        with _sqlite3.connect(_SCAN_DB_PATH) as c:
+            c.execute(
+                "INSERT OR REPLACE INTO scan_cache_v2 (cache_key, data_json, universe, ts) VALUES (?,?,?,?)",
+                (cache_key, _json.dumps(data), universe, ts)
+            )
+    except Exception as _e:
+        logger.warning(f"scan_db_write: {_e}")
+
+def _scan_db_read(cache_key: str) -> dict | None:
+    """Read persisted scan result from SQLite. Returns None if missing or expired."""
+    try:
+        with _sqlite3.connect(_SCAN_DB_PATH) as c:
+            row = c.execute(
+                "SELECT data_json, universe, ts FROM scan_cache_v2 WHERE cache_key=?",
+                (cache_key,)
+            ).fetchone()
+        if row and (int(time.time()) - row[2]) < _SCAN_TTL:
+            return {"data": _json.loads(row[0]), "universe": row[1], "ts": row[2]}
+    except Exception as _e:
+        logger.warning(f"scan_db_read: {_e}")
+    return None
+
+# Init DB table on startup
+_scan_db_init()
+
+# Pre-warm in-memory cache from SQLite on startup (avoids cold scan on Render wake)
+def _prewarm_scan_cache():
+    try:
+        with _sqlite3.connect(_SCAN_DB_PATH) as c:
+            rows = c.execute(
+                "SELECT cache_key, data_json, universe, ts FROM scan_cache_v2"
+            ).fetchall()
+        for row in rows:
+            key, data_json, universe, ts = row
+            if (int(time.time()) - ts) < _SCAN_TTL:
+                _scan_cache.update({"key": key, "ts": ts, "data": _json.loads(data_json), "universe": universe})
+                logger.info(f"Pre-warmed scan cache: key={key}, {universe} coins, age={int(time.time())-ts}s")
+    except Exception as _e:
+        logger.warning(f"_prewarm_scan_cache: {_e}")
+
+_prewarm_scan_cache()
 
 @app.get("/health")
 async def health():
@@ -248,12 +312,23 @@ def scan_top_signals(
     interval = interval.lower()
     now = int(time.time())
     cache_key = f"{interval}:{min_score}:{max_coins}:{int(min_volume)}"
+    # Check in-memory cache first (fast)
     if _scan_cache.get("key") == cache_key and now - _scan_cache.get("ts", 0) < _SCAN_TTL:
         return {
             "signals":  _scan_cache["data"],
             "cached":   True,
             "universe": _scan_cache.get("universe", 0),
             "timestamp": _scan_cache["ts"],
+        }
+    # Fall back to SQLite (survives Render sleep/restart)
+    db_cached = _scan_db_read(cache_key)
+    if db_cached:
+        _scan_cache.update({"key": cache_key, "ts": db_cached["ts"], "data": db_cached["data"], "universe": db_cached["universe"]})
+        return {
+            "signals":  db_cached["data"],
+            "cached":   True,
+            "universe": db_cached["universe"],
+            "timestamp": db_cached["ts"],
         }
 
     # ── Step 1: Get full Binance universe ──────────────────────────────────────────
@@ -315,6 +390,7 @@ def scan_top_signals(
 
     signals.sort(key=lambda s: (s["score"], s["volume_24h"]), reverse=True)
     _scan_cache.update({"key": cache_key, "ts": now, "data": signals, "universe": universe_size})
+    _scan_db_write(cache_key, signals, universe_size, now)  # persist across Render sleep
     return {
         "signals":   signals,
         "cached":    False,

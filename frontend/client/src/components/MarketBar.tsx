@@ -23,8 +23,8 @@ function Stat({ label, value, sub }: StatProps) {
   );
 }
 
-// Fear & Greed needle (placeholder — real index needs paid API)
-function FearGreedMeter({ value = 62 }: { value?: number }) {
+// Fear & Greed needle — live from alternative.me (free, no key)
+function FearGreedMeter({ value = 0, loading = false }: { value?: number; loading?: boolean }) {
   const label =
     value >= 75 ? "Extreme Greed"
     : value >= 55 ? "Greed"
@@ -45,7 +45,7 @@ function FearGreedMeter({ value = 62 }: { value?: number }) {
         Fear &amp; Greed
       </span>
       <span className="text-[12px] md:text-[14px] font-mono font-bold leading-none whitespace-nowrap" style={{ color }}>
-        {value} — {label}
+        {loading ? "…" : `${value} — ${label}`}
       </span>
       <div className="relative w-full h-[3px] rounded-full mt-1 overflow-visible"
            style={{ background: "linear-gradient(90deg,#ff3d5a 0%,#ff8c42 35%,#f7c948 60%,#00d4aa 100%)" }}>
@@ -61,6 +61,19 @@ function FearGreedMeter({ value = 62 }: { value?: number }) {
 export function MarketBar() {
   const { data: market } = useMarketOverview();
   const { data: macro }  = useMacro();
+
+  // Live Fear & Greed from alternative.me (free, no key required)
+  const [fng, setFng] = useState<{ value: number; loading: boolean }>({ value: 0, loading: true });
+  useEffect(() => {
+    fetch("https://api.alternative.me/fng/?limit=1&format=json", { signal: AbortSignal.timeout(8000) })
+      .then(r => r.json())
+      .then(j => {
+        const v = parseInt(j?.data?.[0]?.value ?? "0", 10);
+        if (v > 0) setFng({ value: v, loading: false });
+        else setFng({ value: 0, loading: false });
+      })
+      .catch(() => setFng({ value: 0, loading: false }));
+  }, []);
 
   // Fallback: fetch global data directly from CoinGecko if Render returns 0
   const [cgGlobal, setCgGlobal] = useState<{ cap: number; capChange: number; btcDom: number } | null>(null);
@@ -118,7 +131,7 @@ export function MarketBar() {
       </div>
 
       <div className="border-r border-border/40 flex-shrink-0">
-        <FearGreedMeter value={62} />
+        <FearGreedMeter value={fng.value} loading={fng.loading} />
       </div>
 
       <div className="border-r border-border/40 flex-shrink-0">
