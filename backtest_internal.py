@@ -2,7 +2,8 @@
 backtest_internal.py — Internal Signal Backtest Engine
 
 Replays the live scoring engine (signals.py) bar-by-bar over daily OHLCV
-history fetched from CoinGecko. No external trade data. Fully self-contained.
+history. Primary source: data.py get_ohlcv() (Binance → TwelveData → Finnhub
+→ CoinGecko). Fully self-contained.
 
 Strategy:
   - Look-back window : each bar uses the preceding N bars as history context
@@ -16,6 +17,7 @@ import time, logging, requests
 from functools import lru_cache
 from typing import Optional
 from signals import calculate_signals, SignalResult, _calc_rsi, _calc_atr, _calc_adx, _calc_ema
+from data import get_ohlcv as _data_get_ohlcv
 
 logger = logging.getLogger(__name__)
 
@@ -84,6 +86,20 @@ def _fetch_daily_ohlcv(cg_id: str, ts_bucket: int) -> list[list]:
 
 
 def get_daily_ohlcv(symbol: str) -> list[list]:
+    """
+    Fetch daily OHLCV for backtest.
+    Primary: data.py get_ohlcv() — Binance -> TwelveData -> Finnhub -> CoinGecko.
+    Fallback: direct CoinGecko /ohlc (legacy path, kept for any symbol not in data.py).
+    """
+    # Primary path — uses multi-source fallback chain in data.py
+    try:
+        bars = _data_get_ohlcv(symbol.upper(), interval="1D")
+        if bars and len(bars) >= 10:
+            return bars
+    except Exception as e:
+        logger.warning(f"get_daily_ohlcv primary failed for {symbol}: {e}")
+
+    # Legacy fallback — CoinGecko direct (only if above failed)
     cg_id = CG_ID.get(symbol.upper())
     if not cg_id:
         return []
