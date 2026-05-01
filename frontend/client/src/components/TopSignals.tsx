@@ -3,73 +3,11 @@ import { useState, useEffect, useCallback, useRef } from "react";
 const API = (import.meta as Record<string, unknown> & { env?: Record<string, string> })
   .env?.VITE_API_BASE ?? "https://crypto-sniper.onrender.com";
 
-// Binance US — no geo-restrictions for browser requests
-const BNC = "https://api.binance.us/api/v3";
-
-// Stablecoins / wrapped tokens to exclude
-const EXCLUDE = new Set([
-  "USDC","USDT","BUSD","DAI","TUSD","USDP","FDUSD","PYUSD","USDD","FRAX","LUSD",
-  "GUSD","EURS","AGEUR","WBTC","WETH","WBNB","STETH","CBETH","RETH","FRXETH","NFT",
-]);
-
 interface Signal {
   symbol: string; score: number; max_score: number; signal: string;
   v: number; p: number; r: number; t: number; s: number;
   price: number; change: number; change_24h?: number;
   rsi: number; adx: number; rel_vol?: number;
-}
-
-// Lightweight pre-score from Binance ticker data (no API call to Render)
-// V (0-5): relative volume via trade count proxy
-// P (0-3): 24h price change %
-// R (0-2): position in 24h high/low range
-// Returns pre_score (0-10) — used to rank candidates before deep scoring
-interface Ticker {
-  symbol: string;
-  priceChangePercent: string;
-  lastPrice: string;
-  highPrice: string;
-  lowPrice: string;
-  quoteVolume: string;
-  weightedAvgPrice: string;
-  count: number;
-}
-
-function preScore(t: Ticker): { sym: string; pre: number; v: number; p: number; r: number; chg: number; vol: number; price: number } {
-  const chg  = parseFloat(t.priceChangePercent);
-  const close = parseFloat(t.lastPrice);
-  const high  = parseFloat(t.highPrice);
-  const low   = parseFloat(t.lowPrice);
-  const vol   = parseFloat(t.quoteVolume);
-  const vwap  = parseFloat(t.weightedAvgPrice);
-
-  // V: use quote volume tiers (no baseline, so use absolute $M thresholds)
-  let v = 0;
-  if      (vol >= 500_000_000) v = 5;
-  else if (vol >= 200_000_000) v = 4;
-  else if (vol >= 100_000_000) v = 3;
-  else if (vol >=  50_000_000) v = 2;
-  else if (vol >=  20_000_000) v = 1;
-
-  // P: momentum from 24h change %
-  let p = 0;
-  if      (chg >= 5) p = 3;
-  else if (chg >= 3) p = 2;
-  else if (chg >= 1) p = 1;
-
-  // R: price position in 24h range
-  let r = 0;
-  const range = high - low;
-  if (range > 0) {
-    const pos = (close - low) / range;
-    if      (pos >= 0.75) r = 2;
-    else if (pos >= 0.50) r = 1;
-  }
-
-  // Bonus: price above VWAP (trend proxy, no EMAs available)
-  const aboveVwap = close > vwap ? 1 : 0;
-
-  return { sym: t.symbol.replace("USDT", ""), pre: v + p + r + aboveVwap, v, p, r, chg, vol, price: close };
 }
 
 interface Props { onSelect: (symbol: string) => void; interval?: string; listMode?: boolean; }
@@ -86,12 +24,8 @@ function scoreColor(score: number, max: number): string {
   return r >= 0.67 ? "#22c55e" : r >= 0.34 ? "#f59e0b" : "#ef4444";
 }
 
-// How many candidates to deep-score via /analyse
-const DEEP_SCORE_TOP_N  = 30;
-const DEEP_CONCURRENCY  = 5;
-const COIN_TIMEOUT_MS   = 18_000;
-// BinanceUS volumes are tiny (~$663K BTC/day max) — use $50K floor instead of $5M
-const MIN_VOL_USD       = 50_000; // $50K min daily vol (BinanceUS-friendly)
+// How many results to show from /scan
+const TOP_N             = 30;
 
 export function TopSignals({ onSelect, interval = "1h", listMode = false }: Props) {
   const [signals,     setSignals]     = useState<Signal[]>([]);
@@ -131,125 +65,41 @@ export function TopSignals({ onSelect, interval = "1h", listMode = false }: Prop
     }, 1000);
 
     try {
-      // ── Phase 1: Fetch all Binance USDT tickers directly (browser → Binance, ~200ms) ──
-      const tickerRes = await fetch(`${BNC}/ticker/24hr`, { signal: ctrl.signal });
-      if (!tickerRes.ok) throw new Error(`Binance ${tickerRes.status}`);
-      const tickers: Ticker[] = await tickerRes.json();
-
-      // ── Phase 2: Filter to green coins only, exclude stables, min volume ──
-      const greens = tickers.filter(t => {
-        const sym = t.symbol;
-        if (!sym.endsWith("USDT")) return false;
-        const base = sym.replace("USDT", "");
-        if (EXCLUDE.has(base)) return false;
-        const chg = parseFloat(t.priceChangePercent);
-        const vol = parseFloat(t.quoteVolume);
-        return chg > 0 && vol >= MIN_VOL_USD;
-      });
-
-      setUniverse(greens.length);
-
-      // ── Fallback: if BinanceUS returned 0 green coins, use Render /scan cache ──
-      if (greens.length === 0) {
-        setPhase("scoring");
-        try {
-          const scanRes = await fetch(`${API}/scan?min_score=1&interval=${interval}`, { signal: ctrl.signal });
-          if (scanRes.ok) {
-            const scanData = await scanRes.json();
-            const fallbackSignals: Signal[] = (scanData.signals ?? []).map((s: Record<string, unknown>) => ({
-              symbol:   String(s.symbol ?? ""),
-              score:    Number(s.score ?? 0),
-              max_score: Number(s.max_score ?? 16),
-              signal:   String(s.signal ?? ""),
-              v:        Number(s.v ?? 0),
-              p:        Number(s.p ?? 0),
-              r:        Number(s.r ?? 0),
-              t:        Number(s.t ?? 0),
-              s:        Number(s.s ?? 0),
-              price:    Number(s.price ?? 0),
-              change:   Number(s.change ?? 0),
-              rsi:      Number(s.rsi ?? 0),
-              adx:      Number(s.adx ?? 0),
-              rel_vol:  Number(s.rel_vol ?? 0),
-            }));
-            if (!ctrl.signal.aborted) {
-              setSignals(fallbackSignals);
-              setUniverse(scanData.universe ?? fallbackSignals.length);
-              setLastScan(new Date().toLocaleTimeString());
-              setPhase("done");
-            }
-          }
-        } catch { /* fallback failed silently */ }
-        stopElapsed();
-        setLoading(false);
-        return;
-      }
-
-      // ── Phase 3: Pre-score all green coins client-side (instant, no API) ──
-      const prescored = greens
-        .map(preScore)
-        .sort((a, b) => b.pre - a.pre)          // highest pre-score first
-        .slice(0, DEEP_SCORE_TOP_N);             // take top N candidates
-
-      setCandidates(prescored.length);
+      // ── Fetch scored signals from Render /scan (uses global Binance, 1h cache) ──
+      // BinanceUS is too low volume to be useful — Render's /scan runs from Singapore
+      // where global api.binance.com works fine. Results cached 1hr in SQLite.
       setPhase("scoring");
+      const scanRes = await fetch(
+        `${API}/scan?min_score=1&interval=${interval}&max_coins=300`,
+        { signal: ctrl.signal, }
+      );
+      if (!scanRes.ok) throw new Error(`/scan ${scanRes.status}`);
+      const scanData = await scanRes.json();
 
-      // ── Phase 4: Deep-score top candidates via /analyse (Render) ──
-      // Concurrency-limited to avoid hammering Render
-      const deepResults: Signal[] = [];
+      const allSignals: Signal[] = (scanData.signals ?? []).map((s: Record<string, unknown>) => ({
+        symbol:    String(s.symbol ?? ""),
+        score:     Number(s.score ?? 0),
+        max_score: Number(s.max_score ?? 16),
+        signal:    String(s.signal ?? ""),
+        v:         Number(s.v ?? 0),
+        p:         Number(s.p ?? 0),
+        r:         Number(s.r ?? 0),
+        t:         Number(s.t ?? 0),
+        s:         Number(s.s ?? 0),
+        price:     Number(s.price ?? 0),
+        change:    Number(s.change ?? 0),
+        rsi:       Number(s.rsi ?? 0),
+        adx:       Number(s.adx ?? 0),
+        rel_vol:   Number(s.rel_vol ?? 0),
+      }));
 
-      const deepScore = async (c: ReturnType<typeof preScore>) => {
-        if (ctrl.signal.aborted) return;
-        const coinCtrl = new AbortController();
-        const timer = setTimeout(() => coinCtrl.abort(), COIN_TIMEOUT_MS);
-        ctrl.signal.addEventListener("abort", () => coinCtrl.abort(), { once: true });
-        try {
-          const res = await fetch(`${API}/analyse`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ symbol: c.sym, interval }),
-            signal: coinCtrl.signal,
-          });
-          if (!res.ok) return;
-          const d = await res.json();
-          // /analyse returns nested structure
-          const score  = d?.score   ?? d?.signal?.total ?? 0;
-          const max    = d?.max_score ?? d?.signal?.max ?? 16;
-          const sig    = d?.signal   ?? d?.signal?.label ?? "—";
-          const sigLabel = typeof sig === "string" ? sig : (sig?.label ?? "—");
-          const mkt    = d?.market   ?? {};
-          const timing = d?.timing   ?? {};
-          const comp   = d?.components ?? {};
-          deepResults.push({
-            symbol:   c.sym,
-            score,
-            max_score: max,
-            signal:   sigLabel,
-            v:        comp?.V?.score ?? c.v,
-            p:        comp?.P?.score ?? c.p,
-            r:        comp?.R?.score ?? c.r,
-            t:        comp?.T?.score ?? 0,
-            s:        comp?.S?.score ?? 0,
-            price:    mkt?.close     ?? c.price,
-            change:   mkt?.pct       ?? c.chg,
-            rsi:      timing?.rsi14  ?? 0,
-            adx:      timing?.adx14  ?? 0,
-            rel_vol:  comp?.V?.rv    ?? 0,
-          });
-          setScored(prev => prev + 1);
-        } catch { /* timed out or network error — skip coin */ }
-        finally { clearTimeout(timer); }
-      };
-
-      // Batch in groups of DEEP_CONCURRENCY
-      for (let i = 0; i < prescored.length; i += DEEP_CONCURRENCY) {
-        if (ctrl.signal.aborted) break;
-        await Promise.allSettled(prescored.slice(i, i + DEEP_CONCURRENCY).map(deepScore));
-      }
+      const top = allSignals.slice(0, TOP_N);
 
       if (!ctrl.signal.aborted) {
-        deepResults.sort((a, b) => b.score - a.score);
-        setSignals(deepResults);
+        setSignals(top);
+        setUniverse(scanData.universe ?? allSignals.length);
+        setCandidates(allSignals.length);
+        setScored(allSignals.length);
         setLastScan(new Date().toLocaleTimeString());
         setPhase("done");
         setError(null);
