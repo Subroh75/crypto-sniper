@@ -3,8 +3,8 @@ import { useState, useEffect, useCallback, useRef } from "react";
 const API = (import.meta as Record<string, unknown> & { env?: Record<string, string> })
   .env?.VITE_API_BASE ?? "https://crypto-sniper.onrender.com";
 
-// Score threshold for BUY vs WAIT (STRONG BUY = 9+/16)
 const BUY_THRESHOLD = 9;
+const PAGE_SIZE     = 20;
 
 interface Signal {
   symbol: string; score: number; max_score: number; signal: string;
@@ -13,7 +13,7 @@ interface Signal {
   rsi: number; adx: number; rel_vol?: number;
 }
 
-interface Props { onSelect: (symbol: string) => void; interval?: string; listMode?: boolean; } // listMode kept for compat
+interface Props { onSelect: (symbol: string) => void; interval?: string; listMode?: boolean; }
 
 function scoreColor(score: number, max: number): string {
   if (score === 0) return "#4a5470";
@@ -32,14 +32,19 @@ const TH: React.CSSProperties = {
   textAlign: "left", whiteSpace: "nowrap",
 };
 
+type FilterTab = "buy" | "wait" | "all";
+type SortCol   = "score" | "change" | "rsi";
+
 export function TopSignals({ onSelect, interval = "1h" }: Props) {
-  const [signals,    setSignals]    = useState<Signal[]>([]);
-  const [loading,    setLoading]    = useState(false);
-  const [lastScan,   setLastScan]   = useState<string>("");
-  const [elapsed,    setElapsed]    = useState(0);
-  const [universe,   setUniverse]   = useState(0);
-  const [error,      setError]      = useState<string | null>(null);
-  const [sortBy,     setSortBy]     = useState<"score"|"change"|"rsi">("score");
+  const [signals,  setSignals]  = useState<Signal[]>([]);
+  const [loading,  setLoading]  = useState(false);
+  const [lastScan, setLastScan] = useState<string>("");
+  const [elapsed,  setElapsed]  = useState(0);
+  const [universe, setUniverse] = useState(0);
+  const [error,    setError]    = useState<string | null>(null);
+  const [sortBy,   setSortBy]   = useState<SortCol>("score");
+  const [tab,      setTab]      = useState<FilterTab>("buy");
+  const [page,     setPage]     = useState(1);
 
   const elapsedRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const abortRef   = useRef<AbortController | null>(null);
@@ -56,6 +61,7 @@ export function TopSignals({ onSelect, interval = "1h" }: Props) {
     setLoading(true);
     setError(null);
     setElapsed(0);
+    setPage(1);
 
     stopElapsed();
     const start = Date.now();
@@ -64,8 +70,6 @@ export function TopSignals({ onSelect, interval = "1h" }: Props) {
     }, 1000);
 
     try {
-      // Fetch ALL scored coins from Render /scan (min_score=1 = everything)
-      // Render uses global Binance from Singapore, 1-hour SQLite cache
       const res = await fetch(
         `${API}/scan?min_score=1&interval=${interval}&max_coins=300`,
         { signal: ctrl.signal }
@@ -108,25 +112,39 @@ export function TopSignals({ onSelect, interval = "1h" }: Props) {
   }, [interval]);
 
   useEffect(() => { scan(); }, [scan]);
-  // Hourly auto-refresh — matches backend 1-hour scan cache TTL
   useEffect(() => {
     const t = setInterval(scan, 60 * 60 * 1000);
     return () => clearInterval(t);
   }, [scan]);
   useEffect(() => () => { stopElapsed(); abortRef.current?.abort(); }, []);
 
+  // Reset page when tab or sort changes
+  useEffect(() => { setPage(1); }, [tab, sortBy]);
+
+  const buyCount  = signals.filter(s => s.score >= BUY_THRESHOLD).length;
+  const waitCount = signals.length - buyCount;
+
+  // Filter by tab
+  const filtered = [...signals].filter(s => {
+    if (tab === "buy")  return s.score >= BUY_THRESHOLD;
+    if (tab === "wait") return s.score < BUY_THRESHOLD;
+    return true;
+  });
+
   // Sort
-  const sorted = [...signals].sort((a, b) => {
+  const sorted = filtered.sort((a, b) => {
     if (sortBy === "score")  return b.score - a.score;
     if (sortBy === "change") return (b.change ?? 0) - (a.change ?? 0);
     if (sortBy === "rsi")    return b.rsi - a.rsi;
     return 0;
   });
 
-  const buyCount  = signals.filter(s => s.score >= BUY_THRESHOLD).length;
-  const waitCount = signals.length - buyCount;
+  // Paginate
+  const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
+  const pageClamped = Math.min(page, totalPages);
+  const pageRows   = sorted.slice((pageClamped - 1) * PAGE_SIZE, pageClamped * PAGE_SIZE);
 
-  const SortBtn = ({ col, label }: { col: "score"|"change"|"rsi"; label: string }) => (
+  const SortBtn = ({ col, label }: { col: SortCol; label: string }) => (
     <button
       onClick={() => setSortBy(col)}
       style={{
@@ -142,25 +160,29 @@ export function TopSignals({ onSelect, interval = "1h" }: Props) {
     </button>
   );
 
+  const TabBtn = ({ id, label, count, activeColor }: { id: FilterTab; label: string; count: number; activeColor: string }) => (
+    <button
+      onClick={() => setTab(id)}
+      style={{
+        fontSize: 9, fontWeight: 700, letterSpacing: "0.06em",
+        padding: "2px 8px", borderRadius: 3, cursor: "pointer",
+        border: `1px solid ${tab === id ? activeColor : "#1e293b"}`,
+        background: tab === id ? `${activeColor}18` : "transparent",
+        color: tab === id ? activeColor : "#475569",
+        transition: "all 0.15s",
+      }}
+    >
+      {count} {label}
+    </button>
+  );
+
   return (
     <div style={{ marginBottom: 14 }}>
-      {/* Header */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.08em", color: "#94a3b8", textTransform: "uppercase" as const }}>
-            Green Coins Today
-          </span>
-          {signals.length > 0 && (
-            <>
-              <span style={{ fontSize: 9, color: "#22c55e", background: "#0d2212", padding: "1px 6px", borderRadius: 3, border: "1px solid #14532d", fontWeight: 700 }}>
-                {buyCount} BUY
-              </span>
-              <span style={{ fontSize: 9, color: "#f59e0b", background: "#1a1200", padding: "1px 6px", borderRadius: 3, border: "1px solid #451a00", fontWeight: 700 }}>
-                {waitCount} WAIT
-              </span>
-            </>
-          )}
-        </div>
+      {/* Header row */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+        <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.08em", color: "#94a3b8", textTransform: "uppercase" as const }}>
+          Green Coins Today
+        </span>
         <button
           onClick={scan}
           disabled={loading}
@@ -175,12 +197,23 @@ export function TopSignals({ onSelect, interval = "1h" }: Props) {
         </button>
       </div>
 
-      {/* Status */}
+      {/* Filter tabs */}
+      {signals.length > 0 && (
+        <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
+          <TabBtn id="buy"  label="BUY"  count={buyCount}  activeColor="#22c55e" />
+          <TabBtn id="wait" label="WAIT" count={waitCount} activeColor="#f59e0b" />
+          <TabBtn id="all"  label="ALL"  count={signals.length} activeColor="#7c3aed" />
+        </div>
+      )}
+
+      {/* Status bar */}
       {lastScan && (
         <div style={{ fontSize: 9, color: "#334155", marginBottom: 6 }}>
-          {lastScan} · {signals.length} green coins scored · {universe} total universe
-          {signals.length > 0 && (
-            <span style={{ color: "#475569" }}> · sorted by </span>
+          {lastScan} · {signals.length} green coins · {universe} universe
+          {sorted.length > 0 && pageClamped > 0 && (
+            <span style={{ color: "#1e293b" }}>
+              {" "}· showing {(pageClamped - 1) * PAGE_SIZE + 1}–{Math.min(pageClamped * PAGE_SIZE, sorted.length)} of {sorted.length}
+            </span>
           )}
         </div>
       )}
@@ -205,7 +238,7 @@ export function TopSignals({ onSelect, interval = "1h" }: Props) {
       )}
 
       {/* Table */}
-      {sorted.length > 0 && (
+      {pageRows.length > 0 && (
         <div style={{ borderRadius: 8, overflow: "hidden", border: "1px solid #1e293b", opacity: loading ? 0.6 : 1, transition: "opacity 0.3s" }}>
           {/* Column headers */}
           <div style={{ display: "grid", gridTemplateColumns: "28px 80px 54px 56px 34px 34px 34px 34px 36px 48px", background: "#0a0f1e", borderBottom: "1px solid #1e293b" }}>
@@ -221,11 +254,12 @@ export function TopSignals({ onSelect, interval = "1h" }: Props) {
             <span style={{ ...TH, textAlign: "center" as const }}>Action</span>
           </div>
 
-          {/* Rows */}
-          {sorted.map((sig, i) => {
-            const chg     = sig.change ?? 0;
-            const isBuy   = sig.score >= BUY_THRESHOLD;
-            const rowBg   = i % 2 === 0 ? "#060b17" : "#080e1c";
+          {/* Rows — only current page */}
+          {pageRows.map((sig, i) => {
+            const globalIndex = (pageClamped - 1) * PAGE_SIZE + i + 1;
+            const chg   = sig.change ?? 0;
+            const isBuy = sig.score >= BUY_THRESHOLD;
+            const rowBg = i % 2 === 0 ? "#060b17" : "#080e1c";
 
             return (
               <button
@@ -244,7 +278,7 @@ export function TopSignals({ onSelect, interval = "1h" }: Props) {
               >
                 {/* # */}
                 <span style={{ fontSize: 9, color: "#2d3a50", fontWeight: 700, textAlign: "center" as const, padding: "9px 0" }}>
-                  {i + 1}
+                  {globalIndex}
                 </span>
 
                 {/* Symbol */}
@@ -267,7 +301,7 @@ export function TopSignals({ onSelect, interval = "1h" }: Props) {
                   {sig.score}/{sig.max_score ?? 16}
                 </span>
 
-                {/* V P R T sub-scores */}
+                {/* V P R T */}
                 <span style={{ fontSize: 10, fontWeight: 700, color: subScoreColor(sig.v, 5), fontFamily: "monospace", padding: "0 2px" }}>{sig.v}</span>
                 <span style={{ fontSize: 10, fontWeight: 700, color: subScoreColor(sig.p, 3), fontFamily: "monospace", padding: "0 2px" }}>{sig.p}</span>
                 <span style={{ fontSize: 10, fontWeight: 700, color: subScoreColor(sig.r, 2), fontFamily: "monospace", padding: "0 2px" }}>{sig.r}</span>
@@ -281,19 +315,9 @@ export function TopSignals({ onSelect, interval = "1h" }: Props) {
                 {/* BUY / WAIT badge */}
                 <div style={{ textAlign: "center" as const, padding: "0 4px" }}>
                   {isBuy ? (
-                    <span style={{
-                      fontSize: 8, fontWeight: 800, letterSpacing: "0.06em",
-                      color: "#22c55e", background: "#0d2212",
-                      padding: "2px 6px", borderRadius: 3,
-                      border: "1px solid #14532d",
-                    }}>BUY</span>
+                    <span style={{ fontSize: 8, fontWeight: 800, letterSpacing: "0.06em", color: "#22c55e", background: "#0d2212", padding: "2px 6px", borderRadius: 3, border: "1px solid #14532d" }}>BUY</span>
                   ) : (
-                    <span style={{
-                      fontSize: 8, fontWeight: 800, letterSpacing: "0.06em",
-                      color: "#f59e0b", background: "#1a1200",
-                      padding: "2px 5px", borderRadius: 3,
-                      border: "1px solid #451a00",
-                    }}>WAIT</span>
+                    <span style={{ fontSize: 8, fontWeight: 800, letterSpacing: "0.06em", color: "#f59e0b", background: "#1a1200", padding: "2px 5px", borderRadius: 3, border: "1px solid #451a00" }}>WAIT</span>
                   )}
                 </div>
               </button>
@@ -302,11 +326,66 @@ export function TopSignals({ onSelect, interval = "1h" }: Props) {
         </div>
       )}
 
-      <style>{`
-        @keyframes topsig-pulse {
-          0%, 100% { opacity: 1; } 50% { opacity: 0.4; }
-        }
-      `}</style>
+      {/* Pagination */}
+      {totalPages > 1 && (
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 8 }}>
+          <button
+            onClick={() => setPage(p => Math.max(1, p - 1))}
+            disabled={pageClamped <= 1}
+            style={{
+              fontSize: 9, fontWeight: 700, padding: "3px 10px", borderRadius: 4,
+              border: "1px solid #1e293b", background: "#0a0f1e",
+              color: pageClamped <= 1 ? "#1e293b" : "#7c3aed",
+              cursor: pageClamped <= 1 ? "not-allowed" : "pointer",
+            }}
+          >
+            ← Prev
+          </button>
+
+          {/* Page number pills */}
+          <div style={{ display: "flex", gap: 4 }}>
+            {Array.from({ length: totalPages }, (_, i) => i + 1)
+              .filter(p => p === 1 || p === totalPages || Math.abs(p - pageClamped) <= 1)
+              .reduce<(number | "…")[]>((acc, p, idx, arr) => {
+                if (idx > 0 && typeof arr[idx - 1] === "number" && (p as number) - (arr[idx - 1] as number) > 1) acc.push("…");
+                acc.push(p);
+                return acc;
+              }, [])
+              .map((p, idx) =>
+                p === "…" ? (
+                  <span key={`ellipsis-${idx}`} style={{ fontSize: 9, color: "#334155", padding: "3px 4px" }}>…</span>
+                ) : (
+                  <button
+                    key={p}
+                    onClick={() => setPage(p as number)}
+                    style={{
+                      fontSize: 9, fontWeight: 700, padding: "3px 7px", borderRadius: 4,
+                      border: `1px solid ${pageClamped === p ? "#7c3aed" : "#1e293b"}`,
+                      background: pageClamped === p ? "#7c3aed22" : "#0a0f1e",
+                      color: pageClamped === p ? "#7c3aed" : "#475569",
+                      cursor: "pointer",
+                    }}
+                  >
+                    {p}
+                  </button>
+                )
+              )}
+          </div>
+
+          <button
+            onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+            disabled={pageClamped >= totalPages}
+            style={{
+              fontSize: 9, fontWeight: 700, padding: "3px 10px", borderRadius: 4,
+              border: "1px solid #1e293b", background: "#0a0f1e",
+              color: pageClamped >= totalPages ? "#1e293b" : "#7c3aed",
+              cursor: pageClamped >= totalPages ? "not-allowed" : "pointer",
+            }}
+          >
+            Next →
+          </button>
+        </div>
+      )}
     </div>
   );
 }
