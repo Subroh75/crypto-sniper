@@ -13,6 +13,7 @@ from data import (
     get_gainers_losers, get_market_overview, get_btc_onchain,
     get_news, get_macro, get_watchlist_scores, get_fear_greed, get_crypto_panic, health_check,
     get_social_delta, get_coinpaprika_meta,
+    get_coindar_events, get_santiment_signals,
 )
 from signals import calculate_signals, get_key_levels
 from agents import run_agent_council
@@ -97,12 +98,19 @@ async def analyse(req: AnalyseRequest):
         indicators   = get_indicators(symbol, req.interval)
         fear_greed   = get_fear_greed()
         cp_news      = get_crypto_panic(symbol)
-        social_delta = get_social_delta(symbol)  # CryptoCompare — unlocks S-score 3rd point
+        social_delta    = get_social_delta(symbol)    # Santiment → CC → CryptoPanic proxy
+        coindar_events  = get_coindar_events(symbol)   # upcoming HIGH/MED events
+        san_signals     = get_santiment_signals(symbol) # dev_activity + active_addresses
     except Exception as e:
         raise HTTPException(status_code=502, detail=str(e))
     if not ohlcv:
         raise HTTPException(status_code=404, detail=f"No data for {symbol}")
-    sig = calculate_signals(ohlcv, quote, indicators, fear_greed=fear_greed, cp_news=cp_news, social_delta=social_delta)
+    sig = calculate_signals(
+        ohlcv, quote, indicators,
+        fear_greed=fear_greed, cp_news=cp_news,
+        social_delta=social_delta,
+        coindar_events=coindar_events,
+    )
     levels = get_key_levels(sig)
     # Background: record signal + check price alerts
     import asyncio, threading
@@ -127,8 +135,17 @@ async def analyse(req: AnalyseRequest):
         "fear_greed":fear_greed,"cp_news":cp_news[:3],"key_levels":levels,
         "ohlcv":ohlcv[-48:],
         "derivatives": get_derivatives(symbol),
-        "social_delta": social_delta,
+        "social_delta":    social_delta,
+        "santiment":       san_signals,
+        "events":          coindar_events[:5] if coindar_events else [],
     }
+
+@app.get("/events/{symbol}")
+async def events(symbol: str):
+    """Upcoming Coindar events for a symbol (next 30 days, HIGH/MED/LOW impact)."""
+    sym = symbol.upper().strip()
+    ev  = get_coindar_events(sym, days=30)
+    return {"symbol": sym, "count": len(ev), "events": ev}
 
 @app.get("/fundamentals/{symbol}")
 async def fundamentals(symbol: str):

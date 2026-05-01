@@ -25,6 +25,8 @@ MAUX_KEY   = os.getenv("MARKETAUX_API_KEY", "")          # free tier
 ETHSCAN_KEY= os.getenv("ETHERSCAN_API_KEY", "")          # free tier
 FH_KEY     = os.getenv("FINNHUB_API_KEY", "")             # free at finnhub.io
 CC_KEY     = os.getenv("CRYPTOCOMPARE_API_KEY", "")       # free at cryptocompare.com
+COINDAR_KEY= os.getenv("COINDAR_API_KEY", "")             # free at coindar.org/en/api
+SAN_KEY    = os.getenv("SANTIMENT_API_KEY", "")           # free at app.santiment.net/account
 
 # ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ Base URLs ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ
 CG_BASE  = "https://api.coingecko.com/api/v3"  # demo key works on public API with x_cg_demo_api_key param
@@ -39,6 +41,8 @@ MPOOL    = "https://mempool.space/api/v1"
 ETHSCAN  = "https://api.etherscan.io/api"
 FH_BASE  = "https://finnhub.io/api/v1"                  # crypto OHLCV fallback
 CC_BASE  = "https://min-api.cryptocompare.com"           # social_delta for S-score
+COINDAR_BASE = "https://coindar.org/api/v2"              # crypto events (listings, mainnet, etc.)
+SAN_BASE     = "https://api.santiment.net/graphql"       # social/dev/on-chain via GraphQL
 MAUX     = "https://api.marketaux.com/v1"
 ECONDB   = "https://www.econdb.com/api/series"
 
@@ -398,6 +402,287 @@ def _cc_get_coin_id(symbol: str) -> str:
     return ""
 
 
+# ── Coindar — Crypto Events ──────────────────────────────────────────────────
+
+_COINDAR_ID_CACHE: dict = {}  # symbol -> coindar numeric id string
+_COINDAR_ID_CACHE_TS: float = 0.0
+_COINDAR_ID_TTL: float = 86400.0  # refresh once per day
+
+# Keyword lists for impact classification
+_HIGH_KEYWORDS = [
+    "listing", "mainnet", "launch", "halving", "unlock",
+    "token generation", "tge", "hard fork", "fork", "upgrade",
+    "migration", "snapshot",
+]
+_MED_KEYWORDS = [
+    "partnership", "airdrop", "ama", "conference", "summit",
+    "hackathon", "meetup", "staking", "burn", "governance",
+]
+
+
+def _coindar_classify(caption: str, tags: list) -> str:
+    """Return 'HIGH', 'MED', or 'LOW' based on event caption and tags."""
+    text = (caption + " " + " ".join(t.get("name", "") if isinstance(t, dict) else str(t) for t in (tags or []))).lower()
+    for kw in _HIGH_KEYWORDS:
+        if kw in text:
+            return "HIGH"
+    for kw in _MED_KEYWORDS:
+        if kw in text:
+            return "MED"
+    return "LOW"
+
+
+def _coindar_id_map() -> dict:
+    """
+    Fetch and cache the full Coindar coin list (symbol -> numeric id).
+    Result is cached for 24 hours to stay well within free tier limits.
+    """
+    global _COINDAR_ID_CACHE, _COINDAR_ID_CACHE_TS
+    now = time.time()
+    if _COINDAR_ID_CACHE and (now - _COINDAR_ID_CACHE_TS) < _COINDAR_ID_TTL:
+        return _COINDAR_ID_CACHE
+    if not COINDAR_KEY:
+        return {}
+    try:
+        r = requests.get(
+            f"{COINDAR_BASE}/coins",
+            params={"access_token": COINDAR_KEY},
+            timeout=12,
+        )
+        r.raise_for_status()
+        coins = r.json()
+        mapping = {}
+        for coin in (coins if isinstance(coins, list) else []):
+            sym = (coin.get("symbol") or "").upper().strip()
+            cid = str(coin.get("id", "")).strip()
+            if sym and cid:
+                mapping[sym] = cid
+        _COINDAR_ID_CACHE = mapping
+        _COINDAR_ID_CACHE_TS = now
+        logger.debug(f"Coindar coin map loaded: {len(mapping)} coins")
+        return mapping
+    except Exception as e:
+        logger.warning(f"Coindar coin map failed: {e}")
+        return _COINDAR_ID_CACHE  # return stale cache on error
+
+
+def get_coindar_events(symbol: str, days: int = 30) -> list:
+    """
+    Fetch upcoming Coindar events for `symbol` within the next `days` days.
+
+    Returns a list of dicts:
+      { caption, date, impact (HIGH/MED/LOW), days_until, tags, source }
+
+    Impact classification:
+      HIGH: exchange listing, mainnet launch, token unlock, halving, fork, TGE, migration
+      MED:  partnership, airdrop, AMA, conference, governance, burn, staking
+      LOW:  everything else
+
+    Requires COINDAR_API_KEY env var. Returns [] gracefully if key missing or error.
+    """
+    if not COINDAR_KEY:
+        return []
+    try:
+        id_map = _coindar_id_map()
+        coin_id = id_map.get(symbol.upper().strip())
+        if not coin_id:
+            logger.debug(f"Coindar: no coin id for {symbol}")
+            return []
+
+        from datetime import datetime, timezone, timedelta
+        now = datetime.now(timezone.utc)
+        date_start = now.strftime("%Y-%m-%d")
+        date_end   = (now + timedelta(days=days)).strftime("%Y-%m-%d")
+
+        r = requests.get(
+            f"{COINDAR_BASE}/events",
+            params={
+                "access_token": COINDAR_KEY,
+                "filter_coins":  coin_id,
+                "filter_date_start": date_start,
+                "filter_date_end":   date_end,
+                "sort_by": "date_start",
+                "order_by": "0",  # ascending
+            },
+            timeout=12,
+        )
+        r.raise_for_status()
+        raw = r.json()
+        events = raw if isinstance(raw, list) else raw.get("data", [])
+
+        result = []
+        for ev in events:
+            caption   = ev.get("caption", "")
+            date_str  = (ev.get("date_start") or "")[:10]
+            tags      = ev.get("tags") or []
+            impact    = _coindar_classify(caption, tags)
+            # compute days_until
+            try:
+                event_dt = datetime.strptime(date_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+                days_until = max(0, (event_dt - now).days)
+            except Exception:
+                days_until = 999
+            result.append({
+                "caption":    caption,
+                "date":       date_str,
+                "impact":     impact,
+                "days_until": days_until,
+                "tags":       [t.get("name", t) if isinstance(t, dict) else t for t in tags],
+                "source":     ev.get("source", ""),
+            })
+        logger.debug(f"Coindar events for {symbol}: {len(result)} found")
+        return result
+    except Exception as e:
+        logger.warning(f"Coindar events failed for {symbol}: {e}")
+        return []
+
+
+# ── Santiment — Social / Dev / On-Chain ───────────────────────────────────────
+
+# Santiment slug map: uppercase ticker -> lowercase slug used in GraphQL queries
+SAN_SLUG = {
+    "BTC":"bitcoin","ETH":"ethereum","SOL":"solana","BNB":"binance-coin",
+    "ADA":"cardano","XRP":"xrp","DOGE":"dogecoin","DOT":"polkadot",
+    "AVAX":"avalanche","LINK":"chainlink","UNI":"uniswap","MATIC":"matic-network",
+    "ATOM":"cosmos","LTC":"litecoin","ALGO":"algorand","XLM":"stellar",
+    "NEAR":"near-protocol","FTM":"fantom","SAND":"the-sandbox","MANA":"decentraland",
+    "AAVE":"aave","CRV":"curve-dao-token","MKR":"maker","COMP":"compound",
+    "SNX":"synthetix-network-token","1INCH":"1inch","ENS":"ethereum-name-service",
+    "APE":"apecoin","OP":"optimism","ARB":"arbitrum","SUI":"sui",
+    "PEPE":"pepe","WIF":"dogwifhat","BONK":"bonk","FLOKI":"floki",
+    "INJ":"injective-protocol","SEI":"sei-network","TIA":"celestia",
+    "RENDER":"render-token","FET":"fetch-ai","GRT":"the-graph",
+    "HBAR":"hedera-hashgraph","VET":"vechain","THETA":"theta-network",
+    "EOS":"eos","XTZ":"tezos","ZIL":"zilliqa","ZEC":"zcash",
+    "DASH":"dash","BCH":"bitcoin-cash","ETC":"ethereum-classic",
+    "HYPE":"hyperliquid","KAVA":"kava","BLUR":"blur","IMX":"immutable-x",
+    "PYTH":"pyth-network","JUP":"jupiter-exchange-solana","JTO":"jito-dao",
+    "WLD":"worldcoin-wld","STRK":"starknet","MANTA":"manta-network",
+    "ORDI":"ordi","SATS":"1000sats-ordinals","RATS":"rats-brc-20",
+}
+
+_SAN_CACHE: dict = {}   # symbol -> (ts, result)
+_SAN_TTL   = 6 * 3600   # 6 hour cache — critical to stay within 1K/month free tier
+
+
+def get_santiment_signals(symbol: str) -> dict:
+    """
+    Fetch social, dev, and on-chain metrics from Santiment GraphQL API.
+
+    Returns:
+      {
+        social_delta:      float  — % change in social_volume_total vs yesterday
+                                    (positive = rising mentions, negative = falling)
+        dev_activity:      float  — 7-day average GitHub dev events
+        active_addresses:  float  — 7-day average daily active addresses
+      }
+
+    Requires SANTIMENT_API_KEY env var.  Returns all-zero dict gracefully if
+    key is missing, slug is unknown, or any API error occurs.
+
+    Caches results for 6 hours to protect the free tier (1K calls/month).
+    """
+    zero = {"social_delta": 0.0, "dev_activity": 0.0, "active_addresses": 0.0}
+    if not SAN_KEY:
+        return zero
+
+    sym  = symbol.upper().strip()
+    slug = SAN_SLUG.get(sym)
+    if not slug:
+        logger.debug(f"Santiment: no slug mapping for {sym}")
+        return zero
+
+    # Check cache
+    cached = _SAN_CACHE.get(sym)
+    if cached:
+        ts, data = cached
+        if time.time() - ts < _SAN_TTL:
+            return data
+
+    try:
+        # Single batched GraphQL query — counts as ONE API call regardless of metrics
+        query = """
+        {
+          social_volume: getMetric(metric: "social_volume_total") {
+            current: timeseriesData(
+              slug: \"%s\"
+              from: "utc_now-2d"
+              to: "utc_now"
+              interval: "1d"
+            ) { datetime value }
+          }
+          dev_activity: getMetric(metric: "dev_activity") {
+            series: timeseriesData(
+              slug: \"%s\"
+              from: "utc_now-8d"
+              to: "utc_now"
+              interval: "1d"
+            ) { datetime value }
+          }
+          active_addresses: getMetric(metric: "daily_active_addresses") {
+            series: timeseriesData(
+              slug: \"%s\"
+              from: "utc_now-8d"
+              to: "utc_now"
+              interval: "1d"
+            ) { datetime value }
+          }
+        }
+        """ % (slug, slug, slug)
+
+        r = requests.post(
+            SAN_BASE,
+            json={"query": query},
+            headers={
+                "Authorization": f"Apikey {SAN_KEY}",
+                "Content-Type": "application/json",
+            },
+            timeout=15,
+        )
+        r.raise_for_status()
+        resp = r.json()
+        gql  = resp.get("data", {})
+
+        # ── social_delta: % change today vs yesterday ─────────────────────────
+        social_delta = 0.0
+        sv_data = (gql.get("social_volume") or {}).get("current") or []
+        if len(sv_data) >= 2:
+            prev = float(sv_data[-2].get("value") or 0)
+            curr = float(sv_data[-1].get("value") or 0)
+            if prev > 0:
+                social_delta = round(((curr - prev) / prev) * 100, 2)
+
+        # ── dev_activity: 7-day rolling average ──────────────────────────────
+        dev_activity = 0.0
+        dev_data = (gql.get("dev_activity") or {}).get("series") or []
+        if dev_data:
+            vals = [float(d.get("value") or 0) for d in dev_data[-7:]]
+            dev_activity = round(sum(vals) / len(vals), 2) if vals else 0.0
+
+        # ── daily_active_addresses: 7-day rolling average ─────────────────────
+        active_addresses = 0.0
+        addr_data = (gql.get("active_addresses") or {}).get("series") or []
+        if addr_data:
+            vals = [float(d.get("value") or 0) for d in addr_data[-7:]]
+            active_addresses = round(sum(vals) / len(vals), 0)
+
+        result = {
+            "social_delta":     social_delta,
+            "dev_activity":     dev_activity,
+            "active_addresses": active_addresses,
+        }
+        _SAN_CACHE[sym] = (time.time(), result)
+        logger.debug(
+            f"Santiment {sym} ({slug}): social_delta={social_delta}%, "
+            f"dev={dev_activity}, addr={active_addresses}"
+        )
+        return result
+
+    except Exception as e:
+        logger.warning(f"Santiment signals failed for {symbol}: {e}")
+        return zero
+
+
 def _cryptopanic_social_delta(symbol: str) -> float:
     """
     Derives a social momentum proxy from CryptoPanic vote ratios.
@@ -486,13 +771,23 @@ def get_social_delta(symbol: str) -> float:
     Returns a social momentum score used as the `social_delta` parameter
     in calculate_signals() to unlock the 3rd point of the S-score component.
 
-    Tier 1: CryptoCompare daily social histo (keyed, accurate % change)
-    Tier 2: CryptoPanic vote-ratio proxy (no key, always available)
-    Tier 3: 0.0 (graceful degradation — S-score capped at 2/3)
+    Tier 1: Santiment social_volume_total % change (keyed, real cross-platform data)
+    Tier 2: CryptoCompare daily social histo (keyed, accurate % change)
+    Tier 3: CryptoPanic vote-ratio proxy (no key, always available)
+    Tier 4: 0.0 (graceful degradation — S-score capped at 2/3)
 
     Positive values ≥ 5.0 award the extra S-score point.
     """
-    # Tier 1 — CryptoCompare (works until key expires / plan ends)
+    # Tier 1 — Santiment (best coverage: Telegram + Reddit + Twitter + on-chain)
+    if SAN_KEY:
+        san = get_santiment_signals(symbol)
+        delta = san.get("social_delta", 0.0)
+        if delta != 0.0:
+            logger.debug(f"social_delta {symbol}: Santiment → {delta}%")
+            return delta
+        # delta == 0 could be genuine flatline or missing slug; fall through
+
+    # Tier 2 — CryptoCompare (works until key expires / plan ends)
     if CC_KEY:
         coin_id = _cc_get_coin_id(symbol)
         if coin_id:
@@ -1042,5 +1337,35 @@ def health_check() -> dict:
                   {"fsym": "BTC", "tsyms": "USD"},
                   timeout=8)
         results["cryptocompare"] = "ok" if cc and "USD" in cc else "no_key"
+
+    # Coindar events
+    if COINDAR_KEY:
+        try:
+            r = requests.get(
+                f"{COINDAR_BASE}/coins",
+                params={"access_token": COINDAR_KEY},
+                timeout=10,
+            )
+            results["coindar"] = "ok" if r.status_code == 200 else "error"
+        except Exception:
+            results["coindar"] = "error"
+    else:
+        results["coindar"] = "no_key"
+
+    # Santiment social/dev/on-chain
+    if SAN_KEY:
+        try:
+            r = requests.post(
+                SAN_BASE,
+                json={"query": "{ currentUser { id } }"},
+                headers={"Authorization": f"Apikey {SAN_KEY}", "Content-Type": "application/json"},
+                timeout=10,
+            )
+            body = r.json() if r.status_code == 200 else {}
+            results["santiment"] = "ok" if r.status_code == 200 and "data" in body else "error"
+        except Exception:
+            results["santiment"] = "error"
+    else:
+        results["santiment"] = "no_key"
 
     return results

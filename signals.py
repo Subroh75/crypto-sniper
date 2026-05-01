@@ -95,7 +95,8 @@ def calculate_signals(
     indicators: dict,
     fear_greed: dict = None,
     cp_news: list = None,
-    social_delta: float = 0.0,  # % change in social score (LunarCrush)
+    social_delta: float = 0.0,  # % change in social score
+    coindar_events: list = None,  # from get_coindar_events()
 ) -> SignalResult:
     """
     Main signal calculation entry point.
@@ -221,12 +222,23 @@ def calculate_signals(
     if bull_n > bear_n and bull_n >= 2: s_score += 1
     # Social delta (1pt)
     if social_delta >= 5:               s_score += 1
+    # Coindar high-impact event within 7 days (bonus up to +1, capped by min(s_score,3))
+    events = coindar_events or []
+    high_soon = any(
+        e.get("impact") == "HIGH" and e.get("days_until", 99) <= 7
+        for e in events
+    )
+    if high_soon:
+        s_score += 1
     s_score = min(s_score, 3)
     # Update conviction signals with sentiment context
     if fg_val <= 25:   bull_signals.append(f"Fear&Greed {fg_val} - extreme fear, potential reversal")
     elif fg_val >= 75: bear_signals.append(f"Fear&Greed {fg_val} - extreme greed, fade risk")
     if bull_n > bear_n: bull_signals.append(f"News {bull_n} bullish vs {bear_n} bearish")
     elif bear_n > bull_n: bear_signals.append(f"News {bear_n} bearish vs {bull_n} bullish")
+    if high_soon:
+        ev = next((e for e in events if e.get("impact") == "HIGH" and e.get("days_until", 99) <= 7), {})
+        bull_signals.append(f"Coindar HIGH event in {ev.get('days_until',0)}d: {ev.get('caption','')[:60]}")
 
     # ── Total ──────────────────────────────────────────────────────────────
     total = v_score + p_score + r_score + t_score + s_score
