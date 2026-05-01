@@ -1022,89 +1022,103 @@ def _coincap_quote(symbol: str) -> dict:
 def get_indicators(symbol: str, interval: str = "1h") -> dict:
     """
     Compute RSI, EMAs, Bollinger Bands, ATR, ADX, MACD and VWAP directly
-    from Binance OHLCV klines.  No third-party key required.
+    from Binance OHLCV klines.  Pure Python — no external dependencies.
     Returns None for each field if bars are unavailable.
     """
-    import numpy as np
+    import math
+
+    _EMPTY = {k: None for k in ("rsi","adx","atr","ema20","ema50","ema200",
+                                 "bb_upper","bb_lower","macd","macd_hist","vwap")}
 
     bars = _binance_ohlcv(symbol, interval, limit=300)
     if len(bars) < 30:
-        return {k: None for k in ("rsi","adx","atr","ema20","ema50","ema200",
-                                   "bb_upper","bb_lower","macd","macd_hist","vwap")}
+        return _EMPTY
 
-    closes = np.array([b[4] for b in bars], dtype=float)
-    highs  = np.array([b[2] for b in bars], dtype=float)
-    lows   = np.array([b[3] for b in bars], dtype=float)
-    vols   = np.array([b[5] if len(b) > 5 else 0.0 for b in bars], dtype=float)
+    closes = [float(b[4]) for b in bars]
+    highs  = [float(b[2]) for b in bars]
+    lows   = [float(b[3]) for b in bars]
+    vols   = [float(b[5]) if len(b) > 5 else 0.0 for b in bars]
+    n      = len(closes)
 
-    def ema_arr(arr: np.ndarray, period: int) -> np.ndarray:
+    # ── EMA helper ───────────────────────────────────────────────────────────
+    def _ema(src: list, period: int) -> list:
         k = 2.0 / (period + 1)
-        out = np.empty_like(arr)
-        out[0] = arr[0]
-        for i in range(1, len(arr)):
-            out[i] = arr[i] * k + out[i-1] * (1 - k)
+        out = [src[0]]
+        for v in src[1:]:
+            out.append(v * k + out[-1] * (1 - k))
         return out
 
-    # EMAs
-    ema20  = float(ema_arr(closes, 20)[-1])
-    ema50  = float(ema_arr(closes, 50)[-1])
-    ema200 = float(ema_arr(closes, 200)[-1])
+    ema20_arr  = _ema(closes, 20)
+    ema50_arr  = _ema(closes, 50)
+    ema200_arr = _ema(closes, 200)
+    ema20_val  = ema20_arr[-1]
+    ema50_val  = ema50_arr[-1]
+    ema200_val = ema200_arr[-1]
 
-    # RSI-14
-    deltas = np.diff(closes)
-    gains  = np.where(deltas > 0, deltas, 0.0)
-    losses = np.where(deltas < 0, -deltas, 0.0)
-    avg_g  = np.mean(gains[-14:])
-    avg_l  = np.mean(losses[-14:])
+    # ── RSI-14 ────────────────────────────────────────────────────────────────
+    deltas = [closes[i] - closes[i-1] for i in range(1, n)]
+    gains  = [max(d, 0.0) for d in deltas]
+    losses = [max(-d, 0.0) for d in deltas]
+    avg_g  = sum(gains[-14:]) / 14
+    avg_l  = sum(losses[-14:]) / 14
     rsi    = 100.0 - 100.0 / (1 + avg_g / avg_l) if avg_l != 0 else 100.0
 
-    # ATR-14
-    tr = np.maximum(highs[1:] - lows[1:],
-         np.maximum(np.abs(highs[1:] - closes[:-1]),
-                    np.abs(lows[1:]  - closes[:-1])))
-    atr = float(np.mean(tr[-14:]))
+    # ── ATR-14 ────────────────────────────────────────────────────────────────
+    tr_vals = [
+        max(highs[i] - lows[i],
+            abs(highs[i] - closes[i-1]),
+            abs(lows[i]  - closes[i-1]))
+        for i in range(1, n)
+    ]
+    atr = sum(tr_vals[-14:]) / 14
 
-    # Bollinger Bands (20, 2σ)
-    ma20  = np.mean(closes[-20:])
-    sd20  = np.std(closes[-20:])
-    bb_upper = float(ma20 + 2 * sd20)
-    bb_lower = float(ma20 - 2 * sd20)
+    # ── Bollinger Bands (20, 2σ) ──────────────────────────────────────────────
+    c20   = closes[-20:]
+    ma20  = sum(c20) / 20
+    sd20  = math.sqrt(sum((x - ma20) ** 2 for x in c20) / 20)
+    bb_upper = ma20 + 2 * sd20
+    bb_lower = ma20 - 2 * sd20
 
-    # MACD (12,26,9)
-    ema12 = ema_arr(closes, 12)
-    ema26 = ema_arr(closes, 26)
-    macd_line   = ema12 - ema26
-    signal_line = ema_arr(macd_line, 9)
-    macd_val  = float(macd_line[-1])
-    macd_hist = float(macd_line[-1] - signal_line[-1])
+    # ── MACD (12, 26, 9) ──────────────────────────────────────────────────────
+    ema12_arr   = _ema(closes, 12)
+    ema26_arr   = _ema(closes, 26)
+    macd_line   = [ema12_arr[i] - ema26_arr[i] for i in range(n)]
+    signal_line = _ema(macd_line, 9)
+    macd_val    = macd_line[-1]
+    macd_hist   = macd_line[-1] - signal_line[-1]
 
-    # ADX-14
+    # ── ADX-14 ────────────────────────────────────────────────────────────────
     try:
-        plus_dm  = np.where((highs[1:] - highs[:-1]) > (lows[:-1] - lows[1:]),
-                            np.maximum(highs[1:] - highs[:-1], 0), 0)
-        minus_dm = np.where((lows[:-1] - lows[1:]) > (highs[1:] - highs[:-1]),
-                            np.maximum(lows[:-1] - lows[1:], 0), 0)
-        tr14     = np.mean(tr[-14:])
-        plus_di  = 100 * np.mean(plus_dm[-14:]) / tr14 if tr14 else 0
-        minus_di = 100 * np.mean(minus_dm[-14:]) / tr14 if tr14 else 0
-        dx       = 100 * abs(plus_di - minus_di) / (plus_di + minus_di) if (plus_di + minus_di) else 0
-        adx      = float(dx)
+        plus_dm  = [max(highs[i] - highs[i-1], 0.0)
+                    if (highs[i] - highs[i-1]) > (lows[i-1] - lows[i]) else 0.0
+                    for i in range(1, n)]
+        minus_dm = [max(lows[i-1] - lows[i], 0.0)
+                    if (lows[i-1] - lows[i]) > (highs[i] - highs[i-1]) else 0.0
+                    for i in range(1, n)]
+        tr14     = sum(tr_vals[-14:]) / 14
+        plus_di  = 100 * sum(plus_dm[-14:]) / 14 / tr14 if tr14 else 0.0
+        minus_di = 100 * sum(minus_dm[-14:]) / 14 / tr14 if tr14 else 0.0
+        denom    = plus_di + minus_di
+        adx      = 100 * abs(plus_di - minus_di) / denom if denom else 0.0
     except Exception:
         adx = None
 
-    # VWAP (session — from first bar to last)
-    typical = (highs + lows + closes) / 3
-    cum_tp_vol = np.cumsum(typical * vols)
-    cum_vol    = np.cumsum(vols)
-    vwap = float(cum_tp_vol[-1] / cum_vol[-1]) if cum_vol[-1] else float(closes[-1])
+    # ── VWAP ─────────────────────────────────────────────────────────────────
+    cum_pv  = 0.0
+    cum_vol = 0.0
+    for i in range(n):
+        tp = (highs[i] + lows[i] + closes[i]) / 3
+        cum_pv  += tp * vols[i]
+        cum_vol += vols[i]
+    vwap = cum_pv / cum_vol if cum_vol else closes[-1]
 
     return {
         "rsi":       round(rsi, 2),
         "adx":       round(adx, 2) if adx is not None else None,
         "atr":       round(atr, 6),
-        "ema20":     round(ema20, 6),
-        "ema50":     round(ema50, 6),
-        "ema200":    round(ema200, 6),
+        "ema20":     round(ema20_val, 6),
+        "ema50":     round(ema50_val, 6),
+        "ema200":    round(ema200_val, 6),
         "bb_upper":  round(bb_upper, 6),
         "bb_lower":  round(bb_lower, 6),
         "macd":      round(macd_val, 6),
