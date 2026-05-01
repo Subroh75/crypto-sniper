@@ -25,7 +25,6 @@ import { SignalStreakHeatmap } from "@/components/SignalStreakHeatmap";
 import { PriceAlertCard, subscribeAlertBadge, markAlertsRead } from "@/components/PriceAlertCard";
 import type { AlertHistoryEntry } from "@/components/PriceAlertCard";
 import { ScanAlertPoller } from "@/components/ScanAlertPoller";
-import { VolumeSurgeCard } from "@/components/VolumeSurgeCard";
 import { AuthModal, AuthButton } from "@/components/AuthModal";
 import { PWAInstallBanner } from "@/components/PWAInstallBanner";
 import {
@@ -544,11 +543,6 @@ export default function Home() {
                   </div>
                 </div>
               </Card>
-
-              {/* 02b: Volume Surge — coins with unusual volume vs baseline */}
-              <VolumeSurgeCard
-                onSelect={(sym) => { runAnalysis(sym); if (isMobile) setMobileTab("analyse"); }}
-              />
 
               {/* 02c: Price Chart */}
               <PriceChart
