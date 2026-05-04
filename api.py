@@ -1667,9 +1667,17 @@ async def pdf_report(payload: dict):
             pdf.line(14, pdf.get_y(), 196, pdf.get_y())
             pdf.ln(4)
 
-    # ── FOOTER ──────────────────────────────────────────────────────────────────
-    pdf.set_y(-14)
+    # ── FOOTER — inline (no set_y(-n) to avoid blank page) ────────────────────
+    pdf.set_auto_page_break(auto=False)
+    # Only draw footer on the last page — position it 12mm from physical bottom
+    footer_y = pdf.h - 12
+    # If current y is already past footer zone, just append inline
+    if pdf.get_y() < footer_y - 4:
+        pdf.set_y(footer_y)
+    else:
+        pdf.ln(4)
     pdf.set_draw_color(226, 232, 240)
+    pdf.set_line_width(0.3)
     pdf.line(14, pdf.get_y(), 196, pdf.get_y())
     pdf.ln(2)
     pdf.set_font("Helvetica", "", 6.5)
