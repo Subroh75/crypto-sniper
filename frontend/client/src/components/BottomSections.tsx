@@ -40,17 +40,17 @@ export function TrendingSection({ onSelect }: { onSelect: (sym: string) => void 
       <div className="p-4">
         {loading ? (
           <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
-            {Array.from({ length: 5 }).map((_, i) => (
-              <div key={i} className="h-20 bg-surface-2 rounded-lg animate-pulse border border-border/30" />
+            {Array.from({ length: 6 }).map((_, i) => (
+              <div key={i} className={`h-20 bg-surface-2 rounded-lg animate-pulse border border-border/30${i === 5 ? " sm:hidden" : ""}`} />
             ))}
           </div>
         ) : (
           <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
-            {coins.slice(0, 5).map((coin) => (
+            {coins.slice(0, 6).map((coin, idx) => (
               <button
                 key={coin.symbol}
                 onClick={() => onSelect(coin.symbol)}
-                className="flex flex-col items-center gap-1.5 p-3 rounded-lg border border-border/50 bg-surface-2 hover:border-purple/40 transition-all text-center"
+                className={`flex flex-col items-center gap-1.5 p-3 rounded-lg border border-border/50 bg-surface-2 hover:border-purple/40 transition-all text-center${idx === 5 ? " sm:hidden" : ""}`}
               >
                 <span className="text-[9px] font-mono text-text-muted/60">#{coin.rank}</span>
                 <span className={`text-[14px] font-mono font-black ${
