@@ -1329,11 +1329,12 @@ async def rebuild_baseline(interval: str = "1h", max_coins: int = 500):
 # ── PDF Report Endpoint ────────────────────────────────────────────────────────
 from fastapi.responses import Response as _FResponse
 
+
 @app.post("/pdf-report")
 async def pdf_report(payload: dict):
     """
     Generate a light-theme PDF for a single coin analysis result.
-    Accepts the full analyse response body + optional symbol/interval overrides.
+    Accepts the full analyse response body.
     Returns application/pdf — works on all devices including mobile Safari.
     """
     import io
@@ -1360,14 +1361,16 @@ async def pdf_report(payload: dict):
     sig_obj   = payload.get("signal", {})
     score     = sig_obj.get("total", 0)
     score_max = sig_obj.get("max", 16)
-    signal    = sig_obj.get("label", "")
-    direction = sig_obj.get("direction", "")
+    signal    = sig_obj.get("label", "NO SIGNAL")
 
     comp   = payload.get("components", {})
     mkt    = payload.get("structure", {})
     timing = payload.get("timing", {})
     quote  = payload.get("quote", {})
+    ts     = payload.get("trade_setup", {})
+    agents = payload.get("agents", {})
 
+    # Market structure
     close   = mkt.get("close", quote.get("price", 0))
     ema20   = mkt.get("ema20", 0)
     ema50   = mkt.get("ema50", 0)
@@ -1376,41 +1379,49 @@ async def pdf_report(payload: dict):
     bb_u    = mkt.get("bb_upper", 0)
     bb_l    = mkt.get("bb_lower", 0)
 
-    rsi     = timing.get("rsi", 0)
-    adx     = timing.get("adx", 0)
-    atr     = timing.get("atr", 0)
-    rv      = timing.get("rel_volume", 0)
-    plus_di = timing.get("plus_di", 0)
-    minus_di= timing.get("minus_di", 0)
+    # Timing
+    rsi  = timing.get("rsi", 0)
+    adx  = timing.get("adx", 0)
+    atr  = timing.get("atr", 0)
+    rv   = timing.get("rel_volume", 0)
 
-    def _comp_detail(key):
+    # Quote
+    change_24h  = quote.get("change_24h", 0)
+    high_24h    = quote.get("high_24h", 0)
+    low_24h     = quote.get("low_24h", 0)
+
+    # Trade setup — handle both key naming conventions
+    ts_entry   = ts.get("entry") if ts else None
+    ts_stop    = ts.get("stop") if ts else None
+    ts_target  = ts.get("target") or ts.get("target1") if ts else None
+    ts_rr      = ts.get("rr_ratio") or ts.get("rr") if ts else None
+    ts_stop_pct= ts.get("stop_dist_pct") if ts else None
+
+    # VPRT components
+    def _comp(key):
         c = comp.get(key, {})
         return c.get("score", 0), c.get("max", 0), c.get("detail", "")
 
-    v_sc, v_mx, v_det = _comp_detail("V")
-    p_sc, p_mx, p_det = _comp_detail("P")
-    r_sc, r_mx, r_det = _comp_detail("R")
-    t_sc, t_mx, t_det = _comp_detail("T")
+    v_sc, v_mx, v_det = _comp("V")
+    p_sc, p_mx, p_det = _comp("P")
+    r_sc, r_mx, r_det = _comp("R")
+    t_sc, t_mx, t_det = _comp("T")
 
-    # Confluence
-    confluence = (1 if adx >= 20 else 0) + (1 if rv >= 1.5 else 0) + (1 if 45 <= rsi <= 72 else 0)
-    c_label = "ALIGNED" if confluence == 3 else "PARTIAL" if confluence == 2 else "WEAK"
-
-    # Signal colour (for text)
+    # Signal colour
     if score >= 9:
-        sig_r, sig_g, sig_b = 16, 185, 129   # green
+        sig_r, sig_g, sig_b = 16, 185, 129
     elif score >= 5:
-        sig_r, sig_g, sig_b = 245, 158, 11   # amber
+        sig_r, sig_g, sig_b = 245, 158, 11
     else:
-        sig_r, sig_g, sig_b = 100, 116, 139  # muted
+        sig_r, sig_g, sig_b = 100, 116, 139
 
     # ── Build PDF ───────────────────────────────────────────────────────────────
     pdf = FPDF()
     pdf.add_page()
-    pdf.set_auto_page_break(auto=True, margin=12)
+    pdf.set_auto_page_break(auto=True, margin=14)
     pdf.set_margins(14, 10, 14)
 
-    # --- HEADER BAR ---
+    # ── HEADER BAR ──────────────────────────────────────────────────────────────
     pdf.set_fill_color(15, 23, 42)
     pdf.rect(0, 0, 210, 28, "F")
     pdf.set_font("Helvetica", "B", 14)
@@ -1420,24 +1431,58 @@ async def pdf_report(payload: dict):
     pdf.set_font("Helvetica", "", 8)
     pdf.set_text_color(100, 116, 139)
     pdf.set_xy(14, 16)
-    pdf.cell(0, 5, _p("DETECT EARLY. ACT SMART."), ln=True)
-
-    # Scan timestamp top-right
+    pdf.cell(0, 5, _p("DETECT EARLY. ACT SMART."), ln=False)
     pdf.set_font("Helvetica", "", 7)
     pdf.set_text_color(100, 116, 139)
-    pdf.set_xy(120, 9)
-    pdf.cell(76, 5, _p(f"{symbol}/USDT  |  {interval}  |  {now_str}"), align="R", ln=True)
-
+    pdf.set_xy(110, 9)
+    pdf.cell(86, 5, _p(f"{symbol}/USDT  |  {interval}  |  {now_str}"), align="R")
     pdf.ln(4)
 
-    # --- SIGNAL VERDICT ---
-    pdf.set_font("Helvetica", "B", 22)
+    # ── SIGNAL VERDICT ──────────────────────────────────────────────────────────
+    pdf.set_font("Helvetica", "B", 24)
     pdf.set_text_color(sig_r, sig_g, sig_b)
-    pdf.cell(0, 12, _p(f"{signal}"), ln=True, align="C")
+    pdf.cell(0, 13, _p(signal), ln=True, align="C")
     pdf.set_font("Helvetica", "", 10)
     pdf.set_text_color(71, 85, 105)
     pdf.cell(0, 6, _p(f"Score  {score} / {score_max}"), ln=True, align="C")
-    pdf.ln(3)
+    pdf.ln(1)
+
+    # Quick stats row: price / 24h chg / RSI / ADX / RV
+    stats = [
+        ("CLOSE", f"${close:.6g}"),
+        ("24H",   f"{change_24h:+.2f}%"),
+        ("RSI",   f"{rsi:.0f}"),
+        ("ADX",   f"{adx:.0f}"),
+        ("VOL",   f"{rv:.1f}x"),
+    ]
+    col_w5 = 182 / len(stats)
+    pdf.set_font("Helvetica", "B", 7)
+    pdf.set_text_color(100, 116, 139)
+    x0 = 14
+    for lbl, val in stats:
+        pdf.set_xy(x0, pdf.get_y())
+        pdf.cell(col_w5, 4.5, _p(lbl), align="C")
+        x0 += col_w5
+    pdf.ln(4.5)
+    x0 = 14
+    for lbl, val in stats:
+        # colour 24H
+        if lbl == "24H":
+            vc = (16,185,129) if change_24h >= 0 else (239,68,68)
+        elif lbl == "RSI":
+            vc = (239,68,68) if rsi >= 70 else (16,185,129) if rsi <= 30 else (30,41,59)
+        elif lbl == "VOL":
+            vc = (16,185,129) if rv >= 2 else (245,158,11) if rv >= 1.5 else (30,41,59)
+        elif lbl == "ADX":
+            vc = (16,185,129) if adx >= 25 else (245,158,11)
+        else:
+            vc = (30,41,59)
+        pdf.set_xy(x0, pdf.get_y())
+        pdf.set_font("Helvetica", "B", 9)
+        pdf.set_text_color(*vc)
+        pdf.cell(col_w5, 5, _p(val), align="C")
+        x0 += col_w5
+    pdf.ln(7)
 
     # Divider
     pdf.set_draw_color(226, 232, 240)
@@ -1445,7 +1490,7 @@ async def pdf_report(payload: dict):
     pdf.line(14, pdf.get_y(), 196, pdf.get_y())
     pdf.ln(4)
 
-    # --- HELPER FUNCTIONS ---
+    # ── HELPERS ─────────────────────────────────────────────────────────────────
     def section_hdr(title):
         pdf.set_font("Helvetica", "B", 8)
         pdf.set_text_color(100, 116, 139)
@@ -1453,18 +1498,10 @@ async def pdf_report(payload: dict):
         pdf.cell(0, 6, _p(f"  {title.upper()}"), ln=True, fill=True)
         pdf.ln(1)
 
-    def kv(label, value, val_color=None):
-        pdf.set_font("Helvetica", "B", 8)
-        pdf.set_text_color(100, 116, 139)
-        pdf.cell(58, 5.5, _p(label), ln=False)
-        pdf.set_font("Helvetica", "", 8)
-        if val_color:
-            pdf.set_text_color(*val_color)
-        else:
-            pdf.set_text_color(30, 41, 59)
-        pdf.cell(0, 5.5, _p(str(value)), ln=True)
+    def pos_color(price, ref):
+        return (16, 185, 129) if price > ref else (239, 68, 68)
 
-    def score_pill(label, sc, mx, detail=""):
+    def score_pill(x, y, label, sc, mx, detail=""):
         ratio = sc / mx if mx else 0
         if sc == 0:
             r, g, b = 100, 116, 139
@@ -1474,123 +1511,164 @@ async def pdf_report(payload: dict):
             r, g, b = 245, 158, 11
         else:
             r, g, b = 239, 68, 68
-        x = pdf.get_x(); y = pdf.get_y()
-        # Background pill
-        pdf.set_fill_color(r // 6, g // 6, b // 6)
+        pw, ph = 44, 16
+        pdf.set_fill_color(max(r//8,10), max(g//8,10), max(b//8,10))
         pdf.set_draw_color(r, g, b)
-        pdf.set_line_width(0.2)
-        pdf.rect(x, y, 42, 14, "FD")
-        pdf.set_font("Helvetica", "B", 11)
+        pdf.set_line_width(0.3)
+        pdf.rect(x, y, pw, ph, "FD")
+        pdf.set_font("Helvetica", "B", 12)
         pdf.set_text_color(r, g, b)
         pdf.set_xy(x + 2, y + 1.5)
-        pdf.cell(20, 5, _p(label))
+        pdf.cell(18, 6, _p(label))
         pdf.set_font("Helvetica", "B", 9)
-        pdf.set_xy(x + 24, y + 1)
-        pdf.cell(16, 5, _p(f"{sc}/{mx}"), align="R")
+        pdf.set_xy(x + 22, y + 1.5)
+        pdf.cell(20, 6, _p(f"{sc}/{mx}"), align="R")
         if detail:
             pdf.set_font("Helvetica", "", 6.5)
             pdf.set_text_color(100, 116, 139)
-            pdf.set_xy(x + 2, y + 8)
-            pdf.cell(38, 4, _p(str(detail)[:20]))
-        return x + 44  # next pill x
+            pdf.set_xy(x + 2, y + 9.5)
+            pdf.cell(40, 4, _p(str(detail)[:22]))
 
-    # --- SCORE COMPONENTS ---
-    section_hdr("Signal Components V/P/R/T  +  Confluence")
-    start_x = 14
-    gap = 2
-    pill_w = 42
-
-    pills = [
-        ("V", v_sc, v_mx, v_det),
-        ("P", p_sc, p_mx, p_det),
-        ("R", r_sc, r_mx, r_det),
-        ("T", t_sc, t_mx, t_det),
-        ("C", confluence, 3, c_label),
-    ]
+    # ── SCORE PILLS — VPRT only ─────────────────────────────────────────────────
+    section_hdr("Signal Components  V / P / R / T")
+    pill_w = 44
+    gap    = 3
+    total_w = 4 * pill_w + 3 * gap   # 188
+    start_x = (210 - total_w) / 2
     y0 = pdf.get_y()
+    pills = [("V", v_sc, v_mx, v_det), ("P", p_sc, p_mx, p_det),
+             ("R", r_sc, r_mx, r_det), ("T", t_sc, t_mx, t_det)]
     for i, (lbl, sc, mx, det) in enumerate(pills):
-        pdf.set_xy(start_x + i * (pill_w + gap), y0)
-        score_pill(lbl, sc, mx, det)
-    pdf.ln(18)
+        score_pill(start_x + i * (pill_w + gap), y0, lbl, sc, mx, det)
+    pdf.ln(22)
 
-    # --- 2-COLUMN LAYOUT: market structure + timing ---
-    col_w = 86
+    # ── 2-COLUMN: MARKET STRUCTURE + TIMING QUALITY ─────────────────────────────
+    col_w  = 85
     left_x = 14
-    right_x = 14 + col_w + 6
-    y_start = pdf.get_y()
+    right_x = left_x + col_w + 8
+    y_cols = pdf.get_y()
 
-    # LEFT — Market Structure
-    pdf.set_xy(left_x, y_start)
-    section_hdr("Market Structure")
-    def kv_at(x, label, value, vc=None):
+    def kv_col(x, label, value, vc=None):
         pdf.set_x(x)
         pdf.set_font("Helvetica", "B", 8)
         pdf.set_text_color(100, 116, 139)
-        pdf.cell(40, 5.5, _p(label))
+        pdf.cell(38, 5.5, _p(label))
         pdf.set_font("Helvetica", "", 8)
         pdf.set_text_color(*(vc if vc else (30, 41, 59)))
-        pdf.cell(col_w - 40, 5.5, _p(str(value)), ln=True)
+        pdf.cell(col_w - 38, 5.5, _p(str(value)), ln=True)
 
-    def pos_color(price, ref):
-        return (16, 185, 129) if price > ref else (239, 68, 68)
-
-    pdf.set_x(left_x)
-    kv_at(left_x, "Close",   f"${close:.6g}")
-    kv_at(left_x, "EMA 20",  f"{ema20:.6g}  {'above' if close > ema20 else 'below'}", pos_color(close, ema20) if ema20 else None)
-    kv_at(left_x, "EMA 50",  f"{ema50:.6g}  {'above' if close > ema50 else 'below'}", pos_color(close, ema50) if ema50 else None)
-    kv_at(left_x, "EMA 200", f"{ema200:.6g}  {'above' if close > ema200 else 'below'}", pos_color(close, ema200) if ema200 else None)
-    kv_at(left_x, "VWAP",    f"{vwap:.6g}  {'above' if close > vwap else 'below'}", pos_color(close, vwap) if vwap else None)
-    kv_at(left_x, "BB Band", f"{bb_l:.5g} - {bb_u:.5g}" if bb_u else "n/a")
-
+    # LEFT — Market Structure
+    pdf.set_xy(left_x, y_cols)
+    section_hdr("Market Structure")
+    pdf.set_x(left_x); kv_col(left_x, "Close",   f"${close:.6g}")
+    pdf.set_x(left_x); kv_col(left_x, "EMA 20",  f"{ema20:.6g}  {'above' if close > ema20 else 'below'}", pos_color(close, ema20) if ema20 else None)
+    pdf.set_x(left_x); kv_col(left_x, "EMA 50",  f"{ema50:.6g}  {'above' if close > ema50 else 'below'}", pos_color(close, ema50) if ema50 else None)
+    pdf.set_x(left_x); kv_col(left_x, "EMA 200", f"{ema200:.6g}  {'above' if close > ema200 else 'below'}", pos_color(close, ema200) if ema200 else None)
+    pdf.set_x(left_x); kv_col(left_x, "VWAP",    f"{vwap:.6g}  {'above' if close > vwap else 'below'}", pos_color(close, vwap) if vwap else None)
+    pdf.set_x(left_x); kv_col(left_x, "BB Upper", f"{bb_u:.6g}" if bb_u else "n/a")
+    pdf.set_x(left_x); kv_col(left_x, "BB Lower", f"{bb_l:.6g}" if bb_l else "n/a")
+    if high_24h:
+        pdf.set_x(left_x); kv_col(left_x, "24H High", f"${high_24h:.6g}")
+    if low_24h:
+        pdf.set_x(left_x); kv_col(left_x, "24H Low",  f"${low_24h:.6g}")
     y_after_left = pdf.get_y()
 
     # RIGHT — Timing Quality
-    pdf.set_xy(right_x, y_start)
+    pdf.set_xy(right_x, y_cols)
     section_hdr("Timing Quality")
-    def kv_r(label, value, vc=None):
-        pdf.set_x(right_x)
-        pdf.set_font("Helvetica", "B", 8)
-        pdf.set_text_color(100, 116, 139)
-        pdf.cell(40, 5.5, _p(label))
-        pdf.set_font("Helvetica", "", 8)
-        pdf.set_text_color(*(vc if vc else (30, 41, 59)))
-        pdf.cell(col_w - 40, 5.5, _p(str(value)), ln=True)
-
-    pdf.set_xy(right_x, y_start + 7)
-    rsi_c  = (239,68,68) if rsi >= 70 else (16,185,129) if rsi <= 30 else (245,158,11)
-    adx_c  = (16,185,129) if adx >= 25 else (245,158,11)
-    rv_c   = (16,185,129) if rv >= 2 else (245,158,11)
-    kv_r("RSI 14",    f"{rsi:.1f}  {'OVERBOUGHT' if rsi>=70 else 'OVERSOLD' if rsi<=30 else 'NEUTRAL'}", rsi_c)
-    kv_r("ADX 14",    f"{adx:.1f}  {'Trending' if adx>=20 else 'Ranging'}", adx_c)
-    kv_r("+DI / -DI", f"{plus_di:.1f}  /  {minus_di:.1f}")
-    kv_r("Rel Volume",f"{rv:.1f}x", rv_c)
+    rsi_c = (239,68,68) if rsi >= 70 else (16,185,129) if rsi <= 30 else (245,158,11)
+    adx_c = (16,185,129) if adx >= 25 else (245,158,11)
+    rv_c  = (16,185,129) if rv >= 2 else (245,158,11) if rv >= 1.5 else (100,116,139)
+    pdf.set_xy(right_x, y_cols + 7)
+    kv_col(right_x, "RSI 14",     f"{rsi:.1f}  {'OVERBOUGHT' if rsi>=70 else 'OVERSOLD' if rsi<=30 else 'NEUTRAL'}", rsi_c)
+    pdf.set_x(right_x); kv_col(right_x, "ADX 14",     f"{adx:.1f}  {'Trending' if adx>=20 else 'Ranging'}", adx_c)
+    pdf.set_x(right_x); kv_col(right_x, "Rel Volume",  f"{rv:.1f}x", rv_c)
     if atr and close:
-        kv_r("ATR 14",  f"{atr:.4g}  ({atr/close*100:.2f}% of price)")
-    kv_r("Confluence",f"{confluence}/3  {c_label}", (16,185,129) if confluence==3 else (245,158,11) if confluence==2 else (239,68,68))
+        pdf.set_x(right_x); kv_col(right_x, "ATR 14", f"{atr:.4g}  ({atr/close*100:.2f}% of price)")
+    y_after_right = pdf.get_y()
 
     # Advance past both columns
-    pdf.set_y(max(y_after_left, pdf.get_y()) + 3)
+    pdf.set_y(max(y_after_left, y_after_right) + 4)
 
     # Divider
     pdf.set_draw_color(226, 232, 240)
     pdf.line(14, pdf.get_y(), 196, pdf.get_y())
-    pdf.ln(3)
+    pdf.ln(4)
 
-    # --- TRADE SETUP (if available) ---
-    ts = payload.get("trade_setup")
-    if ts and isinstance(ts, dict) and ts.get("entry"):
+    # ── TRADE SETUP ─────────────────────────────────────────────────────────────
+    if ts_entry:
         section_hdr("Trade Setup")
-        rr = ts.get("rr", ts.get("risk_reward",""))
-        kv("Entry",    f"${ts.get('entry','n/a')}")
-        kv("Stop",     f"${ts.get('stop','n/a')}", (239,68,68))
-        kv("Target 1", f"${ts.get('target1', ts.get('t1','n/a'))}", (16,185,129))
-        kv("Target 2", f"${ts.get('target2', ts.get('t2','n/a'))}", (16,185,129))
-        if rr:
-            kv("Risk : Reward", str(rr))
-        pdf.ln(2)
+        ts_col_w = 182 / 4
+        labels = ["ENTRY", "STOP", "TARGET", "R:R"]
+        values = [
+            f"${ts_entry:.6g}" if ts_entry else "n/a",
+            f"${ts_stop:.6g}" if ts_stop else "n/a",
+            f"${ts_target:.6g}" if ts_target else "n/a",
+            f"{ts_rr:.2f}" if ts_rr else "n/a",
+        ]
+        colors = [
+            (30, 41, 59),
+            (239, 68, 68),
+            (16, 185, 129),
+            (16, 185, 129),
+        ]
+        x0 = 14
+        pdf.set_font("Helvetica", "B", 7)
+        pdf.set_text_color(100, 116, 139)
+        for lbl in labels:
+            pdf.set_xy(x0, pdf.get_y()); pdf.cell(ts_col_w, 5, _p(lbl), align="C")
+            x0 += ts_col_w
+        pdf.ln(5)
+        x0 = 14
+        for val, vc in zip(values, colors):
+            pdf.set_xy(x0, pdf.get_y())
+            pdf.set_font("Helvetica", "B", 10)
+            pdf.set_text_color(*vc)
+            pdf.cell(ts_col_w, 7, _p(val), align="C")
+            x0 += ts_col_w
+        pdf.ln(9)
+        if ts_stop_pct:
+            pdf.set_font("Helvetica", "", 7)
+            pdf.set_text_color(100, 116, 139)
+            pdf.cell(0, 4, _p(f"Stop distance: {abs(ts_stop_pct):.2f}% from entry"), ln=True, align="C")
+        pdf.ln(3)
 
-    # --- FOOTER ---
-    pdf.set_y(-16)
+        pdf.set_draw_color(226, 232, 240)
+        pdf.line(14, pdf.get_y(), 196, pdf.get_y())
+        pdf.ln(4)
+
+    # ── AI AGENTS ───────────────────────────────────────────────────────────────
+    if agents and isinstance(agents, dict):
+        has_agents = any(agents.get(k) for k in ["bull", "bear", "risk", "cio"])
+        if has_agents:
+            section_hdr("AI Agent Debate")
+            agent_defs = [
+                ("bull",  "BULL",         (16,185,129)),
+                ("bear",  "BEAR",         (239,68,68)),
+                ("risk",  "RISK MANAGER", (245,158,11)),
+                ("cio",   "CIO",          (124,58,237)),
+            ]
+            for key, lbl, color in agent_defs:
+                agent = agents.get(key)
+                if not agent:
+                    continue
+                verdict = agent.get("verdict", "")
+                text    = agent.get("text", "") or agent.get("analysis", "")
+                pdf.set_font("Helvetica", "B", 8)
+                pdf.set_text_color(*color)
+                pdf.cell(0, 6, _p(f"{lbl}  —  {verdict}"), ln=True)
+                if text:
+                    pdf.set_font("Helvetica", "", 7.5)
+                    pdf.set_text_color(51, 65, 85)
+                    pdf.multi_cell(0, 4.5, _p(text[:500]))
+                pdf.ln(2)
+
+            pdf.set_draw_color(226, 232, 240)
+            pdf.line(14, pdf.get_y(), 196, pdf.get_y())
+            pdf.ln(4)
+
+    # ── FOOTER ──────────────────────────────────────────────────────────────────
+    pdf.set_y(-14)
     pdf.set_draw_color(226, 232, 240)
     pdf.line(14, pdf.get_y(), 196, pdf.get_y())
     pdf.ln(2)
@@ -1598,10 +1676,8 @@ async def pdf_report(payload: dict):
     pdf.set_text_color(148, 163, 184)
     pdf.cell(0, 4, _p(f"Generated by Crypto Sniper  |  crypto-sniper.app  |  {now_str}  |  Not financial advice."), align="C", ln=True)
 
-    # Output to bytes
-    buf = io.BytesIO()
+    # Output
     pdf_bytes = pdf.output()
-
     return _FResponse(
         content=bytes(pdf_bytes),
         media_type="application/pdf",
