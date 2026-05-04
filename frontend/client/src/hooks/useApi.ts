@@ -393,30 +393,40 @@ export function useAlerts(email: string | null) {
 export function usePdfExport() {
   const [exporting, setExporting] = useState(false);
 
-  const exportPdf = useCallback(async (elementId: string, filename = "crypto-sniper-report.pdf") => {
+  // Server-side PDF generation — works on all devices including mobile Safari.
+  // Sends the current analyse result to POST /pdf-report and downloads the PDF blob.
+  const exportPdf = useCallback(async (
+    _elementId: string,
+    filename = "crypto-sniper-report.pdf",
+    analyseData?: Record<string, unknown>,
+  ) => {
     setExporting(true);
     try {
-      const [{ default: jsPDF }, { default: html2canvas }] = await Promise.all([
-        import("jspdf"),
-        import("html2canvas"),
-      ]);
+      const API = (import.meta as Record<string, unknown> & { env?: Record<string, string> })
+        .env?.VITE_API_BASE ?? "https://crypto-sniper.onrender.com";
 
-      const el = document.getElementById(elementId);
-      if (!el) throw new Error("Element not found");
-
-      const canvas = await html2canvas(el, {
-        scale: 2,
-        useCORS: true,
-        backgroundColor: "#060912",
+      const res = await fetch(`${API}/pdf-report`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(analyseData ?? {}),
       });
 
-      const imgData = canvas.toDataURL("image/png");
-      const pdf     = new jsPDF("p", "mm", "a4");
-      const w       = pdf.internal.pageSize.getWidth();
-      const h       = (canvas.height * w) / canvas.width;
+      if (!res.ok) throw new Error(`PDF generation failed: ${res.status}`);
 
-      pdf.addImage(imgData, "PNG", 0, 0, w, h);
-      pdf.save(filename);
+      const blob = await res.blob();
+      const url  = URL.createObjectURL(blob);
+
+      // Works on mobile: create a hidden anchor and trigger click
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      a.style.display = "none";
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => {
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }, 1000);
     } catch (e) {
       console.error("PDF export failed:", e);
     } finally {

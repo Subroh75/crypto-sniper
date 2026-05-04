@@ -229,7 +229,7 @@ export default function Home() {
 
   const [symbol,   setSymbol]   = useState("BTC");
   const [input,    setInput]    = useState("");
-  const [interval, setInterval] = useState("1H");
+  const [interval, setInterval] = useState("1D");
 
   const [alertEmail,   setAlertEmail]   = useState("");
   const [alertOpen,    setAlertOpen]    = useState(false);
@@ -499,7 +499,7 @@ export default function Home() {
                       <span>VOL <span className={(sig.timing?.rel_volume ?? 0) >= 2 ? "text-teal font-bold" : "text-amber font-bold"}>{(sig.timing?.rel_volume ?? 0).toFixed(1)}x</span></span>
                       <span>ADX <span className={(sig.timing?.adx ?? 0) >= 25 ? "text-teal font-bold" : "text-amber font-bold"}>{(sig.timing?.adx ?? 0).toFixed(0)}</span></span>
                       <span>RSI <span className={(sig.timing?.rsi ?? 50) >= 70 ? "text-red font-bold" : (sig.timing?.rsi ?? 50) <= 30 ? "text-teal font-bold" : "text-amber font-bold"}>{(sig.timing?.rsi ?? 50).toFixed(0)}</span></span>
-                      <span>S <span className="text-orange font-bold">{sig.components.S.score * 4}%</span></span>
+                      <span>CONF <span className={(sig.timing?.adx ?? 0) >= 20 && (sig.timing?.rel_volume ?? 0) >= 1.5 ? "text-teal font-bold" : "text-amber font-bold"}>{((sig.timing?.adx ?? 0) >= 20 ? 1 : 0) + ((sig.timing?.rel_volume ?? 0) >= 1.5 ? 1 : 0) + ((sig.timing?.rsi ?? 50) >= 45 && (sig.timing?.rsi ?? 50) <= 72 ? 1 : 0)}/3</span></span>
                     </div>
                   </div>
                 </div>
@@ -507,18 +507,17 @@ export default function Home() {
 
               {/* 02: Signal Components */}
               <Card>
-                <CardHeader num="02" title="SIGNAL COMPONENTS V/P/R/T/S" />
+                <CardHeader num="02" title="SIGNAL COMPONENTS V/P/R/T" />
                 <div className="p-4">
-                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2">
-                    {(["V","P","R","T","S"] as const).map(key => {
+                  <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-5 gap-2">
+                    {(["V","P","R","T"] as const).map(key => {
                       const comp = sig.components[key];
-                      // Colour driven by score ratio: bullish=green, partial=amber, weak=red, zero=muted
                       const ratio = comp.max > 0 ? comp.score / comp.max : 0;
                       const color =
-                        comp.score === 0   ? "#4a5470"   // zero — muted grey
-                        : ratio >= 0.67   ? "#22c55e"   // 2/3+ of max — bullish green
-                        : ratio >= 0.34   ? "#f59e0b"   // 1/3–2/3 — amber/neutral
-                        : "#ef4444";                    // below 1/3 — bearish red
+                        comp.score === 0   ? "#4a5470"
+                        : ratio >= 0.67   ? "#22c55e"
+                        : ratio >= 0.34   ? "#f59e0b"
+                        : "#ef4444";
                       return (
                         <div key={key} className="bg-surface-2 rounded-lg border p-3"
                           style={{ borderColor:
@@ -530,7 +529,6 @@ export default function Home() {
                           <div className="text-[22px] font-black mb-0.5" style={{ color }}>{key}</div>
                           <div className="text-[9px] font-mono text-text-muted/70 uppercase tracking-wide mb-2">
                             <MetricTooltip id={key}>{comp.label}</MetricTooltip>
-                            {key === "S" && <span className="ml-1 text-[7px] bg-orange/10 text-orange px-1 py-0.5 rounded">NEW</span>}
                           </div>
                           <div className="text-[16px] font-mono font-bold mb-0.5" style={{ color }}>
                             {comp.score}/{comp.max}
@@ -540,6 +538,25 @@ export default function Home() {
                         </div>
                       );
                     })}
+                    {/* 5th tile: Confluence — how many TFs agree */}
+                    {(() => {
+                      const rsi  = sig.timing?.rsi ?? 50;
+                      const adx  = sig.timing?.adx ?? 0;
+                      const rv   = sig.timing?.rel_volume ?? 0;
+                      const confluence = (adx >= 20 ? 1 : 0) + (rv >= 1.5 ? 1 : 0) + (rsi >= 45 && rsi <= 72 ? 1 : 0);
+                      const cLabel = confluence === 3 ? "ALIGNED" : confluence === 2 ? "PARTIAL" : "WEAK";
+                      const cColor = confluence === 3 ? "#22c55e" : confluence === 2 ? "#f59e0b" : "#ef4444";
+                      const cBorder = confluence === 3 ? "rgba(34,197,94,0.25)" : confluence === 2 ? "rgba(245,158,11,0.25)" : "rgba(239,68,68,0.25)";
+                      return (
+                        <div className="bg-surface-2 rounded-lg border p-3" style={{ borderColor: cBorder }}>
+                          <div className="text-[22px] font-black mb-0.5" style={{ color: cColor }}>C</div>
+                          <div className="text-[9px] font-mono text-text-muted/70 uppercase tracking-wide mb-2">Confluence</div>
+                          <div className="text-[16px] font-mono font-bold mb-0.5" style={{ color: cColor }}>{confluence}/3</div>
+                          <ScoreBar score={confluence} max={3} color={cColor} />
+                          <div className="text-[9px] font-mono text-text-muted/60 mt-1.5">{cLabel}</div>
+                        </div>
+                      );
+                    })()}
                   </div>
                 </div>
               </Card>
@@ -957,15 +974,27 @@ export default function Home() {
               {/* Signals group */}
               <div className={isMobile && mobileTab !== "signals" ? "hidden" : ""}>
                 <CSOVerdict sig={sig} kron={kronosHk.data} fearGreed={sig?.fear_greed} />
-                <TopSignals
-                  onSelect={(sym) => { runAnalysis(sym); if(isMobile) setMobileTab("analyse"); }}
+                {!isMobile && <TopSignals
+                  onSelect={(sym) => { runAnalysis(sym); }}
                   interval={interval}
-                  listMode={isMobile}
-                />
+                  listMode={false}
+                />}
                 {isMobile && <SignalStreakHeatmap />}
                 <TradeSetupCard setup={sig?.trade_setup ?? null} close={sig?.quote?.price ?? 0} />
                 <ConvictionMeter conviction={sig.conviction} />
                 <KeyLevelsCard levels={sig.key_levels} />
+              </div>
+              {/* Scanner tab — mobile only */}
+              <div className={isMobile && mobileTab !== "scanner" ? "hidden" : isMobile ? "" : "hidden"}>
+                <TopSignals
+                  onSelect={(sym) => { runAnalysis(sym); if(isMobile) setMobileTab("analyse"); }}
+                  interval={interval}
+                  listMode={true}
+                />
+                <DipScannerCard
+                  interval={interval}
+                  onSelect={(sym) => { runAnalysis(sym); if(isMobile) setMobileTab("analyse"); }}
+                />
               </div>
               {/* Watchlist + Tools group */}
               <div className={isMobile && mobileTab !== "sidebar" ? "hidden" : ""}>
@@ -982,7 +1011,7 @@ export default function Home() {
                   symbol={symbol}
                   interval={interval}
                   onRerun={() => runAnalysis()}
-                  onExport={() => exportPdf(reportId, `crypto-sniper-${symbol}-${interval}.pdf`)}
+                  onExport={() => exportPdf(reportId, `crypto-sniper-${symbol}-${interval}.pdf`, sig as unknown as Record<string, unknown>)}
                   exporting={exporting}
                 />
                 <BasketScanner
@@ -1016,6 +1045,7 @@ export default function Home() {
               { key: "analyse",  label: "Analyse",  icon: "◎" },
               { key: "signals",  label: "Signals",  icon: "▲" },
               { key: "sidebar",  label: "Tools",    icon: "◈" },
+              { key: "scanner",  label: "Scanner",  icon: "⊕" },
             ] as const).map(tab => (
               <button
                 key={tab.key}

@@ -1324,3 +1324,289 @@ async def rebuild_baseline(interval: str = "1h", max_coins: int = 500):
             logger.error(f"Manual baseline rebuild error: {e}")
     threading.Thread(target=_run, daemon=True).start()
     return {"ok": True, "message": "Baseline rebuild started in background"}
+
+
+# ── PDF Report Endpoint ────────────────────────────────────────────────────────
+from fastapi.responses import Response as _FResponse
+
+@app.post("/pdf-report")
+async def pdf_report(payload: dict):
+    """
+    Generate a light-theme PDF for a single coin analysis result.
+    Accepts the full analyse response body + optional symbol/interval overrides.
+    Returns application/pdf — works on all devices including mobile Safari.
+    """
+    import io
+    from fpdf import FPDF
+    from datetime import datetime, timezone
+
+    def _p(text):
+        text = str(text)
+        replacements = {
+            "\u2014":"-","\u2013":"-","\u00d7":"x","\u00b7":".",
+            "\u2019":"'","\u2018":"'","\u201c":'"',"\u201d":'"',
+            "\u2022":"-","\u2026":"...","\u2192":"->",
+            "\u2713":"OK","\u2717":"X","\u25b2":"^","\u25bc":"v",
+            "\u2191":"^","\u2193":"v",
+        }
+        for ch, rep in replacements.items():
+            text = text.replace(ch, rep)
+        return text.encode("latin-1", errors="ignore").decode("latin-1")
+
+    symbol   = payload.get("symbol", "?")
+    interval = payload.get("interval", "1D")
+    now_str  = datetime.now(timezone.utc).strftime("%d %b %Y %H:%M UTC")
+
+    sig_obj   = payload.get("signal", {})
+    score     = sig_obj.get("total", 0)
+    score_max = sig_obj.get("max", 16)
+    signal    = sig_obj.get("label", "")
+    direction = sig_obj.get("direction", "")
+
+    comp   = payload.get("components", {})
+    mkt    = payload.get("structure", {})
+    timing = payload.get("timing", {})
+    quote  = payload.get("quote", {})
+
+    close   = mkt.get("close", quote.get("price", 0))
+    ema20   = mkt.get("ema20", 0)
+    ema50   = mkt.get("ema50", 0)
+    ema200  = mkt.get("ema200", 0)
+    vwap    = mkt.get("vwap", 0)
+    bb_u    = mkt.get("bb_upper", 0)
+    bb_l    = mkt.get("bb_lower", 0)
+
+    rsi     = timing.get("rsi", 0)
+    adx     = timing.get("adx", 0)
+    atr     = timing.get("atr", 0)
+    rv      = timing.get("rel_volume", 0)
+    plus_di = timing.get("plus_di", 0)
+    minus_di= timing.get("minus_di", 0)
+
+    def _comp_detail(key):
+        c = comp.get(key, {})
+        return c.get("score", 0), c.get("max", 0), c.get("detail", "")
+
+    v_sc, v_mx, v_det = _comp_detail("V")
+    p_sc, p_mx, p_det = _comp_detail("P")
+    r_sc, r_mx, r_det = _comp_detail("R")
+    t_sc, t_mx, t_det = _comp_detail("T")
+
+    # Confluence
+    confluence = (1 if adx >= 20 else 0) + (1 if rv >= 1.5 else 0) + (1 if 45 <= rsi <= 72 else 0)
+    c_label = "ALIGNED" if confluence == 3 else "PARTIAL" if confluence == 2 else "WEAK"
+
+    # Signal colour (for text)
+    if score >= 9:
+        sig_r, sig_g, sig_b = 16, 185, 129   # green
+    elif score >= 5:
+        sig_r, sig_g, sig_b = 245, 158, 11   # amber
+    else:
+        sig_r, sig_g, sig_b = 100, 116, 139  # muted
+
+    # ── Build PDF ───────────────────────────────────────────────────────────────
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_auto_page_break(auto=True, margin=12)
+    pdf.set_margins(14, 10, 14)
+
+    # --- HEADER BAR ---
+    pdf.set_fill_color(15, 23, 42)
+    pdf.rect(0, 0, 210, 28, "F")
+    pdf.set_font("Helvetica", "B", 14)
+    pdf.set_text_color(241, 245, 249)
+    pdf.set_xy(14, 7)
+    pdf.cell(0, 8, _p("CRYPTO SNIPER"), ln=False)
+    pdf.set_font("Helvetica", "", 8)
+    pdf.set_text_color(100, 116, 139)
+    pdf.set_xy(14, 16)
+    pdf.cell(0, 5, _p("DETECT EARLY. ACT SMART."), ln=True)
+
+    # Scan timestamp top-right
+    pdf.set_font("Helvetica", "", 7)
+    pdf.set_text_color(100, 116, 139)
+    pdf.set_xy(120, 9)
+    pdf.cell(76, 5, _p(f"{symbol}/USDT  |  {interval}  |  {now_str}"), align="R", ln=True)
+
+    pdf.ln(4)
+
+    # --- SIGNAL VERDICT ---
+    pdf.set_font("Helvetica", "B", 22)
+    pdf.set_text_color(sig_r, sig_g, sig_b)
+    pdf.cell(0, 12, _p(f"{signal}"), ln=True, align="C")
+    pdf.set_font("Helvetica", "", 10)
+    pdf.set_text_color(71, 85, 105)
+    pdf.cell(0, 6, _p(f"Score  {score} / {score_max}"), ln=True, align="C")
+    pdf.ln(3)
+
+    # Divider
+    pdf.set_draw_color(226, 232, 240)
+    pdf.set_line_width(0.3)
+    pdf.line(14, pdf.get_y(), 196, pdf.get_y())
+    pdf.ln(4)
+
+    # --- HELPER FUNCTIONS ---
+    def section_hdr(title):
+        pdf.set_font("Helvetica", "B", 8)
+        pdf.set_text_color(100, 116, 139)
+        pdf.set_fill_color(248, 250, 252)
+        pdf.cell(0, 6, _p(f"  {title.upper()}"), ln=True, fill=True)
+        pdf.ln(1)
+
+    def kv(label, value, val_color=None):
+        pdf.set_font("Helvetica", "B", 8)
+        pdf.set_text_color(100, 116, 139)
+        pdf.cell(58, 5.5, _p(label), ln=False)
+        pdf.set_font("Helvetica", "", 8)
+        if val_color:
+            pdf.set_text_color(*val_color)
+        else:
+            pdf.set_text_color(30, 41, 59)
+        pdf.cell(0, 5.5, _p(str(value)), ln=True)
+
+    def score_pill(label, sc, mx, detail=""):
+        ratio = sc / mx if mx else 0
+        if sc == 0:
+            r, g, b = 100, 116, 139
+        elif ratio >= 0.67:
+            r, g, b = 16, 185, 129
+        elif ratio >= 0.34:
+            r, g, b = 245, 158, 11
+        else:
+            r, g, b = 239, 68, 68
+        x = pdf.get_x(); y = pdf.get_y()
+        # Background pill
+        pdf.set_fill_color(r // 6, g // 6, b // 6)
+        pdf.set_draw_color(r, g, b)
+        pdf.set_line_width(0.2)
+        pdf.rect(x, y, 42, 14, "FD")
+        pdf.set_font("Helvetica", "B", 11)
+        pdf.set_text_color(r, g, b)
+        pdf.set_xy(x + 2, y + 1.5)
+        pdf.cell(20, 5, _p(label))
+        pdf.set_font("Helvetica", "B", 9)
+        pdf.set_xy(x + 24, y + 1)
+        pdf.cell(16, 5, _p(f"{sc}/{mx}"), align="R")
+        if detail:
+            pdf.set_font("Helvetica", "", 6.5)
+            pdf.set_text_color(100, 116, 139)
+            pdf.set_xy(x + 2, y + 8)
+            pdf.cell(38, 4, _p(str(detail)[:20]))
+        return x + 44  # next pill x
+
+    # --- SCORE COMPONENTS ---
+    section_hdr("Signal Components V/P/R/T  +  Confluence")
+    start_x = 14
+    gap = 2
+    pill_w = 42
+
+    pills = [
+        ("V", v_sc, v_mx, v_det),
+        ("P", p_sc, p_mx, p_det),
+        ("R", r_sc, r_mx, r_det),
+        ("T", t_sc, t_mx, t_det),
+        ("C", confluence, 3, c_label),
+    ]
+    y0 = pdf.get_y()
+    for i, (lbl, sc, mx, det) in enumerate(pills):
+        pdf.set_xy(start_x + i * (pill_w + gap), y0)
+        score_pill(lbl, sc, mx, det)
+    pdf.ln(18)
+
+    # --- 2-COLUMN LAYOUT: market structure + timing ---
+    col_w = 86
+    left_x = 14
+    right_x = 14 + col_w + 6
+    y_start = pdf.get_y()
+
+    # LEFT — Market Structure
+    pdf.set_xy(left_x, y_start)
+    section_hdr("Market Structure")
+    def kv_at(x, label, value, vc=None):
+        pdf.set_x(x)
+        pdf.set_font("Helvetica", "B", 8)
+        pdf.set_text_color(100, 116, 139)
+        pdf.cell(40, 5.5, _p(label))
+        pdf.set_font("Helvetica", "", 8)
+        pdf.set_text_color(*(vc if vc else (30, 41, 59)))
+        pdf.cell(col_w - 40, 5.5, _p(str(value)), ln=True)
+
+    def pos_color(price, ref):
+        return (16, 185, 129) if price > ref else (239, 68, 68)
+
+    pdf.set_x(left_x)
+    kv_at(left_x, "Close",   f"${close:.6g}")
+    kv_at(left_x, "EMA 20",  f"{ema20:.6g}  {'above' if close > ema20 else 'below'}", pos_color(close, ema20) if ema20 else None)
+    kv_at(left_x, "EMA 50",  f"{ema50:.6g}  {'above' if close > ema50 else 'below'}", pos_color(close, ema50) if ema50 else None)
+    kv_at(left_x, "EMA 200", f"{ema200:.6g}  {'above' if close > ema200 else 'below'}", pos_color(close, ema200) if ema200 else None)
+    kv_at(left_x, "VWAP",    f"{vwap:.6g}  {'above' if close > vwap else 'below'}", pos_color(close, vwap) if vwap else None)
+    kv_at(left_x, "BB Band", f"{bb_l:.5g} - {bb_u:.5g}" if bb_u else "n/a")
+
+    y_after_left = pdf.get_y()
+
+    # RIGHT — Timing Quality
+    pdf.set_xy(right_x, y_start)
+    section_hdr("Timing Quality")
+    def kv_r(label, value, vc=None):
+        pdf.set_x(right_x)
+        pdf.set_font("Helvetica", "B", 8)
+        pdf.set_text_color(100, 116, 139)
+        pdf.cell(40, 5.5, _p(label))
+        pdf.set_font("Helvetica", "", 8)
+        pdf.set_text_color(*(vc if vc else (30, 41, 59)))
+        pdf.cell(col_w - 40, 5.5, _p(str(value)), ln=True)
+
+    pdf.set_xy(right_x, y_start + 7)
+    rsi_c  = (239,68,68) if rsi >= 70 else (16,185,129) if rsi <= 30 else (245,158,11)
+    adx_c  = (16,185,129) if adx >= 25 else (245,158,11)
+    rv_c   = (16,185,129) if rv >= 2 else (245,158,11)
+    kv_r("RSI 14",    f"{rsi:.1f}  {'OVERBOUGHT' if rsi>=70 else 'OVERSOLD' if rsi<=30 else 'NEUTRAL'}", rsi_c)
+    kv_r("ADX 14",    f"{adx:.1f}  {'Trending' if adx>=20 else 'Ranging'}", adx_c)
+    kv_r("+DI / -DI", f"{plus_di:.1f}  /  {minus_di:.1f}")
+    kv_r("Rel Volume",f"{rv:.1f}x", rv_c)
+    if atr and close:
+        kv_r("ATR 14",  f"{atr:.4g}  ({atr/close*100:.2f}% of price)")
+    kv_r("Confluence",f"{confluence}/3  {c_label}", (16,185,129) if confluence==3 else (245,158,11) if confluence==2 else (239,68,68))
+
+    # Advance past both columns
+    pdf.set_y(max(y_after_left, pdf.get_y()) + 3)
+
+    # Divider
+    pdf.set_draw_color(226, 232, 240)
+    pdf.line(14, pdf.get_y(), 196, pdf.get_y())
+    pdf.ln(3)
+
+    # --- TRADE SETUP (if available) ---
+    ts = payload.get("trade_setup")
+    if ts and isinstance(ts, dict) and ts.get("entry"):
+        section_hdr("Trade Setup")
+        rr = ts.get("rr", ts.get("risk_reward",""))
+        kv("Entry",    f"${ts.get('entry','n/a')}")
+        kv("Stop",     f"${ts.get('stop','n/a')}", (239,68,68))
+        kv("Target 1", f"${ts.get('target1', ts.get('t1','n/a'))}", (16,185,129))
+        kv("Target 2", f"${ts.get('target2', ts.get('t2','n/a'))}", (16,185,129))
+        if rr:
+            kv("Risk : Reward", str(rr))
+        pdf.ln(2)
+
+    # --- FOOTER ---
+    pdf.set_y(-16)
+    pdf.set_draw_color(226, 232, 240)
+    pdf.line(14, pdf.get_y(), 196, pdf.get_y())
+    pdf.ln(2)
+    pdf.set_font("Helvetica", "", 6.5)
+    pdf.set_text_color(148, 163, 184)
+    pdf.cell(0, 4, _p(f"Generated by Crypto Sniper  |  crypto-sniper.app  |  {now_str}  |  Not financial advice."), align="C", ln=True)
+
+    # Output to bytes
+    buf = io.BytesIO()
+    pdf_bytes = pdf.output()
+
+    return _FResponse(
+        content=bytes(pdf_bytes),
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="crypto-sniper-{symbol}-{interval}.pdf"',
+            "Access-Control-Expose-Headers": "Content-Disposition",
+        }
+    )
