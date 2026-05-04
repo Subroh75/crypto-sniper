@@ -993,7 +993,7 @@ export default function Home() {
                   symbol={symbol}
                   interval={interval}
                   onRerun={() => runAnalysis()}
-                  onExport={() => exportPdf(reportId, `crypto-sniper-${symbol}-${interval}.pdf`, { ...(sig as unknown as Record<string, unknown>), agents: kron?.agents ?? undefined })}
+                  onExport={() => exportPdf(reportId, `crypto-sniper-${symbol}-${interval}.pdf`, { ...(sig as unknown as Record<string, unknown>), agents: kron?.agents ?? undefined, forecast: kron?.forecast ?? undefined })}
                   exporting={exporting}
                 />
                 <BasketScanner
