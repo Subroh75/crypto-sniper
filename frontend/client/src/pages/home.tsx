@@ -368,7 +368,7 @@ export default function Home() {
           Real-Time Crypto Signal Engine
         </h1>
         <p className="text-text-muted text-[11px] md:text-[13px] mb-4 md:mb-5 px-2">
-          V/P/R/T/S scoring &middot; Kronos AI &middot; On-chain &middot; Agent debate
+          V/P/R/T scoring &middot; Kronos AI &middot; On-chain &middot; Agent debate
         </p>
 
         {/* Timeframe pills */}
@@ -427,14 +427,36 @@ export default function Home() {
       <div className="max-w-[1380px] mx-auto px-3 md:px-4 pb-tab-bar md:pb-20">
 
         {!sig && !loading && (
-          <div
-            className={isMobile ? "flex flex-col gap-3" : "grid gap-3"}
-            style={isMobile ? undefined : { gridTemplateColumns: "1fr 320px" }}
-          >
-            <div className="text-center py-10 text-text-muted text-[13px] font-mono">
-              Enter a coin symbol above to analyse
+          <div className="max-w-[640px] mx-auto px-2 py-6">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-6">
+              {[
+                { icon: "V", label: "Volume",    desc: "Relative volume vs 20-bar avg" },
+                { icon: "P", label: "Momentum",  desc: "ATR-adjusted price move" },
+                { icon: "R", label: "Range",     desc: "Position within Bollinger Bands" },
+                { icon: "T", label: "Trend",     desc: "EMA stack + ADX confirmation" },
+              ].map(f => (
+                <div key={f.icon} className="bg-surface-card border border-border/50 rounded-xl p-3 text-center">
+                  <div className="text-[22px] font-black text-purple mb-1">{f.icon}</div>
+                  <div className="text-[11px] font-mono font-bold text-text mb-0.5">{f.label}</div>
+                  <div className="text-[9px] font-mono text-text-muted/60 leading-relaxed">{f.desc}</div>
+                </div>
+              ))}
             </div>
-
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              {[
+                { icon: "🤖", label: "Kronos AI",     desc: "Expected move, target price, conviction" },
+                { icon: "⚖",  label: "Agent Debate",  desc: "Bull / Bear / Risk / CIO verdicts" },
+                { icon: "📊", label: "Derivatives",   desc: "Funding rate, OI, long/short ratio" },
+              ].map(f => (
+                <div key={f.label} className="bg-surface-card border border-border/50 rounded-xl p-3 flex items-start gap-2.5">
+                  <span className="text-[18px] leading-none mt-0.5">{f.icon}</span>
+                  <div>
+                    <div className="text-[11px] font-mono font-bold text-text mb-0.5">{f.label}</div>
+                    <div className="text-[9px] font-mono text-text-muted/60 leading-relaxed">{f.desc}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         )}
 
@@ -484,9 +506,6 @@ export default function Home() {
                     <div className="text-[10px] font-mono text-text-muted/70 mb-2 tracking-wide">
                       {symbol}/USDT  ·  {interval}  ·  {new Date(sig.timestamp * 1000).toUTCString().slice(0,-4)} UTC
                     </div>
-                    <div className={`inline-block text-[10px] font-mono font-bold px-3 py-1 rounded border mb-3 ${VERDICT_BG[sig.signal.label] ?? VERDICT_BG["NO SIGNAL"]}`}>
-                      {sig.signal.label}
-                    </div>
                     <div className={`text-[34px] font-black mb-1 ${VERDICT_COLOR[sig.signal.label] ?? "text-text-muted"}`}>
                       {sig.signal.label}
                     </div>
@@ -507,7 +526,7 @@ export default function Home() {
 
               {/* 02: Signal Components */}
               <Card>
-                <CardHeader num="02" title="SIGNAL COMPONENTS VPRT" />
+                <CardHeader num="02" title="SIGNAL COMPONENTS" />
                 <div className="p-4">
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                     {(["V","P","R","T"] as const).map(key => {
@@ -871,7 +890,7 @@ export default function Home() {
 
               {/* 07: Agent Debate */}
               <Card>
-                <CardHeader num="07" icon="⚖" title="AI LAB - AGENT DEBATE" badge="LIVE" />
+                <CardHeader num="07" icon="⚖" title="AI LAB - AGENT DEBATE" />
                 <div className="p-3 space-y-2">
                   {kron?.agents ? (
                     kron.agents.map(agent => {
@@ -1028,23 +1047,24 @@ export default function Home() {
               { key: "signals",  label: "Signals",  icon: "▲" },
               { key: "sidebar",  label: "Tools",    icon: "◈" },
               { key: "scanner",  label: "Scanner",  icon: "⊕" },
-            ] as const).map(tab => (
-              <button
-                key={tab.key}
-                onClick={() => setMobileTab(tab.key)}
-                className={`flex-1 flex flex-col items-center justify-center gap-0.5 py-2 min-h-[52px] transition-colors ${
-                  mobileTab === tab.key
-                    ? "text-purple"
-                    : "text-text-muted/50 hover:text-text-muted"
-                }`}
-              >
-                <span className="text-[16px] leading-none">{tab.icon}</span>
-                <span className="text-[9px] font-mono font-bold uppercase tracking-wider">{tab.label}</span>
-                {mobileTab === tab.key && (
-                  <span className="absolute bottom-0 left-0 right-0 h-[2px] bg-purple rounded-full" style={{ position: "static", display: "block", width: "24px", height: "2px", background: "#7c3aed", borderRadius: "9999px" }} />
-                )}
-              </button>
-            ))}
+            ] as const).map(tab => {
+              const active = mobileTab === tab.key;
+              return (
+                <button
+                  key={tab.key}
+                  onClick={() => setMobileTab(tab.key)}
+                  className="flex-1 flex flex-col items-center justify-center gap-0.5 py-2 min-h-[52px] transition-colors relative"
+                  style={{ color: active ? "#7c3aed" : "rgba(148,163,184,0.5)" }}
+                >
+                  {/* Active top-border indicator */}
+                  {active && (
+                    <span style={{ position: "absolute", top: 0, left: "25%", right: "25%", height: 2, background: "#7c3aed", borderRadius: "0 0 2px 2px" }} />
+                  )}
+                  <span className="text-[16px] leading-none">{tab.icon}</span>
+                  <span className="text-[9px] font-mono font-bold uppercase tracking-wider">{tab.label}</span>
+                </button>
+              );
+            })}
           </div>
         </nav>
       )}

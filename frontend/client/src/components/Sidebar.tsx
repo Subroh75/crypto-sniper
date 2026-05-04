@@ -1494,7 +1494,7 @@ export function ScannerCumulativeCard() {
   if (loading) {
     return (
       <SideCard>
-        <SideCardHeader num="12" icon="📈" title="STRATEGY RETURN" badge="ALL-TIME" />
+        <SideCardHeader num="11" icon="📈" title="STRATEGY RETURN" badge="ALL-TIME" />
         <div className="px-4 py-5 text-[10px] font-mono text-text-muted/50 text-center animate-pulse">
           Loading...
         </div>
@@ -1520,7 +1520,7 @@ export function ScannerCumulativeCard() {
 
   return (
     <SideCard>
-      <SideCardHeader num="12" icon="📈" title="STRATEGY RETURN" badge="ALL-TIME" />
+      <SideCardHeader num="11" icon="📈" title="STRATEGY RETURN" badge="ALL-TIME" />
       <div className="px-4 py-4">
         {noData ? (
           <div className="text-center py-3">

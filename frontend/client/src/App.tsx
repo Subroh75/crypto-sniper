@@ -1,4 +1,4 @@
-import { Switch, Route, Router } from "wouter";
+import { Switch, Route, Router, Redirect } from "wouter";
 import { useHashLocation } from "wouter/use-hash-location";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { queryClient } from "@/lib/queryClient";
@@ -10,6 +10,10 @@ function AppRoutes() {
   return (
     <Switch>
       <Route path="/" component={Home} />
+      {/* Redirect legacy/direct URL visits to home — prevents raw router error */}
+      <Route path="/signals"><Redirect to="/" /></Route>
+      <Route path="/scanner"><Redirect to="/" /></Route>
+      <Route path="/tools"><Redirect to="/" /></Route>
       <Route component={NotFound} />
     </Switch>
   );
