@@ -499,7 +499,7 @@ export default function Home() {
                       <span>VOL <span className={(sig.timing?.rel_volume ?? 0) >= 2 ? "text-teal font-bold" : "text-amber font-bold"}>{(sig.timing?.rel_volume ?? 0).toFixed(1)}x</span></span>
                       <span>ADX <span className={(sig.timing?.adx ?? 0) >= 25 ? "text-teal font-bold" : "text-amber font-bold"}>{(sig.timing?.adx ?? 0).toFixed(0)}</span></span>
                       <span>RSI <span className={(sig.timing?.rsi ?? 50) >= 70 ? "text-red font-bold" : (sig.timing?.rsi ?? 50) <= 30 ? "text-teal font-bold" : "text-amber font-bold"}>{(sig.timing?.rsi ?? 50).toFixed(0)}</span></span>
-                      <span>CONF <span className={(sig.timing?.adx ?? 0) >= 20 && (sig.timing?.rel_volume ?? 0) >= 1.5 ? "text-teal font-bold" : "text-amber font-bold"}>{((sig.timing?.adx ?? 0) >= 20 ? 1 : 0) + ((sig.timing?.rel_volume ?? 0) >= 1.5 ? 1 : 0) + ((sig.timing?.rsi ?? 50) >= 45 && (sig.timing?.rsi ?? 50) <= 72 ? 1 : 0)}/3</span></span>
+
                     </div>
                   </div>
                 </div>
@@ -507,9 +507,9 @@ export default function Home() {
 
               {/* 02: Signal Components */}
               <Card>
-                <CardHeader num="02" title="SIGNAL COMPONENTS V/P/R/T" />
+                <CardHeader num="02" title="SIGNAL COMPONENTS VPRT" />
                 <div className="p-4">
-                  <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-5 gap-2">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                     {(["V","P","R","T"] as const).map(key => {
                       const comp = sig.components[key];
                       const ratio = comp.max > 0 ? comp.score / comp.max : 0;
@@ -538,25 +538,7 @@ export default function Home() {
                         </div>
                       );
                     })}
-                    {/* 5th tile: Confluence — how many TFs agree */}
-                    {(() => {
-                      const rsi  = sig.timing?.rsi ?? 50;
-                      const adx  = sig.timing?.adx ?? 0;
-                      const rv   = sig.timing?.rel_volume ?? 0;
-                      const confluence = (adx >= 20 ? 1 : 0) + (rv >= 1.5 ? 1 : 0) + (rsi >= 45 && rsi <= 72 ? 1 : 0);
-                      const cLabel = confluence === 3 ? "ALIGNED" : confluence === 2 ? "PARTIAL" : "WEAK";
-                      const cColor = confluence === 3 ? "#22c55e" : confluence === 2 ? "#f59e0b" : "#ef4444";
-                      const cBorder = confluence === 3 ? "rgba(34,197,94,0.25)" : confluence === 2 ? "rgba(245,158,11,0.25)" : "rgba(239,68,68,0.25)";
-                      return (
-                        <div className="bg-surface-2 rounded-lg border p-3" style={{ borderColor: cBorder }}>
-                          <div className="text-[22px] font-black mb-0.5" style={{ color: cColor }}>C</div>
-                          <div className="text-[9px] font-mono text-text-muted/70 uppercase tracking-wide mb-2">Confluence</div>
-                          <div className="text-[16px] font-mono font-bold mb-0.5" style={{ color: cColor }}>{confluence}/3</div>
-                          <ScoreBar score={confluence} max={3} color={cColor} />
-                          <div className="text-[9px] font-mono text-text-muted/60 mt-1.5">{cLabel}</div>
-                        </div>
-                      );
-                    })()}
+
                   </div>
                 </div>
               </Card>
