@@ -21,7 +21,7 @@ SIGNAL_EMOJI = {
 }
 
 
-async def fetch_analysis(symbol: str, interval: str = "1H") -> str:
+async def fetch_analysis(symbol: str, interval: str = "1D") -> str:
     """Hit /analyse and return a formatted Telegram-ready string."""
     url = f"{API_BASE}/analyse"
     payload = {"symbol": symbol.upper(), "interval": interval.lower()}

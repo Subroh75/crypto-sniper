@@ -57,7 +57,7 @@ async def _analyse_symbol(session: aiohttp.ClientSession, symbol: str) -> dict |
     try:
         async with session.post(
             f"{API_BASE}/analyse",
-            json={"symbol": symbol, "interval": "1h"},
+            json={"symbol": symbol, "interval": "1d"},
             timeout=aiohttp.ClientTimeout(total=25)
         ) as r:
             if r.status != 200:
@@ -79,7 +79,7 @@ async def _analyse_symbol(session: aiohttp.ClientSession, symbol: str) -> dict |
 def _format_scan_message(hits: list[dict], scan_time: str) -> str:
     header = (
         f"CRYPTO SNIPER  —  HOURLY SCAN\n"
-        f"{scan_time}  |  1H  |  Score 9+/13\n"
+        f"{scan_time}  |  1D  |  Score 9+/13\n"
         f"{'─' * 34}\n"
         f"STRONG BUY signals found: {len(hits)}\n"
     )
