@@ -1160,6 +1160,57 @@ export default function Home() {
           </div>
         </div>
       )}
+
+      {/* ── Telegram Support Button ── */}
+      <a
+        href="https://t.me/Niftysnipabot"
+        target="_blank"
+        rel="noopener noreferrer"
+        title="Chat with Kai — Crypto Sniper Support"
+        style={{
+          position: "fixed",
+          bottom: isMobile ? "72px" : "24px",
+          right: "20px",
+          zIndex: 9999,
+          width: 52,
+          height: 52,
+          borderRadius: "50%",
+          background: "linear-gradient(135deg,#7c3aed,#4f46e5)",
+          boxShadow: "0 4px 24px rgba(124,58,237,0.45)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          cursor: "pointer",
+          textDecoration: "none",
+          transition: "transform 0.15s ease, box-shadow 0.15s ease",
+        }}
+        onMouseEnter={e => {
+          (e.currentTarget as HTMLAnchorElement).style.transform = "scale(1.1)";
+          (e.currentTarget as HTMLAnchorElement).style.boxShadow = "0 6px 32px rgba(124,58,237,0.65)";
+        }}
+        onMouseLeave={e => {
+          (e.currentTarget as HTMLAnchorElement).style.transform = "scale(1)";
+          (e.currentTarget as HTMLAnchorElement).style.boxShadow = "0 4px 24px rgba(124,58,237,0.45)";
+        }}
+      >
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M21.94 2.29a1 1 0 0 0-1.02-.17L2.33 9.36a1 1 0 0 0 .06 1.87l4.17 1.38 1.62 5.03a1 1 0 0 0 1.7.37l2.32-2.54 4.54 3.33a1 1 0 0 0 1.55-.59l3-14a1 1 0 0 0-.35-.92zM10.27 14.27l-.9 2.78-.9-2.78L16 8z" fill="white"/>
+        </svg>
+        <span style={{
+          position: "absolute",
+          inset: -3,
+          borderRadius: "50%",
+          border: "2px solid rgba(124,58,237,0.4)",
+          animation: "tg-ping 2s cubic-bezier(0,0,0.2,1) infinite",
+        }} />
+      </a>
+      <style>{`
+        @keyframes tg-ping {
+          0%   { transform: scale(1);   opacity: 0.6; }
+          80%  { transform: scale(1.5); opacity: 0; }
+          100% { transform: scale(1.5); opacity: 0; }
+        }
+      `}</style>
     </div>
   );
 }

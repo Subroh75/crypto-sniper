@@ -78,14 +78,30 @@ async def get_agent_response(
 
     try:
         response = client.messages.create(
-            model="claude-3-5-haiku-20241022",
+            model="claude-3-haiku-20240307",
             max_tokens=600,
             system=system,
             messages=messages
         )
         return response.content[0].text.strip()
+    except anthropic.NotFoundError:
+        # Fallback to older model if haiku not available on this key
+        try:
+            response = client.messages.create(
+                model="claude-3-sonnet-20240229",
+                max_tokens=600,
+                system=system,
+                messages=messages
+            )
+            return response.content[0].text.strip()
+        except Exception as e2:
+            import logging
+            logging.getLogger(__name__).error(f"Claude fallback failed: {e2}")
+            return _rule_based(messages[-1]["content"])
     except Exception as e:
-        return f"Signal engine offline momentarily. Try again in a few seconds. (Error: {type(e).__name__})"
+        import logging
+        logging.getLogger(__name__).error(f"Claude error: {type(e).__name__}: {e}")
+        return _rule_based(messages[-1]["content"])
 
 
 def _rule_based(text: str) -> str:
