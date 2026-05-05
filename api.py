@@ -158,14 +158,15 @@ async def analyse(req: AnalyseRequest):
     symbol = req.symbol.upper().strip()
     t_start = time.time()
     try:
-        ohlcv        = get_ohlcv(symbol, req.interval)
-        quote        = get_quote(symbol)
-        indicators   = get_indicators(symbol, req.interval)
-        fear_greed   = get_fear_greed()
-        cp_news      = get_crypto_panic(symbol)
-        social_delta    = get_social_delta(symbol)    # Santiment → CC → CryptoPanic proxy
-        coindar_events  = get_coindar_events(symbol)   # upcoming HIGH/MED events
-        san_signals     = get_santiment_signals(symbol) # dev_activity + active_addresses
+        ohlcv      = get_ohlcv(symbol, req.interval)
+        quote      = get_quote(symbol)
+        indicators = get_indicators(symbol, req.interval)
+        # S score removed — social/sentiment calls skipped for speed
+        fear_greed     = {}
+        cp_news        = []
+        social_delta   = 0.0
+        coindar_events = []
+        san_signals    = {}
     except Exception as e:
         raise HTTPException(status_code=502, detail=str(e))
     if not ohlcv:
@@ -190,7 +191,7 @@ async def analyse(req: AnalyseRequest):
             "P":{"score":sig.p_score,"max":3,"label":"Momentum","detail":f"chg={quote.get('change_24h',0):.1f}%"},
             "R":{"score":sig.r_score,"max":2,"label":"Range Pos","detail":f"{sig.range_pos:.0f}%"},
             "T":{"score":sig.t_score,"max":3,"label":"Trend","detail":f"ADX {sig.adx:.0f}"},
-            "S":{"score":sig.s_score,"max":3,"label":"Social","detail":"LunarCrush"},
+            # S score removed — pure VPRT (max 13)
         },
         "structure":{"close":sig.close,"ema20":sig.ema20,"ema50":sig.ema50,"ema200":sig.ema200,"vwap":sig.vwap,"bb_upper":sig.bb_upper,"bb_lower":sig.bb_lower},
         "timing":{"rsi":sig.rsi,"adx":sig.adx,"atr":sig.atr,"rel_volume":sig.rel_volume},
