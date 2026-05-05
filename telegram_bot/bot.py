@@ -248,7 +248,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_email = (db_user.get("email") or "") if db_user else ""
 
         tg_ok, email_ok = await escalate(
-            user.id, user_name, user_email, esc_summary, transcript
+            user.id, user_name, user_email, esc_summary, transcript,
+            bot=context.bot
         )
 
         esc_msg = (

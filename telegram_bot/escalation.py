@@ -29,10 +29,11 @@ async def escalate(
     user_name: str,
     user_email: str,
     summary: str,
-    transcript: str
+    transcript: str,
+    bot=None
 ):
     """Fire both escalation channels concurrently."""
-    tg_ok    = await _notify_telegram(telegram_id, user_name, user_email, summary, transcript)
+    tg_ok    = await _notify_telegram(telegram_id, user_name, user_email, summary, transcript, bot=bot)
     email_ok = await _notify_email(telegram_id, user_name, user_email, summary, transcript)
     logger.info(f"Escalation fired — TG: {tg_ok}, Email: {email_ok}")
     return tg_ok, email_ok
@@ -43,12 +44,9 @@ async def _notify_telegram(
     user_name: str,
     user_email: str,
     summary: str,
-    transcript: str
+    transcript: str,
+    bot=None
 ):
-    if not BOT_TOKEN:
-        logger.warning("BOT_TOKEN not set — cannot send Telegram escalation")
-        return False
-
     # Truncate transcript to fit Telegram's 4096 char limit
     max_transcript = 2800
     if len(transcript) > max_transcript:
@@ -64,17 +62,34 @@ async def _notify_telegram(
         f"Transcript:\n{transcript}"
     )
 
+    # Use bot instance directly if available (most reliable)
+    if bot:
+        try:
+            await bot.send_message(chat_id=ADMIN_CHAT_ID, text=text)
+            logger.info(f"Escalation TG DM sent to admin {ADMIN_CHAT_ID}")
+            return True
+        except Exception as e:
+            logger.error(f"Bot.send_message escalation failed: {e}")
+
+    # Fallback to raw HTTP if no bot instance
+    if not BOT_TOKEN:
+        logger.warning("BOT_TOKEN not set — cannot send Telegram escalation")
+        return False
+
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     try:
         async with aiohttp.ClientSession() as session:
             async with session.post(url, json={
-                "chat_id":    ADMIN_CHAT_ID,
-                "text":       text,
-                "parse_mode": None  # plain text — safe for any content
+                "chat_id": ADMIN_CHAT_ID,
+                "text":    text,
             }, timeout=aiohttp.ClientTimeout(total=10)) as resp:
-                return resp.status == 200
+                ok = resp.status == 200
+                if not ok:
+                    body = await resp.text()
+                    logger.error(f"Telegram API error: {resp.status} {body}")
+                return ok
     except Exception as e:
-        logger.error(f"Telegram escalation failed: {e}")
+        logger.error(f"Telegram HTTP escalation failed: {e}")
         return False
 
 
