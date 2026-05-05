@@ -122,7 +122,7 @@ def _format_result(data: dict, symbol: str, interval: str) -> str:
     lines += [
         "",
         "─" * 34,
-        "Full report: https://crypto-sniper.app",
+        "https://crypto-sniper.app",
         "Not financial advice.",
     ]
 
