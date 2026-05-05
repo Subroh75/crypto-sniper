@@ -1,10 +1,10 @@
 """
 agents.py — 4-Agent Council for Crypto Sniper
 Agents: Bull Case, Bear Case, Risk Manager, CIO Verdict
-Powered by Claude claude-haiku-4-5-20251001 via Anthropic API
+Powered by Claude claude-haiku-4-5 via Anthropic API
 
 Each agent now produces deep, structured analysis incorporating:
-- VPRTS component breakdown (V/P/R/T/S scores)
+- VPRT component breakdown (V/P/R/T scores, max 13)
 - Kronos AI forecast (direction, green_pct, conviction)
 - Bull/bear signal arrays
 - Full market structure (EMA stack, VWAP, BB, RSI, ADX, ATR)
@@ -26,7 +26,7 @@ AGENTS = {
         "instruction": """You are a senior bullish crypto analyst at a quant hedge fund. You receive a rich signal context for a crypto asset and must build a compelling, data-driven bull case.
 
 Your analysis MUST:
-1. Open with the VPRTS score and specifically call out which components are strongest (e.g. "Volume scores 4/5 with 2.8x relative volume — institutional accumulation is likely")
+1. Open with the VPRT score and specifically call out which components are strongest (e.g. "Volume scores 4/5 with 2.8x relative volume — institutional accumulation is likely")
 2. Reference the EMA stack explicitly — is price above EMA20, EMA50, EMA200? Is VWAP held?
 3. Reference RSI and ADX to confirm momentum quality (not overbought, trending)
 4. If Kronos forecast is available, cite the direction, green_candle_pct, and bull_conviction
@@ -43,7 +43,7 @@ Write 4-6 sentences. Be specific with numbers. No filler phrases.""",
         "instruction": """You are a senior bearish crypto analyst at a quant hedge fund. You receive a rich signal context for a crypto asset and must build a compelling, data-driven bear case.
 
 Your analysis MUST:
-1. Open by identifying the weakest VPRTS components — which dimensions are scoring below par?
+1. Open by identifying the weakest VPRT components — which dimensions are scoring below par?
 2. Assess RSI for overbought risk — is there exhaustion above 70? Is momentum decelerating?
 3. Reference Bollinger Band position — is price pressing the upper band (fade territory)?
 4. If Kronos forecast is available, cite the bear_conviction and any downside move_pct
@@ -64,7 +64,7 @@ Your analysis MUST:
 2. Reference ADX to determine if this is a trending or ranging environment (ADX < 20 = ranging = dangerous for breakout entries)
 3. State the proposed stop level, the distance as a % of price, and whether it's tight or wide
 4. Reference the R/R ratio — is 1.5:1 or better achievable?
-5. If the VPRTS score is borderline (5-8/16), flag that the edge is thin and recommend reduced sizing
+5. If the VPRT score is borderline (5-8/13), flag that the edge is thin and recommend reduced sizing
 6. Conclude with a clear risk verdict — is the risk manageable or does it exceed acceptable thresholds?
 7. End your response with your verdict on a new line: "VERDICT: GO" or "VERDICT: HOLD" or "VERDICT: AVOID"
 
@@ -77,7 +77,7 @@ Write 4-6 sentences. Be specific with numbers. No filler phrases.""",
         "instruction": """You are the Chief Investment Officer synthesising the full bull/bear/risk debate for a crypto trade decision.
 
 Your analysis MUST:
-1. Open with a scorecard summary — "VPRTS: V{v}/5, P{p}/3, R{r}/2, T{t}/3, S{s}/3 = {total}/16" style statement
+1. Open with a scorecard summary — "VPRT: V{v}/5, P{p}/3, R{r}/2, T{t}/3 = {total}/13" style statement
 2. Weigh the bull case vs bear case — which argument is stronger and why?
 3. Reference Kronos AI's forecast direction and conviction — does the AI model align with the signal?
 4. State whether the Fear & Greed Index supports or contradicts the trade
@@ -155,12 +155,12 @@ def _build_context(symbol: str, ctx: dict) -> str:
         f"SYMBOL: {symbol}/USDT",
         f"INTERVAL: {ctx.get('interval', '1H')}",
         "",
-        f"═══ VPRTS SCORE: {total}/16 — {ctx.get('signal', 'NO SIGNAL')} ═══",
+        f"═══ VPRT SCORE: {total}/13 — {ctx.get('signal', 'NO SIGNAL')} ═══",
         f"  V (Volume,  max 5): {v_score}/5  |  Relative Volume = {rel_vol:.2f}x",
         f"  P (Momentum, max 3): {p_score}/3  |  24H Change = {ctx.get('change_24h', 0):+.2f}%",
         f"  R (Range Pos, max 2): {r_score}/2  |  BB position = {f'{bb_pos_pct:.0f}%' if bb_pos_pct is not None else 'N/A'}",
         f"  T (Trend,   max 3): {t_score}/3  |  ADX = {adx:.1f}",
-        f"  S (Social,  max 3): {s_score}/3",
+        # S score removed — pure VPRT
         f"  Direction: {ctx.get('direction', 'NEUTRAL')}",
         "",
         "═══ MARKET STRUCTURE ═══",
@@ -320,7 +320,7 @@ def _fallback_agent(agent_key: str, symbol: str, ctx: dict) -> dict:
 
     texts = {
         "bull": (
-            f"VPRTS score is {score}/16 with Volume at {v_score}/5 ({rel_vol:.1f}x relative volume) and Momentum at {p_score}/3 on a {chg:+.2f}% 24H move. "
+            f"VPRT score is {score}/13 with Volume at {v_score}/5 ({rel_vol:.1f}x relative volume) and Momentum at {p_score}/3 on a {chg:+.2f}% 24H move. "
             + (f"EMA stack is confirmed bullish — price above EMA20, EMA50{', and EMA200 macro trend intact' if ema200 and close > ema200 else ''} — a classic accumulation structure. "
                if ema else
                f"EMA stack is not yet confirmed: price needs to reclaim EMA20 before a clean entry. ")
@@ -334,7 +334,7 @@ def _fallback_agent(agent_key: str, symbol: str, ctx: dict) -> dict:
         ),
 
         "bear": (
-            f"VPRTS score of {score}/16 means {16 - score} points of potential upside are missing — "
+            f"VPRT score of {score}/13 means {13 - score} points of potential upside are missing — "
             + (f"Trend component scores only {t_score}/3 with ADX at {adx:.0f}, indicating a weak or ranging market. "
                if adx < 20 else
                f"however ADX at {adx:.0f} shows trend strength — bears need a catalyst to reverse this momentum. ")
@@ -360,30 +360,30 @@ def _fallback_agent(agent_key: str, symbol: str, ctx: dict) -> dict:
                   "reasonable given current volatility. ")
                if stop else "No stop level available — this is a risk flag. ")
             + (f"R/R of {rr:.1f}:1 {'meets minimum thresholds for execution.' if rr and rr >= 1.5 else 'is below the 1.5:1 minimum — reduce size or pass.' if rr else 'is unknown — cannot size position.'}")
-            + (f" Score of {score}/16 is borderline — reduce position size to 50% of normal allocation." if 5 <= score <= 8 else "")
+            + (f" Score of {score}/13 is borderline — reduce position size to 50% of normal allocation." if 5 <= score <= 8 else "")
             + f"\nVERDICT: {'GO' if score >= 9 and rr and rr >= 1.5 else 'HOLD' if score >= 5 else 'AVOID'}"
         ),
 
         "cio": (
-            f"Scorecard: V={v_score}/5, P={p_score}/3, R={r_score}/2, T={t_score}/3, S={s_score}/3 — total {score}/16 ({ctx.get('signal', 'NO SIGNAL')}). "
+            f"Scorecard: V={v_score}/5, P={p_score}/3, R={r_score}/2, T={t_score}/3 — total {score}/13 ({ctx.get('signal', 'NO SIGNAL')}). "
             + (f"The bull case is stronger: EMA stack confirmed, {rel_vol:.1f}x volume, and RSI at {rsi:.0f} with room to run. "
                if score >= 9 and ema else
-               f"Neither bull nor bear has a decisive edge at {score}/16 — the signal is insufficient for high-conviction execution. ")
-            + (f"Kronos AI forecasts a {ctx.get('kron_direction', 'neutral')} move with {'green candle bias' if (ctx.get('kron_green_pct', 50) or 50) > 55 else 'bearish candle bias'}, aligning {'with' if (ctx.get('kron_direction','NEUTRAL') == ctx.get('direction','NEUTRAL')) else 'against'} the VPRTS direction. "
+               f"Neither bull nor bear has a decisive edge at {score}/13 — the signal is insufficient for high-conviction execution. ")
+            + (f"Kronos AI forecasts a {ctx.get('kron_direction', 'neutral')} move with {'green candle bias' if (ctx.get('kron_green_pct', 50) or 50) > 55 else 'bearish candle bias'}, aligning {'with' if (ctx.get('kron_direction','NEUTRAL') == ctx.get('direction','NEUTRAL')) else 'against'} the VPRT direction. "
                if ctx.get("kron_direction") else "")
             + (f"Fear & Greed at {ctx.get('fg_value', 'N/A')} ({ctx.get('fg_label', '')}) {'supports contrarian longs' if (ctx.get('fg_value') or 50) < 30 else 'signals caution at elevated sentiment' if (ctx.get('fg_value') or 50) > 70 else 'is neutral — no additional edge from sentiment'}. ")
             + (f"Final decision: execute at ${ctx.get('entry', 0):,.4f} with stop ${ctx.get('stop', 0):,.4f} targeting ${ctx.get('target', 0):,.4f} for a {rr:.1f}:1 return."
                if score >= 9 and ctx.get("entry") and rr else
-               f"Final decision: stand aside and wait for score ≥ 9/16 before committing capital.")
-            + f"\nVERDICT: {'STRONG BUY' if score >= 12 else 'BUY' if score >= 9 and ema else 'HOLD' if score >= 5 else 'AVOID'}"
+               f"Final decision: stand aside and wait for score ≥ 9/13 before committing capital.")
+            + f"\nVERDICT: {'STRONG BUY' if score >= 10 else 'BUY' if score >= 9 and ema else 'HOLD' if score >= 5 else 'AVOID'}"
         ),
     }
 
     verdicts = {
-        "bull": "STRONG BUY" if score >= 12 else "BUY" if score >= 9 else "HOLD" if score >= 5 else "HOLD",
+        "bull": "STRONG BUY" if score >= 10 else "BUY" if score >= 9 else "HOLD" if score >= 5 else "HOLD",
         "bear": "SELL" if rsi >= 75 else "HOLD",
         "risk": "GO"  if score >= 9 and rr and rr >= 1.5 else "HOLD" if score >= 5 else "AVOID",
-        "cio":  "STRONG BUY" if score >= 12 else "BUY" if score >= 9 and ema else "HOLD" if score >= 5 else "AVOID",
+        "cio":  "STRONG BUY" if score >= 10 else "BUY" if score >= 9 and ema else "HOLD" if score >= 5 else "AVOID",
     }
 
     return {

@@ -49,7 +49,7 @@ async def run_kronos_forecast(symbol: str, ctx: dict) -> dict:
 - 24H Change: {change:+.2f}%
 - RSI: {rsi:.1f}
 - ADX: {adx:.1f}
-- Signal Score: {score}/16
+- Signal Score: {score}/13
 - Direction: {ctx.get('direction', 'NEUTRAL')}
 - EMA Stack: {'Bullish' if ctx.get('ema_stack') else 'Not confirmed'}
 
@@ -124,7 +124,7 @@ def _heuristic_forecast(symbol: str, ctx: dict) -> dict:
     # RSI contribution: RSI 70 = +15, RSI 30 = -15, linear between
     base_green += (rsi - 50) * 0.3
     # Score contribution: max score = 16, score 9 = +8, score 0 = -8
-    base_green += (score - 8) * 1.0
+    base_green += (score - 6.5) * 1.0
     # 24h change contribution
     base_green += min(max(change * 1.5, -10), 10)
     # EMA stack bonus
@@ -136,7 +136,7 @@ def _heuristic_forecast(symbol: str, ctx: dict) -> dict:
     green_pct = round(min(max(base_green, 15), 85), 1)
 
     # Direction based on signals
-    if score >= 7 and change > 0:
+    if score >= 6 and change > 0:
         direction = "Rising"
         expected_move = abs(change) * 0.5
     elif rsi >= 70 or score < 3:
