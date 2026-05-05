@@ -240,7 +240,7 @@ async def run_agent_council(symbol: str, signal_ctx: dict) -> list[dict]:
             def _call():
                 client = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
                 return client.messages.create(
-                    model="claude-haiku-4-5-20251001",
+                    model="claude-haiku-4-5",
                     max_tokens=400,
                     system=agent["instruction"],
                     messages=[{

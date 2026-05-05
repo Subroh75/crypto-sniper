@@ -60,7 +60,7 @@ Generate a 24-hour forecast. Current price is ${close:,.2f}."""
         def _call():
             client = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
             return client.messages.create(
-                model="claude-haiku-4-5-20251001",
+                model="claude-haiku-4-5",
                 max_tokens=1000,
                 system=KRONOS_PROMPT,
                 messages=[{"role": "user", "content": prompt}]
