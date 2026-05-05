@@ -252,8 +252,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
         esc_msg = (
-            "This has been escalated to the Crypto Sniper team.\n"
-            "Subroh will follow up directly — usually within a few hours.\n\n"
+            "This has been escalated to the Crypto Sniper support team.\n"
+            "Kai will follow up directly — usually within a few hours.\n\n"
             "Is there anything else I can help with in the meantime?"
         )
         await save_message(user.id, "assistant", esc_msg)
