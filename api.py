@@ -363,7 +363,7 @@ def scan_top_signals(
                 "change":    quote["change_24h"],
                 "volume_24h": quote["volume_24h"],
                 "score":     sig.total,
-                "max_score": 16,
+                "max_score": 13,
                 "signal":    sig.signal_label,
                 "direction": sig.direction,
                 "rsi":       round(sig.rsi, 1),
@@ -465,7 +465,7 @@ def dip_scan(
                 "price":     quote["price"],
                 "change":    quote["change_24h"],
                 "score":     sig.total,
-                "max_score": 16,
+                "max_score": 13,
                 "signal":    sig.signal_label,
                 "rsi":       round(sig.rsi, 1),
                 "adx":       round(sig.adx, 1),
@@ -568,7 +568,7 @@ def dip_performance(
 
     Answers: "If I bought every coin that was down 10% AND scored 9/16, what happened?"
 
-    Groups results into score bands: 1-4, 5-6, 7-8, 9-10, 11-13, 14-16
+    Groups results into score bands: 1-4, 5-6, 7-8, 9-10, 11-13
     """
     from concurrent.futures import ThreadPoolExecutor, as_completed
     from backtest_internal import get_daily_ohlcv, _score_bar, _hold_return, MIN_BARS_CONTEXT
@@ -670,7 +670,6 @@ def dip_performance(
         {"label": "7–8",   "min": 7,  "max": 8,  "color": "#f59e0b"},
         {"label": "9–10",  "min": 9,  "max": 10, "color": "#22c55e"},
         {"label": "11–13", "min": 11, "max": 13, "color": "#22c55e"},
-        {"label": "14–16", "min": 14, "max": 16, "color": "#7c3aed"},
     ]
 
     def band_stats(pairs):
@@ -725,7 +724,7 @@ def score_performance(
     and returns avg return + win rate per bucket.
 
     Buckets: 1-4 (Weak), 5-6 (Moderate), 7-8 (Good), 9-10 (Strong Buy),
-             11-13 (Strong+), 14-16 (Elite)
+             11-13 (Elite)
     """
     from concurrent.futures import ThreadPoolExecutor, as_completed
     from backtest_internal import get_daily_ohlcv, _score_bar, _hold_return, MIN_BARS_CONTEXT
@@ -1357,7 +1356,7 @@ async def pdf_report(payload: dict):
     now_str   = datetime.now(timezone.utc).strftime("%d %b %Y %H:%M UTC")
     sig_obj   = payload.get("signal", {})
     score     = sig_obj.get("total", 0)
-    score_max = sig_obj.get("max", 16)
+    score_max = sig_obj.get("max", 13)
     signal    = sig_obj.get("label", "NO SIGNAL")
     comp      = payload.get("components", {})
     mkt       = payload.get("structure", {})

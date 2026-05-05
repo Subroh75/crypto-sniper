@@ -70,8 +70,8 @@ def _format_result(data: dict, symbol: str, interval: str) -> str:
     bull_pct  = conv.get("bull_pct", 0)
     bear_pct  = conv.get("bear_pct", 0)
 
-    # Score bar (16 chars wide)
-    filled = round(score / 16 * 12)
+    # Score bar (13 max)
+    filled = round(score / 13 * 12)
     bar = "[" + "#" * filled + "-" * (12 - filled) + "]"
 
     signal_display = SIGNAL_EMOJI.get(label, label)
@@ -80,7 +80,7 @@ def _format_result(data: dict, symbol: str, interval: str) -> str:
         f"CRYPTO SNIPER  |  {symbol}/USDT  |  {interval}",
         "─" * 34,
         f"SIGNAL:  {signal_display}",
-        f"SCORE:   {score}/16  {bar}",
+        f"SCORE:   {score}/13  {bar}",
         f"DIR:     {direction}",
         "",
         "── VPRT BREAKDOWN ──────────────",

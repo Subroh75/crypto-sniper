@@ -79,7 +79,7 @@ async def _analyse_symbol(session: aiohttp.ClientSession, symbol: str) -> dict |
 def _format_scan_message(hits: list[dict], scan_time: str) -> str:
     header = (
         f"CRYPTO SNIPER  —  HOURLY SCAN\n"
-        f"{scan_time}  |  1H  |  Score 9+/16\n"
+        f"{scan_time}  |  1H  |  Score 9+/13\n"
         f"{'─' * 34}\n"
         f"STRONG BUY signals found: {len(hits)}\n"
     )
@@ -108,10 +108,10 @@ def _format_scan_message(hits: list[dict], scan_time: str) -> str:
         t_sc   = comp.get("T", {}).get("score", 0)
 
         # Score bar
-        filled = round(score / 16 * 10)
+        filled = round(score / 13 * 10)
         bar    = "[" + "#" * filled + "-" * (10 - filled) + "]"
 
-        block  = f"\n#{i}  {symbol}/USDT  —  {score}/16  {bar}\n"
+        block  = f"\n#{i}  {symbol}/USDT  —  {score}/13  {bar}\n"
         block += f"Signal:  {label}\n"
         block += f"Price:   ${close:.6g}  ({chg:+.2f}%)\n"
         block += f"VPRT:    V{v_sc} P{p_sc} R{r_sc} T{t_sc}  |  RSI {rsi:.0f}  ADX {adx:.0f}  Vol {rv:.1f}x\n"

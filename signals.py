@@ -1,14 +1,13 @@
 """
-signals.py — V/P/R/T/S scoring engine for Crypto Sniper
+signals.py — V/P/R/T scoring engine for Crypto Sniper
 
 Signal Components:
   V — Volume     (0–5 pts)  : relative volume vs 20-bar avg
   P — Momentum   (0–3 pts)  : ATR-normalised price move
   R — Range Pos  (0–2 pts)  : close position in bar range
   T — Trend      (0–3 pts)  : EMA stack + ADX
-  S — Social     (0–3 pts)  : LunarCrush score (free placeholder)
 
-Total: 0–16 pts
+Total: 0–13 pts
   STRONG BUY : >= 9
   MODERATE   : >= 5
   NO SIGNAL  : < 5
@@ -26,9 +25,9 @@ class SignalResult:
     p_score:   int = 0
     r_score:   int = 0
     t_score:   int = 0
-    s_score:   int = 0
+    s_score:   int = 0   # kept for API compat, always 0
     total:     int = 0
-    max_score: int = 16
+    max_score: int = 13
 
     # Raw values
     rel_volume: float = 0.0
@@ -206,42 +205,22 @@ def calculate_signals(
     bull_signals = []
     bear_signals = []
 
-    # ── S: Social Score (0–3) ──────────────────────────────────────────────
-    # S score: Fear & Greed + CryptoPanic + social delta
+    # S score removed — pure technical scoring only (V+P+R+T = 13 max)
     s_score = 0
     fg = fear_greed or {}
-    fg_val   = fg.get("value", 50)
-    fg_delta = fg.get("delta", 0)
-    news     = cp_news or []
+    fg_val = fg.get("value", 50)
+    news   = cp_news or []
     bull_n = sum(1 for n in news if n.get("sentiment") == "bullish")
     bear_n = sum(1 for n in news if n.get("sentiment") == "bearish")
-    # Fear & Greed signal (1pt)
-    if fg_val >= 70 and fg_delta > 0: s_score += 1   # greed rising = momentum
-    elif fg_val <= 25:                s_score += 1   # extreme fear = buy dip
-    # News sentiment (1pt)
-    if bull_n > bear_n and bull_n >= 2: s_score += 1
-    # Social delta (1pt)
-    if social_delta >= 5:               s_score += 1
-    # Coindar high-impact event within 7 days (bonus up to +1, capped by min(s_score,3))
     events = coindar_events or []
-    high_soon = any(
-        e.get("impact") == "HIGH" and e.get("days_until", 99) <= 7
-        for e in events
-    )
-    if high_soon:
-        s_score += 1
-    s_score = min(s_score, 3)
-    # Update conviction signals with sentiment context
+    # Keep conviction context for Fear&Greed and news (display only, not scored)
     if fg_val <= 25:   bull_signals.append(f"Fear&Greed {fg_val} - extreme fear, potential reversal")
     elif fg_val >= 75: bear_signals.append(f"Fear&Greed {fg_val} - extreme greed, fade risk")
     if bull_n > bear_n: bull_signals.append(f"News {bull_n} bullish vs {bear_n} bearish")
     elif bear_n > bull_n: bear_signals.append(f"News {bear_n} bearish vs {bull_n} bullish")
-    if high_soon:
-        ev = next((e for e in events if e.get("impact") == "HIGH" and e.get("days_until", 99) <= 7), {})
-        bull_signals.append(f"Coindar HIGH event in {ev.get('days_until',0)}d: {ev.get('caption','')[:60]}")
 
-    # ── Total ──────────────────────────────────────────────────────────────
-    total = v_score + p_score + r_score + t_score + s_score
+    # ── Total (V+P+R+T only, max 13) ──────────────────────────────────────
+    total = v_score + p_score + r_score + t_score
 
     # ── Direction ──────────────────────────────────────────────────────────
     direction = "NEUTRAL"
