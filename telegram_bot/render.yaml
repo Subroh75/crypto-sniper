@@ -1,0 +1,30 @@
+services:
+  - type: worker
+    name: crypto-sniper-bot
+    runtime: python
+    region: singapore
+    plan: starter
+    rootDir: telegram_bot
+    buildCommand: pip install -r requirements.txt
+    startCommand: python bot.py
+    disk:
+      name: bot-data
+      mountPath: /data
+      sizeGB: 1
+    envVars:
+      - key: BOT_TOKEN
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: ADMIN_CHAT_ID
+        value: "5861457546"
+      - key: ADMIN_EMAIL
+        value: subroh.iyer@gmail.com
+      - key: RENDER_API_URL
+        value: https://crypto-sniper.onrender.com
+      - key: DB_PATH
+        value: /data/bot.db
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
