@@ -56,17 +56,13 @@ async def get_agent_response(
 
     client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
-    # Build context about this user
+    # Build context about this user — email intentionally omitted to prevent exposure
     user_context = ""
     if user:
         name = user.get("first_name", "")
-        email = user.get("email", "")
         tier = user.get("tier", "free")
-        user_context = f"\nCurrent user: {name}"
-        if email:
-            user_context += f" | Email: {email} | Tier: {tier}"
-        else:
-            user_context += " | Email: not linked"
+        has_email = bool(user.get("email"))
+        user_context = f"\nCurrent user: {name} | Tier: {tier.upper()} | Account linked: {'yes' if has_email else 'no'}"
 
     system = SYSTEM_PROMPT + user_context
 
