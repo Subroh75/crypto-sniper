@@ -78,7 +78,7 @@ async def get_agent_response(
 
     try:
         response = client.messages.create(
-            model="claude-3-haiku-20240307",
+            model="claude-haiku-4-5",
             max_tokens=600,
             system=system,
             messages=messages
@@ -88,7 +88,7 @@ async def get_agent_response(
         # Fallback to older model if haiku not available on this key
         try:
             response = client.messages.create(
-                model="claude-3-sonnet-20240229",
+                model="claude-sonnet-4-5",
                 max_tokens=600,
                 system=system,
                 messages=messages
