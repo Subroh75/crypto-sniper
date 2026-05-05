@@ -23,6 +23,7 @@ from db import init_db, get_user, upsert_user, set_user_email, save_message, get
 from agent import get_agent_response, extract_analyse_command, extract_escalation
 from analyse import fetch_analysis
 from escalation import escalate
+from scanner import hourly_scan_job
 
 logging.basicConfig(
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
@@ -281,6 +282,16 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
 async def post_init(application: Application):
     await init_db()
     logger.info("DB initialised")
+
+    # Schedule hourly scanner
+    job_queue = application.job_queue
+    job_queue.run_repeating(
+        hourly_scan_job,
+        interval=3600,   # every hour
+        first=60,        # first run 60s after bot starts (gives API time to wake)
+        name="hourly_scanner",
+    )
+    logger.info("Hourly scanner scheduled (first run in 60s)")
 
 
 def main():
