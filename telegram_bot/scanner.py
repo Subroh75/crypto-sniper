@@ -13,7 +13,8 @@ logger = logging.getLogger(__name__)
 
 API_BASE   = os.environ.get("RENDER_API_URL", "https://crypto-sniper.onrender.com")
 ADMIN_CHAT = int(os.environ.get("ADMIN_CHAT_ID", "5861457546"))
-MIN_SCORE  = int(os.environ.get("SCANNER_MIN_SCORE", "9"))
+MIN_SCORE       = int(os.environ.get("SCANNER_MIN_SCORE", "9"))
+WATCH_MIN_SCORE = 5   # coins scored 5–8 shown in "no trade" report
 TOP_N      = int(os.environ.get("SCANNER_TOP_N", "10"))
 
 BINANCE_TICKER = "https://data-api.binance.vision/api/v3/ticker/24hr"
@@ -72,6 +73,10 @@ async def _get_top_symbols(n: int = 200) -> list[str]:
 # ─────────────────────────────────────────────
 
 async def _analyse_symbol(session: aiohttp.ClientSession, symbol: str) -> dict | None:
+    """
+    Returns the analyse result if score >= WATCH_MIN_SCORE (5+).
+    Callers filter by MIN_SCORE (9) for STRONG BUY and WATCH_MIN_SCORE (5–8) for watch.
+    """
     try:
         async with session.post(
             f"{API_BASE}/analyse",
@@ -83,7 +88,7 @@ async def _analyse_symbol(session: aiohttp.ClientSession, symbol: str) -> dict |
             data = await r.json()
             sig = data.get("signal", {})
             score = sig.get("total", 0)
-            if score >= MIN_SCORE:
+            if score >= WATCH_MIN_SCORE:
                 return data
     except Exception as e:
         logger.debug(f"Analyse error {symbol}: {e}")
@@ -131,6 +136,72 @@ async def _fetch_kronos(session: aiohttp.ClientSession, symbol: str, analyse_dat
 # ─────────────────────────────────────────────
 #  Step 3: format a Telegram alert block
 # ─────────────────────────────────────────────
+
+def _format_quiet_message(watch: list[dict], scan_time: str) -> str:
+    """
+    Sent when no coin reaches 9/13 STRONG BUY.
+    Shows top near-miss coins (5–8/13) as a watch list with market context.
+    """
+    header = (
+        f"CRYPTO SNIPER  —  DAILY SCAN\n"
+        f"{scan_time}  |  1D  |  Score 9+/13\n"
+        f"{'─' * 34}\n"
+        f"NO TRADES TODAY\n"
+        f"Market ranging — no coin reached 9/13\n"
+    )
+
+    if not watch:
+        return (
+            header +
+            f"{'─' * 34}\n"
+            "Nothing above 5/13 this scan. Deep range or low volume market.\n"
+            "https://crypto-sniper.app"
+        )
+
+    header += f"Top {len(watch)} coins on watch ({watch[0].get('signal',{}).get('total',0)}–8/13):\n"
+
+    blocks = []
+    for i, data in enumerate(watch, 1):
+        sig    = data.get("signal", {})
+        score  = sig.get("total", 0)
+        symbol = data.get("symbol", "?")
+        struct = data.get("structure", {})
+        timing = data.get("timing", {})
+        quote  = data.get("quote", {})
+        comp   = data.get("components", {})
+
+        close  = struct.get("close") or quote.get("price") or 0
+        chg    = quote.get("change_24h") or 0
+        rsi    = timing.get("rsi") or 0
+        rv     = timing.get("rel_volume") or 0
+        adx    = timing.get("adx") or 0
+
+        v_sc = comp.get("V", {}).get("score", 0)
+        p_sc = comp.get("P", {}).get("score", 0)
+        r_sc = comp.get("R", {}).get("score", 0)
+        t_sc = comp.get("T", {}).get("score", 0)
+
+        filled = round(score / 13 * 10)
+        bar    = "[" + "#" * filled + "-" * (10 - filled) + "]"
+
+        # What's missing to reach 9?
+        gap   = 9 - score
+        needs = f"+{gap} to signal"
+
+        block  = f"\n#{i}  {symbol}  —  {score}/13  {bar}"
+        block += f"  ({needs})\n"
+        block += f"Price: ${close:.6g}  ({chg:+.2f}%)\n"
+        block += f"VPRT:  V{v_sc} P{p_sc} R{r_sc} T{t_sc}  |  RSI {rsi:.0f}  ADX {adx:.0f}  Vol {rv:.1f}x\n"
+        blocks.append(block)
+
+    footer = (
+        f"\n{'─' * 34}\n"
+        "Watch these — a volume or momentum shift could push them over.\n"
+        "https://crypto-sniper.app"
+    )
+
+    return header + "".join(blocks) + footer
+
 
 def _format_scan_message(hits: list[dict], scan_time: str) -> str:
     header = (
@@ -254,15 +325,21 @@ async def hourly_scan_job(context) -> None:
         elif res is not None:
             hits.append(res)
 
-    # Sort by score descending, take top N
+    # Sort by score descending
     hits.sort(key=lambda x: x.get("signal", {}).get("total", 0), reverse=True)
-    top = hits[:TOP_N]
 
-    logger.info(f"[Scanner] {len(top)} signals found, {errors} errors")
+    # Split into STRONG BUY (9+) and watch tier (5–8)
+    strong = [h for h in hits if h.get("signal", {}).get("total", 0) >= MIN_SCORE]
+    watch  = [h for h in hits if WATCH_MIN_SCORE <= h.get("signal", {}).get("total", 0) < MIN_SCORE]
 
-    # 4. Send to Telegram (or stay silent if nothing found)
-    if not top:
-        logger.info("[Scanner] No STRONG BUY signals this hour — staying silent")
+    top        = strong[:TOP_N]
+    watch_top  = watch[:10]   # top 10 near-miss coins
+
+    logger.info(f"[Scanner] {len(top)} STRONG BUY, {len(watch_top)} watch-tier, {errors} errors")
+
+    # 4. Send to Telegram
+    if not top and not watch_top:
+        logger.info("[Scanner] Nothing above 5/13 this scan — staying silent")
         return
 
     # 4a. Enrich top hits with Kronos AI forecast (parallel, best-effort)
@@ -278,6 +355,20 @@ async def hourly_scan_job(context) -> None:
             coin_data["kronos"] = kron
         else:
             coin_data["kronos"] = {}
+
+    # If no STRONG BUY signals, send a quiet market / watch report instead
+    if not top:
+        msg = _format_quiet_message(watch_top, scan_time)
+        try:
+            if len(msg) <= 4096:
+                await bot.send_message(chat_id=ADMIN_CHAT, text=msg)
+            else:
+                for chunk in [msg[i:i+4096] for i in range(0, len(msg), 4096)]:
+                    await bot.send_message(chat_id=ADMIN_CHAT, text=chunk)
+            logger.info(f"[Scanner] Quiet market report sent — {len(watch_top)} coins on watch")
+        except Exception as e:
+            logger.error(f"[Scanner] Quiet report send failed: {e}")
+        return
 
     msg = _format_scan_message(top, scan_time)
 
