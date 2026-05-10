@@ -14,7 +14,9 @@ logger = logging.getLogger(__name__)
 API_BASE   = os.environ.get("RENDER_API_URL", "https://crypto-sniper.onrender.com")
 ADMIN_CHAT = int(os.environ.get("ADMIN_CHAT_ID", "5861457546"))
 MIN_SCORE       = int(os.environ.get("SCANNER_MIN_SCORE", "9"))
-WATCH_MIN_SCORE = 5   # coins scored 5–8 shown in "no trade" report
+WATCH_MIN_SCORE  = 5   # coins scored 5–8 shown in "no trade" report
+BACKUP_INTERVAL  = "1h"  # re-score on this interval when 1D has no 9+ hits
+BACKUP_TOP_N     = 5     # max coins in backup signal
 TOP_N      = int(os.environ.get("SCANNER_TOP_N", "10"))
 
 BINANCE_TICKER = "https://data-api.binance.vision/api/v3/ticker/24hr"
@@ -72,15 +74,20 @@ async def _get_top_symbols(n: int = 200) -> list[str]:
 #  Step 2: score a single symbol
 # ─────────────────────────────────────────────
 
-async def _analyse_symbol(session: aiohttp.ClientSession, symbol: str) -> dict | None:
+async def _analyse_symbol(
+    session: aiohttp.ClientSession,
+    symbol: str,
+    interval: str = "1d",
+    min_score: int = WATCH_MIN_SCORE,
+) -> dict | None:
     """
-    Returns the analyse result if score >= WATCH_MIN_SCORE (5+).
-    Callers filter by MIN_SCORE (9) for STRONG BUY and WATCH_MIN_SCORE (5–8) for watch.
+    Score a single symbol. Returns result if score >= min_score, else None.
+    Interval defaults to 1d; pass interval='1h' for the backup scan.
     """
     try:
         async with session.post(
             f"{API_BASE}/analyse",
-            json={"symbol": symbol, "interval": "1d"},
+            json={"symbol": symbol, "interval": interval},
             timeout=aiohttp.ClientTimeout(total=25)
         ) as r:
             if r.status != 200:
@@ -88,11 +95,45 @@ async def _analyse_symbol(session: aiohttp.ClientSession, symbol: str) -> dict |
             data = await r.json()
             sig = data.get("signal", {})
             score = sig.get("total", 0)
-            if score >= WATCH_MIN_SCORE:
+            if score >= min_score:
                 return data
     except Exception as e:
-        logger.debug(f"Analyse error {symbol}: {e}")
+        logger.debug(f"Analyse error {symbol} ({interval}): {e}")
     return None
+
+
+async def _run_scan(
+    symbols: list[str],
+    interval: str = "1d",
+    min_score: int = WATCH_MIN_SCORE,
+    concurrency: int = 5,
+) -> tuple[list[dict], int]:
+    """
+    Score all symbols in parallel. Returns (hits, error_count).
+    hits includes every result with score >= min_score, sorted desc.
+    """
+    hits   = []
+    errors = 0
+    sem    = asyncio.Semaphore(concurrency)
+
+    async def bounded(session, sym):
+        async with sem:
+            result = await _analyse_symbol(session, sym, interval=interval, min_score=min_score)
+            await asyncio.sleep(0.15)
+            return result
+
+    async with aiohttp.ClientSession() as session:
+        tasks   = [bounded(session, sym) for sym in symbols]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    for res in results:
+        if isinstance(res, Exception):
+            errors += 1
+        elif res is not None:
+            hits.append(res)
+
+    hits.sort(key=lambda x: x.get("signal", {}).get("total", 0), reverse=True)
+    return hits, errors
 
 
 # ─────────────────────────────────────────────
@@ -136,6 +177,78 @@ async def _fetch_kronos(session: aiohttp.ClientSession, symbol: str, analyse_dat
 # ─────────────────────────────────────────────
 #  Step 3: format a Telegram alert block
 # ─────────────────────────────────────────────
+
+async def _send(bot, chat_id: int, msg: str) -> None:
+    """Send a Telegram message, splitting at 4096 chars if needed."""
+    if len(msg) <= 4096:
+        await bot.send_message(chat_id=chat_id, text=msg)
+    else:
+        for chunk in [msg[i:i+4096] for i in range(0, len(msg), 4096)]:
+            await bot.send_message(chat_id=chat_id, text=chunk)
+
+
+def _format_backup_message(hits: list[dict], scan_time: str) -> str:
+    """
+    Sent when 1D has no 9+ signals but 1H re-scan finds some.
+    Clearly labelled as a shorter-timeframe backup — lower conviction.
+    """
+    header = (
+        f"CRYPTO SNIPER  —  BACKUP SIGNAL (1H)\n"
+        f"{scan_time}  |  1H  |  Score 9+/13\n"
+        f"{'─' * 34}\n"
+        f"No 1D signals today — 1H scan found {len(hits)}\n"
+        f"Lower conviction: use tight stops\n"
+    )
+
+    blocks = []
+    for i, data in enumerate(hits, 1):
+        sig    = data.get("signal", {})
+        score  = sig.get("total", 0)
+        label  = sig.get("label", "")
+        symbol = data.get("symbol", "?")
+        struct = data.get("structure", {})
+        timing = data.get("timing", {})
+        quote  = data.get("quote", {})
+        comp   = data.get("components", {})
+        trade  = data.get("trade_setup") or {}
+
+        close  = struct.get("close") or quote.get("price") or 0
+        chg    = quote.get("change_24h") or 0
+        rsi    = timing.get("rsi") or 0
+        rv     = timing.get("rel_volume") or 0
+        adx    = timing.get("adx") or 0
+
+        v_sc = comp.get("V", {}).get("score", 0)
+        p_sc = comp.get("P", {}).get("score", 0)
+        r_sc = comp.get("R", {}).get("score", 0)
+        t_sc = comp.get("T", {}).get("score", 0)
+
+        filled = round(score / 13 * 10)
+        bar    = "[" + "#" * filled + "-" * (10 - filled) + "]"
+
+        block  = f"\n#{i}  {symbol}/USDT  —  {score}/13  {bar}\n"
+        block += f"Signal:  {label} (1H)\n"
+        block += f"Price:   ${close:.6g}  ({chg:+.2f}% 24h)\n"
+        block += f"VPRT:    V{v_sc} P{p_sc} R{r_sc} T{t_sc}  |  RSI {rsi:.0f}  ADX {adx:.0f}  Vol {rv:.1f}x\n"
+
+        if trade and trade.get("entry") and trade.get("stop") and trade.get("target"):
+            rr = trade.get("rr_ratio")
+            block += f"Setup:   E {trade['entry']:.6g}  SL {trade['stop']:.6g}  TP {trade['target']:.6g}"
+            if rr:
+                block += f"  R:R {rr:.2f}"
+            block += "\n"
+
+        blocks.append(block)
+
+    footer = (
+        f"\n{'─' * 34}\n"
+        "1H signals — confirm on higher TF before entry.\n"
+        "https://crypto-sniper.app\n"
+        "Not financial advice."
+    )
+
+    return header + "".join(blocks) + footer
+
 
 def _format_quiet_message(watch: list[dict], scan_time: str) -> str:
     """
@@ -304,86 +417,62 @@ async def hourly_scan_job(context) -> None:
         logger.warning("[Scanner] No symbols returned — aborting")
         return
 
-    # 3. Score each symbol (with concurrency limit to avoid hammering the API)
-    hits    = []
-    errors  = 0
-    sem     = asyncio.Semaphore(5)  # max 5 concurrent requests
+    # 3. Score all symbols on 1D — primary scan
+    hits_1d, errors = await _run_scan(symbols, interval="1d", min_score=WATCH_MIN_SCORE)
 
-    async def bounded_analyse(session, sym):
-        async with sem:
-            result = await _analyse_symbol(session, sym)
-            await asyncio.sleep(0.15)
-            return result
+    strong_1d = [h for h in hits_1d if h.get("signal", {}).get("total", 0) >= MIN_SCORE]
+    watch_1d  = [h for h in hits_1d if WATCH_MIN_SCORE <= h.get("signal", {}).get("total", 0) < MIN_SCORE]
 
-    async with aiohttp.ClientSession() as session:
-        tasks   = [bounded_analyse(session, sym) for sym in symbols]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+    top       = strong_1d[:TOP_N]
+    watch_top = watch_1d[:10]
 
-    for res in results:
-        if isinstance(res, Exception):
-            errors += 1
-        elif res is not None:
-            hits.append(res)
+    logger.info(f"[Scanner] 1D scan: {len(top)} STRONG BUY, {len(watch_top)} watch-tier, {errors} errors")
 
-    # Sort by score descending
-    hits.sort(key=lambda x: x.get("signal", {}).get("total", 0), reverse=True)
+    # 4. No 1D signals — try 1H backup scan on the same universe
+    backup_hits: list[dict] = []
+    if not top:
+        logger.info("[Scanner] No 1D signals — running 1H backup scan")
+        hits_1h, _ = await _run_scan(symbols, interval=BACKUP_INTERVAL, min_score=MIN_SCORE)
+        backup_hits = hits_1h[:BACKUP_TOP_N]
+        logger.info(f"[Scanner] 1H backup: {len(backup_hits)} STRONG BUY found")
 
-    # Split into STRONG BUY (9+) and watch tier (5–8)
-    strong = [h for h in hits if h.get("signal", {}).get("total", 0) >= MIN_SCORE]
-    watch  = [h for h in hits if WATCH_MIN_SCORE <= h.get("signal", {}).get("total", 0) < MIN_SCORE]
-
-    top        = strong[:TOP_N]
-    watch_top  = watch[:10]   # top 10 near-miss coins
-
-    logger.info(f"[Scanner] {len(top)} STRONG BUY, {len(watch_top)} watch-tier, {errors} errors")
-
-    # 4. Send to Telegram
-    if not top and not watch_top:
-        logger.info("[Scanner] Nothing above 5/13 this scan — staying silent")
+    # 5. Nothing anywhere — send watch report or stay silent
+    if not top and not backup_hits:
+        if watch_top:
+            msg = _format_quiet_message(watch_top, scan_time)
+            try:
+                await _send(bot, ADMIN_CHAT, msg)
+                logger.info(f"[Scanner] Quiet watch report sent — {len(watch_top)} coins")
+            except Exception as e:
+                logger.error(f"[Scanner] Quiet report send failed: {e}")
+        else:
+            logger.info("[Scanner] Nothing above 5/13 anywhere — staying silent")
         return
 
-    # 4a. Enrich top hits with Kronos AI forecast (parallel, best-effort)
-    async with aiohttp.ClientSession() as kron_session:
-        kronos_tasks = [
-            _fetch_kronos(kron_session, d.get("symbol", ""), d)
-            for d in top
-        ]
-        kronos_results = await asyncio.gather(*kronos_tasks, return_exceptions=True)
+    # 6a. Enrich 1D hits with Kronos (only when we have real 1D signals)
+    if top:
+        async with aiohttp.ClientSession() as kron_session:
+            kronos_results = await asyncio.gather(
+                *[_fetch_kronos(kron_session, d.get("symbol", ""), d) for d in top],
+                return_exceptions=True
+            )
+        for coin_data, kron in zip(top, kronos_results):
+            coin_data["kronos"] = kron if isinstance(kron, dict) and kron else {}
 
-    for coin_data, kron in zip(top, kronos_results):
-        if isinstance(kron, dict) and kron:
-            coin_data["kronos"] = kron
-        else:
-            coin_data["kronos"] = {}
-
-    # If no STRONG BUY signals, send a quiet market / watch report instead
-    if not top:
-        msg = _format_quiet_message(watch_top, scan_time)
+    # 6b. Send backup signal if 1D had nothing but 1H found hits
+    if not top and backup_hits:
+        msg = _format_backup_message(backup_hits, scan_time)
         try:
-            if len(msg) <= 4096:
-                await bot.send_message(chat_id=ADMIN_CHAT, text=msg)
-            else:
-                for chunk in [msg[i:i+4096] for i in range(0, len(msg), 4096)]:
-                    await bot.send_message(chat_id=ADMIN_CHAT, text=chunk)
-            logger.info(f"[Scanner] Quiet market report sent — {len(watch_top)} coins on watch")
+            await _send(bot, ADMIN_CHAT, msg)
+            logger.info(f"[Scanner] 1H backup signal sent — {len(backup_hits)} coins")
         except Exception as e:
-            logger.error(f"[Scanner] Quiet report send failed: {e}")
+            logger.error(f"[Scanner] Backup signal send failed: {e}")
         return
 
     msg = _format_scan_message(top, scan_time)
 
     try:
-        # Split if over Telegram's 4096 char limit
-        if len(msg) <= 4096:
-            await bot.send_message(chat_id=ADMIN_CHAT, text=msg)
-        else:
-            # Send header + one block per coin
-            await bot.send_message(chat_id=ADMIN_CHAT, text=msg[:4096])
-            remaining = msg[4096:]
-            while remaining:
-                await bot.send_message(chat_id=ADMIN_CHAT, text=remaining[:4096])
-                remaining = remaining[4096:]
-
-        logger.info(f"[Scanner] Alert sent — {len(top)} signals")
+        await _send(bot, ADMIN_CHAT, msg)
+        logger.info(f"[Scanner] 1D alert sent — {len(top)} signals")
     except Exception as e:
         logger.error(f"[Scanner] Telegram send failed: {e}")
