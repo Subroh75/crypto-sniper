@@ -245,7 +245,9 @@ export default function Home() {
   // Stable user_id: logged-in users use email, anonymous users use a stable string
   const userId = auth.user?.email ?? "anon";
   // Tier helpers — admin/full always passes everything
-  const isFullAccess = tierAtLeast(auth.user, "full");
+  // GATE_ENABLED: false until Telegram payment bot is live. Flip to true to enforce tiers.
+  const GATE_ENABLED = false;
+  const isFullAccess = !GATE_ENABLED || tierAtLeast(auth.user, "full");
   const [premiumOpen, setPremiumOpen] = useState(false);
   const [premiumFeature, setPremiumFeature] = useState("");
   function requireFull(feature: string, action: () => void) {
