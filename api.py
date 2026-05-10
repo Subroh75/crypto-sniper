@@ -78,7 +78,7 @@ class WatchlistRequest(BaseModel):
 
 # ── Scan cache ───────────────────────────────────────────────────────────────
 _scan_cache: dict = {}
-_SCAN_TTL  = 1200  # 20-min cache — balances freshness vs API load (was 3600)
+_SCAN_TTL  = 300   # 5-min cache — keeps scanner scores close to live analyse results
 
 # ── SQLite persistence for scan cache (survives Render sleep/restart) ─────────
 _SCAN_DB_PATH = os.path.join(os.path.dirname(__file__), "data.db")
@@ -380,6 +380,7 @@ def scan_top_signals(
                 "r":         sig.r_score,
                 "t":         sig.t_score,
                 "s":         sig.s_score,
+                "scanned_at": int(time.time()),
             }
         except Exception:
             return None

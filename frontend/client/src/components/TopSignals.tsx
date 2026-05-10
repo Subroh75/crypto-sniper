@@ -7,6 +7,7 @@ const BUY_THRESHOLD = 9;
 const PAGE_SIZE     = 20;
 
 interface Signal {
+  scanned_at?: number;
   symbol: string; score: number; max_score: number; signal: string;
   v: number; p: number; r: number; t: number; s: number;
   price: number; change: number; change_24h?: number;
@@ -105,6 +106,7 @@ export function TopSignals({ onSelect, interval = "1h", onBuySignalsChange }: Pr
         rsi:       Number(s.rsi ?? 0),
         adx:       Number(s.adx ?? 0),
         rel_vol:   Number(s.rel_vol ?? 0),
+        scanned_at: s.scanned_at ? Number(s.scanned_at) : undefined,
       }));
 
       if (!ctrl.signal.aborted) {
@@ -240,9 +242,10 @@ export function TopSignals({ onSelect, interval = "1h", onBuySignalsChange }: Pr
       )}
 
       {/* Stale cache warning — scores may differ from manual analysis */}
-      {cacheAge !== null && cacheAge >= 5 && (
-        <div style={{ fontSize: 9, color: "#f59e0b", background: "#1a1200", border: "1px solid #451a00", borderRadius: 4, padding: "4px 8px", marginBottom: 6 }}>
-          Cached {cacheAge}m ago — tap a coin for live score. Scores may differ slightly.
+      {cacheAge !== null && cacheAge >= 2 && (
+        <div style={{ fontSize: 9, color: "#f59e0b", background: "#1a1200", border: "1px solid #451a00", borderRadius: 4, padding: "4px 8px", marginBottom: 6, display: "flex", alignItems: "center", gap: 6 }}>
+          <span>⚠</span>
+          <span>Scores from {cacheAge}m ago — market conditions may have changed. Tap a coin for a live re-score.</span>
         </div>
       )}
 
@@ -316,6 +319,10 @@ export function TopSignals({ onSelect, interval = "1h", onBuySignalsChange }: Pr
                   </span>
                   <span style={{ fontSize: 8, color: "#334155" }}>
                     ${sig.price < 0.01 ? sig.price.toFixed(6) : sig.price < 1 ? sig.price.toFixed(4) : sig.price.toFixed(2)}
+                    {sig.scanned_at && (() => {
+                      const ageM = Math.round((Date.now() / 1000 - sig.scanned_at) / 60);
+                      return ageM >= 2 ? <span style={{ color: "#f59e0b", marginLeft: 4 }}>{ageM}m ago</span> : null;
+                    })()}
                   </span>
                 </div>
 
