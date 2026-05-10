@@ -75,7 +75,46 @@ export function AuthModal({
             <div className="text-center">
               <div className="text-3xl mb-3">✅</div>
               <div className="text-[15px] font-black text-text mb-1">Logged in</div>
-              <div className="text-[12px] font-mono text-text-muted mb-5">{user.email}</div>
+              <div className="text-[12px] font-mono text-text-muted mb-2">{user.email}</div>
+              {/* Tier badge */}
+              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full mb-4"
+                style={{
+                  background: user.tier === "admin" || user.tier === "full" ? "rgba(34,197,94,0.1)" :
+                              user.tier === "free" ? "rgba(100,116,139,0.1)" : "rgba(124,58,237,0.1)",
+                  border: `1px solid ${
+                    user.tier === "admin" || user.tier === "full" ? "rgba(34,197,94,0.3)" :
+                    user.tier === "free" ? "rgba(100,116,139,0.3)" : "rgba(124,58,237,0.3)"
+                  }`,
+                }}>
+                <span style={{
+                  fontSize: 10, fontFamily: "monospace", fontWeight: 700, textTransform: "uppercase",
+                  color: user.tier === "admin" || user.tier === "full" ? "#22c55e" :
+                         user.tier === "free" ? "#64748b" : "#7c3aed",
+                }}>
+                  {user.tier === "admin" ? "Admin" :
+                   user.tier === "full" ? "Full App" :
+                   user.tier === "pro_kronos" ? "Pro + Kronos" :
+                   user.tier === "pro" ? "Signals Pro" :
+                   user.tier === "basic" ? "Signals Basic" : "Free"}
+                </span>
+              </div>
+              {user.tier === "free" && (
+                <div className="mb-4">
+                  <a
+                    href="https://t.me/Niftysnipabot?start=subscribe"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center justify-center gap-2 w-full py-2.5 rounded-lg font-mono font-bold text-[12px] text-white transition-opacity hover:opacity-80"
+                    style={{ background: "linear-gradient(135deg,#7c3aed,#4f46e5)", textDecoration: "none" }}
+                  >
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="#fff">
+                      <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
+                    </svg>
+                    Upgrade via Telegram
+                  </a>
+                  <div className="text-[9px] font-mono text-text-muted/40 mt-1.5">Pay with Telegram Stars · No card needed</div>
+                </div>
+              )}
               <div className="text-[10px] font-mono text-text-muted/60 leading-relaxed mb-6">
                 Your watchlist and alerts are synced across sessions.
               </div>

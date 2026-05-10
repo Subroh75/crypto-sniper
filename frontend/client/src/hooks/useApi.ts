@@ -445,7 +445,7 @@ export function usePdfExport() {
 import {
   getBacktest, getConfluence,
   getWatchlistItems, addWatchlistItem, removeWatchlistItem,
-  requestMagicLink, verifyMagicLink, getMe,
+  requestMagicLink, verifyMagicLink, getMe, authViaTelegram,
   getOnchain,
   getBacktestInternal,
   getScorePerformance,
@@ -453,7 +453,7 @@ import {
 } from "@/lib/api";
 import type {
   BacktestData, ConfluenceData,
-  MagicLinkResult, VerifyResult, AuthUser,
+  MagicLinkResult, VerifyResult, AuthUser, UserTier,
   OnChainData,
   BacktestInternalData,
 } from "@/types/api";
@@ -544,24 +544,65 @@ export function useScorePerformance(topN = 15) {
     true,
   );
 }
-export function useAuth() {
-  const [user, setUser]           = useState<AuthUser | null>(null);
-  const [sessionToken, setToken]  = useState<string | null>(() => {
-    // Read from memory only — do NOT use localStorage
-    return null;
-  });
-  const [loading, setLoading]     = useState(false);
-  const [error, setError]         = useState<string | null>(null);
-  const [linkSent, setLinkSent]   = useState(false);
+// Admin emails — always get full access, no token needed
+const ADMIN_EMAILS = new Set(["subroh.iyer@gmail.com"]);
 
-  // On mount, try session from in-memory (page reload clears it — by design, no localStorage)
+// Tier ordering — higher index = more access
+const TIER_RANK: Record<UserTier, number> = {
+  free: 0, basic: 1, pro: 2, pro_kronos: 3, full: 4, admin: 99,
+};
+
+/** Returns true if user's tier meets or exceeds required tier */
+export function tierAtLeast(user: AuthUser | null, required: UserTier): boolean {
+  if (!user) return false;
+  return (TIER_RANK[user.tier] ?? 0) >= (TIER_RANK[required] ?? 0);
+}
+
+export function useAuth() {
+  const [user, setUser]          = useState<AuthUser | null>(null);
+  const [sessionToken, setToken] = useState<string | null>(() =>
+    // Persist session in localStorage so it survives page reloads
+    typeof localStorage !== "undefined" ? localStorage.getItem("cs_session") : null
+  );
+  const [loading, setLoading]    = useState(false);
+  const [error, setError]        = useState<string | null>(null);
+  const [linkSent, setLinkSent]  = useState(false);
+
+  // On mount: (1) check for ?tg_token= in URL (Telegram deep link), then (2) restore session
   useEffect(() => {
+    // Check for Telegram auth token in URL params
+    const urlParams = new URLSearchParams(window.location.search);
+    const tgToken   = urlParams.get("tg_token");
+    if (tgToken) {
+      // Strip token from URL immediately
+      const cleanUrl = window.location.pathname + window.location.hash.replace(/[?&]tg_token=[^&]*/, "");
+      window.history.replaceState(null, "", cleanUrl);
+      setLoading(true);
+      authViaTelegram(tgToken)
+        .then(res => {
+          localStorage.setItem("cs_session", res.session_token);
+          setToken(res.session_token);
+          const tier: UserTier = ADMIN_EMAILS.has(res.email) ? "admin" : res.tier;
+          setUser({ email: res.email, tier });
+        })
+        .catch(() => { /* silent — user stays as free */ })
+        .finally(() => setLoading(false));
+      return;
+    }
+    // Restore existing session from localStorage
     if (sessionToken) {
       getMe(sessionToken)
-        .then(u => setUser({ email: u.email }))
-        .catch(() => { setToken(null); setUser(null); });
+        .then(u => {
+          const tier: UserTier = ADMIN_EMAILS.has(u.email) ? "admin" : (u.tier ?? "free");
+          setUser({ email: u.email, tier });
+        })
+        .catch(() => {
+          localStorage.removeItem("cs_session");
+          setToken(null);
+          setUser(null);
+        });
     }
-  }, [sessionToken]);
+  }, []); // eslint-disable-line
 
   const login = useCallback(async (email: string): Promise<MagicLinkResult> => {
     setLoading(true);
@@ -587,8 +628,10 @@ export function useAuth() {
       const res = await verifyMagicLink(token);
       if (res.error) { setError(res.error); return res; }
       if (res.session_token && res.email) {
+        localStorage.setItem("cs_session", res.session_token);
         setToken(res.session_token);
-        setUser({ email: res.email });
+        const tier: UserTier = ADMIN_EMAILS.has(res.email) ? "admin" : "free";
+        setUser({ email: res.email, tier });
       }
       return res;
     } catch (e) {
@@ -601,6 +644,7 @@ export function useAuth() {
   }, []);
 
   const logout = useCallback(() => {
+    localStorage.removeItem("cs_session");
     setToken(null);
     setUser(null);
     setLinkSent(false);

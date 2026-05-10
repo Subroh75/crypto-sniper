@@ -215,3 +215,93 @@ def verify_session(session_token: str) -> Optional[str]:
         return payload.get("email")
     except Exception:
         return None
+
+
+# ── Tier management ──────────────────────────────────────────────────────────
+
+ADMIN_EMAILS = {"subroh.iyer@gmail.com"}
+
+def _init_tier_columns():
+    """Add tier / paid_until / telegram_id columns if not present (idempotent)."""
+    with _get_conn() as c:
+        cols = [r[1] for r in c.execute("PRAGMA table_info(users)").fetchall()]
+        if "tier" not in cols:
+            c.execute("ALTER TABLE users ADD COLUMN tier TEXT NOT NULL DEFAULT 'free'")
+        if "paid_until" not in cols:
+            c.execute("ALTER TABLE users ADD COLUMN paid_until INTEGER")
+        if "telegram_id" not in cols:
+            c.execute("ALTER TABLE users ADD COLUMN telegram_id TEXT")
+        if "auth_token" not in cols:
+            c.execute("ALTER TABLE users ADD COLUMN auth_token TEXT")
+        if "auth_token_ts" not in cols:
+            c.execute("ALTER TABLE users ADD COLUMN auth_token_ts INTEGER")
+
+_init_tier_columns()
+
+
+def get_user_tier(email: str) -> str:
+    """Return tier for email. Admin always returns 'admin'."""
+    if email.lower().strip() in ADMIN_EMAILS:
+        return "admin"
+    with _get_conn() as c:
+        row = c.execute(
+            "SELECT tier, paid_until FROM users WHERE email=?",
+            (email.lower().strip(),)
+        ).fetchone()
+    if not row:
+        return "free"
+    now = int(time.time())
+    # If subscription expired, downgrade to free
+    if row["paid_until"] and row["paid_until"] < now and row["tier"] not in ("admin", "free"):
+        with _get_conn() as c:
+            c.execute("UPDATE users SET tier='free' WHERE email=?", (email.lower().strip(),))
+        return "free"
+    return row["tier"] or "free"
+
+
+def validate_telegram_token(token: str) -> Optional[dict]:
+    """
+    Validate a short-lived auth token issued by the Telegram bot.
+    Returns { email, tier, telegram_id, paid_until } or None.
+    Token expires in 10 minutes.
+    """
+    TOKEN_TTL = 600  # 10 minutes
+    with _get_conn() as c:
+        row = c.execute(
+            """SELECT email, tier, telegram_id, paid_until, auth_token_ts
+               FROM users
+               WHERE auth_token=? AND auth_token_ts > ?""",
+            (token, int(time.time()) - TOKEN_TTL)
+        ).fetchone()
+    if not row:
+        return None
+    email = row["email"]
+    # Invalidate token (one-time use)
+    with _get_conn() as c:
+        c.execute("UPDATE users SET auth_token=NULL, auth_token_ts=NULL WHERE email=?", (email,))
+    tier = get_user_tier(email)
+    session_token = SIGNER.dumps({"email": email, "ts": int(time.time())})
+    return {
+        "email":       email,
+        "tier":        tier,
+        "telegram_id": row["telegram_id"],
+        "paid_until":  row["paid_until"],
+        "session_token": session_token,
+    }
+
+
+def verify_session_with_tier(session_token: str) -> Optional[dict]:
+    """
+    Like verify_session but also returns tier.
+    Returns { email, tier } or None.
+    """
+    SESSION_TTL = 86_400 * 30  # 30 days
+    try:
+        payload = SIGNER.loads(session_token, max_age=SESSION_TTL)
+        email   = payload.get("email")
+        if not email:
+            return None
+        tier = get_user_tier(email)
+        return {"email": email, "tier": tier}
+    except Exception:
+        return None

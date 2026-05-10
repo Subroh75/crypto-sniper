@@ -26,11 +26,12 @@ import { PriceAlertCard, subscribeAlertBadge, markAlertsRead } from "@/component
 import type { AlertHistoryEntry } from "@/components/PriceAlertCard";
 import { ScanAlertPoller } from "@/components/ScanAlertPoller";
 import { AuthModal, AuthButton } from "@/components/AuthModal";
+import { PremiumModal, usePremiumGate } from "@/components/PremiumModal";
 import { PWAInstallBanner } from "@/components/PWAInstallBanner";
 import {
   useAnalyse, useKronos, useWatchlist, usePdfExport,
   useHitRate, useAlerts,
-  useEditableWatchlist, useAuth,
+  useEditableWatchlist, useAuth, tierAtLeast,
 } from "@/hooks/useApi";
 import { fmtPrice, fmtPct } from "@/lib/api";
 import { MetricTooltip } from "@/components/Tooltip";
@@ -243,6 +244,15 @@ export default function Home() {
   const auth = useAuth();
   // Stable user_id: logged-in users use email, anonymous users use a stable string
   const userId = auth.user?.email ?? "anon";
+  // Tier helpers — admin/full always passes everything
+  const isFullAccess = tierAtLeast(auth.user, "full");
+  const [premiumOpen, setPremiumOpen] = useState(false);
+  const [premiumFeature, setPremiumFeature] = useState("");
+  function requireFull(feature: string, action: () => void) {
+    if (isFullAccess) { action(); return; }
+    setPremiumFeature(feature);
+    setPremiumOpen(true);
+  }
 
   const analyse  = useAnalyse();
   const kronosHk = useKronos();
@@ -348,12 +358,20 @@ export default function Home() {
             </div>
             <AuthButton user={auth.user} onClick={() => setAuthOpen(true)} />
             <AlertBell />
-            <button
-              className="hidden md:flex text-[11px] font-mono font-bold text-white px-2.5 md:px-3 py-1.5 rounded transition-all min-h-[36px]"
-              style={{ background: "#7c3aed" }}
-            >
-              Subscribe
-            </button>
+            {!isFullAccess && (
+              <a
+                href="https://t.me/Niftysnipabot?start=subscribe"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="hidden md:flex items-center gap-1.5 text-[11px] font-mono font-bold text-white px-2.5 md:px-3 py-1.5 rounded transition-all min-h-[36px]"
+                style={{ background: "linear-gradient(135deg,#7c3aed,#4f46e5)", textDecoration: "none" }}
+              >
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="#fff">
+                  <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
+                </svg>
+                Get Full Access
+              </a>
+            )}
           </div>
         </div>
       </header>
@@ -394,17 +412,21 @@ export default function Home() {
             ref={inputRef}
             value={input}
             onChange={e => setInput(e.target.value.toUpperCase())}
-            onKeyDown={e => e.key === "Enter" && runAnalysis()}
-            placeholder="BTC  ETH  SOL  KAVA..."
-            className="flex-1 h-[48px] rounded-lg border border-border/60 bg-surface px-4 text-[15px] font-sans font-medium text-text placeholder:text-text-muted/50 outline-none focus:border-purple transition-all w-full"
+            onKeyDown={e => e.key === "Enter" && requireFull("Deep analysis", () => { runAnalysis(); })}
+            onClick={() => { if (!isFullAccess) requireFull("Deep analysis", () => {}); }}
+            readOnly={!isFullAccess}
+            placeholder={isFullAccess ? "BTC  ETH  SOL  KAVA..." : "Full App only — upgrade to search any coin"}
+            className={`flex-1 h-[48px] rounded-lg border border-border/60 bg-surface px-4 text-[15px] font-sans font-medium text-text placeholder:text-text-muted/50 outline-none focus:border-purple transition-all w-full ${
+              !isFullAccess ? "cursor-pointer opacity-70" : ""
+            }`}
           />
           <button
-            onClick={() => { runAnalysis(); if (isMobile) setMobileTab("analyse"); }}
-            disabled={loading}
+            onClick={() => requireFull("Deep analysis", () => { runAnalysis(); if (isMobile) setMobileTab("analyse"); })}
+            disabled={loading && isFullAccess}
             className="h-[48px] px-5 rounded-lg font-sans font-bold text-[13px] text-white flex items-center justify-center gap-2 transition-all disabled:opacity-60 w-full sm:w-auto"
             style={{ background: "#7c3aed" }}
           >
-            {loading ? "Analysing..." : "Analyse"}
+            {loading && isFullAccess ? "Analysing..." : isFullAccess ? "Analyse" : "🔒 Upgrade to Analyse"}
           </button>
         </div>
 
@@ -414,7 +436,7 @@ export default function Home() {
           {QUICK_COINS.map(sym => (
             <button
               key={sym}
-              onClick={() => { runAnalysis(sym); if (isMobile) setMobileTab("analyse"); }}
+              onClick={() => requireFull("Deep analysis", () => { runAnalysis(sym); if (isMobile) setMobileTab("analyse"); })}
               className="text-[11px] font-mono px-2.5 py-1 rounded-md border border-border/50 bg-surface-2 text-text-muted hover:border-purple/40 hover:text-text transition-all min-h-[32px]"
             >
               {sym}
@@ -718,9 +740,14 @@ export default function Home() {
 
               {/* 06: Kronos AI Forecast */}
               <Card>
-                <CardHeader num="06" title="KRONOS AI FORECAST" />
+                <CardHeader num="06" title="KRONOS AI FORECAST" badge={!isFullAccess ? "PREMIUM" : undefined} />
                 <div className="p-4">
-                  {kronosHk.loading && (
+                  {!isFullAccess && (
+                    <PremiumModal open inline feature="Kronos AI forecast"
+                      requiredTier="full" currentTier={auth.user?.tier ?? "free"}
+                      onDismiss={() => {}} />
+                  )}
+                  {isFullAccess && kronosHk.loading && (
                     <div className="flex items-center gap-3 py-8 justify-center text-text-muted text-[11px] font-mono">
                       <div className="flex gap-1">
                         {[0,1,2].map(i=><div key={i} className="w-1.5 h-1.5 rounded-full bg-purple animate-bounce" style={{animationDelay:`${i*0.15}s`}}/>)}
@@ -728,7 +755,7 @@ export default function Home() {
                       Kronos forecasting {symbol}...
                     </div>
                   )}
-                  {kron && !kronosHk.loading && (
+                  {isFullAccess && kron && !kronosHk.loading && (
                     <>
                       {/* Row 1: direction / move / trade quality */}
                       <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-2">
@@ -880,7 +907,7 @@ export default function Home() {
                       </div>
                     </>
                   )}
-                  {!kron && !kronosHk.loading && (
+                  {isFullAccess && !kron && !kronosHk.loading && (
                     <div className="text-center py-6 text-[11px] font-mono text-text-muted/60">
                       Waiting for signal analysis...
                     </div>
@@ -890,9 +917,14 @@ export default function Home() {
 
               {/* 07: Agent Debate */}
               <Card>
-                <CardHeader num="07" icon="⚖" title="AI LAB - AGENT DEBATE" />
+                <CardHeader num="07" icon="⚖" title="AI LAB - AGENT DEBATE" badge={!isFullAccess ? "PREMIUM" : undefined} />
                 <div className="p-3 space-y-2">
-                  {kron?.agents ? (
+                  {!isFullAccess && (
+                    <PremiumModal open inline feature="Agent debate"
+                      requiredTier="full" currentTier={auth.user?.tier ?? "free"}
+                      onDismiss={() => {}} />
+                  )}
+                  {isFullAccess && kron?.agents ? (
                     kron.agents.map(agent => {
                       const accentClass =
                         agent.key === "bull" ? "border-teal/25 bg-teal/4"  :
@@ -941,17 +973,17 @@ export default function Home() {
                         </div>
                       );
                     })
-                  ) : kronosHk.loading ? (
+                  ) : isFullAccess && kronosHk.loading ? (
                     <div className="space-y-2">
                       {[...Array(4)].map((_,i) => (
                         <div key={i} className="h-24 bg-surface-2 rounded-lg animate-pulse border border-border/30" />
                       ))}
                     </div>
-                  ) : (
+                  ) : isFullAccess ? (
                     <div className="text-center py-6 text-[11px] font-mono text-text-muted/60">
                       Waiting for signal analysis...
                     </div>
-                  )}
+                  ) : null}
                 </div>
               </Card>
 
@@ -961,7 +993,10 @@ export default function Home() {
               <MacroSection />
 
               {/* 09: Perplexity Deep Research */}
-              <DeepResearchSection symbol={symbol} analyseData={sig} />
+              {isFullAccess
+                ? <DeepResearchSection symbol={symbol} analyseData={sig} />
+                : <Card><CardHeader num="09" title="DEEP RESEARCH" badge="PREMIUM" /><div className="p-4"><PremiumModal open inline feature="Deep research" requiredTier="full" currentTier={auth.user?.tier ?? "free"} onDismiss={() => {}} /></div></Card>
+              }
 
               {/* 12: Multi-Timeframe Confluence */}
               <MultiTimeframeCard symbol={symbol} />
@@ -987,15 +1022,25 @@ export default function Home() {
               </div>
               {/* Scanner tab — mobile only */}
               <div className={isMobile && mobileTab !== "scanner" ? "hidden" : isMobile ? "" : "hidden"}>
-                <TopSignals
-                  onSelect={(sym) => { runAnalysis(sym); if(isMobile) setMobileTab("analyse"); }}
-                  interval={interval}
-                  listMode={true}
-                />
-                <DipScannerCard
-                  interval={interval}
-                  onSelect={(sym) => { runAnalysis(sym); if(isMobile) setMobileTab("analyse"); }}
-                />
+                {isFullAccess ? (
+                  <>
+                    <TopSignals
+                      onSelect={(sym) => { runAnalysis(sym); if(isMobile) setMobileTab("analyse"); }}
+                      interval={interval}
+                      listMode={true}
+                    />
+                    <DipScannerCard
+                      interval={interval}
+                      onSelect={(sym) => { runAnalysis(sym); if(isMobile) setMobileTab("analyse"); }}
+                    />
+                  </>
+                ) : (
+                  <div className="p-4">
+                    <PremiumModal open inline feature="Live scanner"
+                      requiredTier="full" currentTier={auth.user?.tier ?? "free"}
+                      onDismiss={() => setMobileTab("analyse")} />
+                  </div>
+                )}
               </div>
               {/* Watchlist + Tools group */}
               <div className={isMobile && mobileTab !== "sidebar" ? "hidden" : ""}>
@@ -1108,6 +1153,15 @@ export default function Home() {
         error={auth.error}
         linkSent={auth.linkSent}
         onLogout={auth.logout}
+      />
+
+      {/* PREMIUM UPGRADE MODAL — global, triggered by requireFull() */}
+      <PremiumModal
+        open={premiumOpen}
+        feature={premiumFeature}
+        requiredTier="full"
+        currentTier={auth.user?.tier ?? "free"}
+        onDismiss={() => setPremiumOpen(false)}
       />
 
       {/* ALERTS MODAL */}

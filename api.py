@@ -4,7 +4,7 @@ Endpoints: /analyse /kronos /deep-research /market /trending /gainers /news /mac
 """
 import os, time, logging
 from typing import Optional
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -30,6 +30,7 @@ from watchlist_db import (
 )
 from auth import (
     send_magic_link, verify_magic_link, verify_session,
+    validate_telegram_token, verify_session_with_tier,
 )
 from alerts import (
     AlertRequest, register_alert, get_alerts, delete_alert,
@@ -903,11 +904,29 @@ async def verify_link(token: str):
 
 @app.get("/auth/me")
 async def me(session_token: str):
-    """Return authenticated user email if session is valid."""
-    email = verify_session(session_token)
-    if not email:
+    """Return authenticated user email + tier if session is valid."""
+    result = verify_session_with_tier(session_token)
+    if not result:
         raise HTTPException(status_code=401, detail="Invalid or expired session")
-    return {"email": email, "timestamp": int(time.time())}
+    return {**result, "timestamp": int(time.time())}
+
+
+@app.post("/auth/telegram")
+async def auth_telegram(request: Request):
+    """
+    Validate a short-lived token issued by the Telegram bot.
+    Returns { email, tier, session_token, paid_until } on success.
+    Called by the frontend after a user arrives via deep link:
+      https://crypto-sniper.app?tg_token=XXX
+    """
+    body = await request.json()
+    token = body.get("token", "").strip()
+    if not token:
+        raise HTTPException(status_code=400, detail="Missing token")
+    result = validate_telegram_token(token)
+    if not result:
+        raise HTTPException(status_code=401, detail="Invalid or expired Telegram token")
+    return {**result, "timestamp": int(time.time())}
 
 
 # ── Internal Signal Backtest ────────────────────────────────────────────────

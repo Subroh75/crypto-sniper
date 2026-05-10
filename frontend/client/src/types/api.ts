@@ -409,8 +409,11 @@ export interface VerifyResult {
   error?:         string;
 }
 
+export type UserTier = "free" | "basic" | "pro" | "pro_kronos" | "full" | "admin";
+
 export interface AuthUser {
   email: string;
+  tier:  UserTier;
 }
 
 

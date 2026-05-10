@@ -225,9 +225,17 @@ export function verifyMagicLink(token: string): Promise<import("@/types/api").Ve
   return get(`/auth/verify?token=${encodeURIComponent(token)}`, 0);
 }
 
-/** Get current user from session token */
+/** Get current user from session token (includes tier) */
 export function getMe(sessionToken: string): Promise<import("@/types/api").AuthUser & { timestamp: number }> {
   return get(`/auth/me?session_token=${encodeURIComponent(sessionToken)}`, 0);
+}
+
+/** Validate a Telegram-issued one-time auth token */
+export function authViaTelegram(token: string): Promise<{
+  email: string; tier: import("@/types/api").UserTier;
+  session_token: string; paid_until?: number; timestamp: number;
+}> {
+  return post(`/auth/telegram`, { token }, 0);
 }
 
 /** On-chain intelligence for a symbol */
