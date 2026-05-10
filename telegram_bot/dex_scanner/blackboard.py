@@ -90,8 +90,8 @@ class Blackboard:
     # Telegram message composers
     # ────────────────────────────────────────────────────────────────────────
 
-    def compose_sweep(self, top_n: int = 10) -> str:
-        """Full sweep message — posted by hourly scanner job."""
+    def compose_sweep(self, top_n: int = 10, mode: str = "HOURLY") -> str:
+        """Full sweep message — posted by the scanner job."""
         hits = self.all_hits(top_n)
         s    = self.summary()
         scan_time = datetime.now(timezone.utc).strftime("%d %b %Y %H:%M UTC")
@@ -99,9 +99,12 @@ class Blackboard:
         chains_active = [c for c, st in self._chain_status.items() if st == "done"]
         chain_str = " · ".join(c.upper() for c in chains_active)
 
+        prefix = "DAILY" if mode == "DAILY" else "HOURLY"
+        tf     = "1D" if mode == "DAILY" else "1H"
+
         header = (
-            f"🔍 DEX GEM SCAN\n"
-            f"{scan_time}  |  Score 9+/13\n"
+            f"🔍 DEX GEM SCAN  —  {prefix}\n"
+            f"{scan_time}  |  {tf}  |  Score 9+/13\n"
             f"Chains: {chain_str}\n"
             f"{'─' * 32}\n"
         )
@@ -109,8 +112,8 @@ class Blackboard:
         if not hits:
             return (
                 header +
-                "No gems found this sweep.\n"
-                "All chains scanned — nothing passed risk + signal thresholds.\n"
+                f"No gems found this {prefix.lower()} sweep.\n"
+                "Nothing passed risk + signal thresholds.\n"
                 f"{'─' * 32}\n"
                 "https://crypto-sniper.app\n"
                 "Not financial advice."

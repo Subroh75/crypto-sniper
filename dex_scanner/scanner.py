@@ -1,15 +1,16 @@
 """
 dex_scanner/scanner.py
 ───────────────────────
-Orchestrator — spawns all chain agents in parallel, collects results
-onto the blackboard, and sends the Telegram sweep message.
+Orchestrator — spawns all chain agents in parallel, writes to blackboard,
+sends the Telegram sweep message.
+
+  22:00 UTC (8 AM AEST)  →  daily sweep   — tighter filters, top 5 per chain
+  Every other hour        →  hourly sweep  — looser filters, fresher momentum
 
 Also exposes:
   gem_lookup(address, bot, chat_id)  — single-token /gem command handler
-  get_last_sweep()                   — returns cached last sweep results
+  get_last_sweep()                   — cached last sweep board + time
   SUPPORTED_CHAINS                   — list of active chain IDs
-
-Wired into the Telegram bot's JobQueue for hourly sweeps.
 """
 
 import asyncio
@@ -37,6 +38,20 @@ AGENTS = [
 
 SUPPORTED_CHAINS = [a.chain_id for a in AGENTS]
 
+# ── Scan mode config ──────────────────────────────────────────────────────────
+DAILY_HOUR_UTC = 22   # 8 AM AEST — use tighter daily filters at this UTC hour
+
+# Daily mode: stricter filters — only the clearest setups
+DAILY_TOP_N    = 5    # top N per chain
+DAILY_MIN_LIQ_MULT  = 2.0   # 2× the chain's base min_liq
+DAILY_MIN_VOL_MULT  = 2.0   # 2× the chain's base min_vol
+DAILY_MIN_AGE_H     = 72    # older pairs only (3 days+)
+DAILY_MIN_TXNS      = 100   # higher activity threshold
+
+# Hourly mode: standard filters — fresher, more coins
+HOURLY_TOP_N   = 5    # top N per chain
+# (uses each agent's default min_liq, min_vol, min_age_h, min_txns_1h)
+
 # ── Last sweep cache — persists between JobQueue runs ─────────────────────────
 _last_sweep_board: Blackboard | None = None
 _last_sweep_time:  str               = "Never"
@@ -47,44 +62,57 @@ def get_last_sweep() -> tuple[Blackboard | None, str]:
 
 
 # ────────────────────────────────────────────────────────────────────────────
-# HOURLY SWEEP JOB — registered with python-telegram-bot JobQueue
+# HOURLY/DAILY SWEEP JOB — registered with python-telegram-bot JobQueue
 # ────────────────────────────────────────────────────────────────────────────
 
 async def dex_scan_job(context) -> None:
     """
-    JobQueue callback — runs every hour.
-    Spawns all chain agents in parallel, writes to blackboard,
-    composes and sends sweep message.
+    JobQueue callback — fires every hour.
+
+    At 22:00 UTC (8 AM AEST): daily sweep — tighter filters, top gems.
+    All other hours:           hourly sweep — standard filters, intraday momentum.
     """
     global _last_sweep_board, _last_sweep_time
 
     bot       = context.bot
     chat_id   = context.job.data.get("chat_id")
-    scan_time = datetime.now(timezone.utc).strftime("%d %b %Y %H:%M UTC")
-    logger.info(f"[DEX Scanner] Starting sweep — {scan_time}")
+    now_utc   = datetime.now(timezone.utc)
+    scan_time = now_utc.strftime("%d %b %Y %H:%M UTC")
+
+    is_daily = (now_utc.hour == DAILY_HOUR_UTC)
+    mode     = "DAILY" if is_daily else "HOURLY"
+    top_n    = DAILY_TOP_N if is_daily else HOURLY_TOP_N
+
+    logger.info(f"[DEX Scanner] Starting {mode} sweep — {scan_time}")
 
     board = Blackboard()
     for agent in AGENTS:
         board.register_chain(agent.chain_id)
 
     async with aiohttp.ClientSession() as session:
-        tasks = [_run_agent(agent, session, board) for agent in AGENTS]
+        tasks = [
+            _run_agent(agent, session, board, is_daily=is_daily, top_n=top_n)
+            for agent in AGENTS
+        ]
         await asyncio.gather(*tasks, return_exceptions=True)
 
     # Cache for /gems command
     _last_sweep_board = board
     _last_sweep_time  = scan_time
 
-    msg = board.compose_sweep(top_n=10)
     s   = board.summary()
-    logger.info(f"[DEX Scanner] Sweep done — {s['total_hits']} hits, {s['elapsed_s']}s")
+    msg = board.compose_sweep(top_n=top_n * len(AGENTS), mode=mode)
+
+    logger.info(
+        f"[DEX Scanner] {mode} sweep done — "
+        f"{s['total_hits']} hits, {s['elapsed_s']}s"
+    )
 
     if not chat_id:
         logger.warning("[DEX Scanner] No chat_id in job data — skipping send")
         return
 
     try:
-        # Telegram 4096 char limit
         if len(msg) <= 4096:
             await bot.send_message(chat_id=chat_id, text=msg)
         else:
@@ -94,11 +122,32 @@ async def dex_scan_job(context) -> None:
         logger.error(f"[DEX Scanner] Telegram send failed: {e}")
 
 
-async def _run_agent(agent, session: aiohttp.ClientSession, board: Blackboard) -> None:
-    """Run one chain agent with a hard 45s timeout, write results to board."""
+async def _run_agent(
+    agent,
+    session: aiohttp.ClientSession,
+    board: Blackboard,
+    is_daily: bool = False,
+    top_n: int = 5,
+) -> None:
+    """
+    Run one chain agent with a hard 45s timeout.
+    Daily mode: temporarily tighten the agent's filters before scanning.
+    """
+    # Stash originals
+    orig_liq   = agent.min_liq
+    orig_vol   = agent.min_vol
+    orig_age   = agent.min_age_h
+    orig_txns  = agent.min_txns_1h
+
+    if is_daily:
+        agent.min_liq     = orig_liq  * DAILY_MIN_LIQ_MULT
+        agent.min_vol     = orig_vol  * DAILY_MIN_VOL_MULT
+        agent.min_age_h   = max(orig_age, DAILY_MIN_AGE_H)
+        agent.min_txns_1h = max(orig_txns, DAILY_MIN_TXNS)
+
     try:
         hits = await asyncio.wait_for(
-            agent.scan(session, top_n=5),
+            agent.scan(session, top_n=top_n),
             timeout=45
         )
         board.write(agent.chain_id, hits)
@@ -108,6 +157,12 @@ async def _run_agent(agent, session: aiohttp.ClientSession, board: Blackboard) -
     except Exception as e:
         logger.error(f"[{agent.chain_id.upper()}] Agent error: {e}")
         board.fail(agent.chain_id)
+    finally:
+        # Always restore original filters
+        agent.min_liq     = orig_liq
+        agent.min_vol     = orig_vol
+        agent.min_age_h   = orig_age
+        agent.min_txns_1h = orig_txns
 
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -118,35 +173,36 @@ async def gem_lookup(
     address_or_name: str,
     bot,
     chat_id: int,
-    preferred_chain: str | None = None
+    preferred_chain: str | None = None,
 ) -> None:
     """
-    Resolve an address or token name, run all three checks (market + risk +
-    signal) via the appropriate chain agent, and send the result.
-
-    If preferred_chain is provided (e.g. "sol", "bsc"), try that agent first.
-    Otherwise auto-detect via DexScreener cross-chain search.
+    Resolve an address or token name, run all checks via the appropriate
+    chain agent, and send the result.
     """
     query = address_or_name.strip()
 
     await bot.send_message(
         chat_id=chat_id,
-        text=f"🔍 Scanning {query[:20]}{'...' if len(query) > 20 else ''}...\nRunning market · risk · signal checks"
+        text=(
+            f"🔍 Scanning {query[:20]}{'...' if len(query) > 20 else ''}...\n"
+            "Running market · risk · signal checks"
+        )
     )
 
     async with aiohttp.ClientSession() as session:
         hit = None
 
-        # If chain specified, try that agent first
         if preferred_chain:
             agent = _agent_by_chain(preferred_chain)
             if agent:
-                hit = await asyncio.wait_for(
-                    agent.analyse_address(session, query),
-                    timeout=25
-                )
+                try:
+                    hit = await asyncio.wait_for(
+                        agent.analyse_address(session, query),
+                        timeout=25
+                    )
+                except Exception:
+                    pass
 
-        # Auto-detect: try all agents, take best result by liquidity
         if not hit:
             tasks = [
                 asyncio.wait_for(agent.analyse_address(session, query), timeout=25)
@@ -155,7 +211,6 @@ async def gem_lookup(
             results = await asyncio.gather(*tasks, return_exceptions=True)
             candidates = [r for r in results if isinstance(r, dict) and r is not None]
             if candidates:
-                # Pick highest liquidity result
                 hit = max(candidates, key=lambda x: x.get("liquidity", 0))
 
     if not hit:
@@ -173,6 +228,10 @@ async def gem_lookup(
     except Exception as e:
         logger.error(f"[DEX Scanner] gem_lookup send failed: {e}")
 
+
+# ────────────────────────────────────────────────────────────────────────────
+# Helpers
+# ────────────────────────────────────────────────────────────────────────────
 
 def _agent_by_chain(chain_id: str):
     for a in AGENTS:
