@@ -56,7 +56,7 @@ function SideCardHeader({ num, icon, title, badge, src }: {
 // ════════════════════════════════════════════════════════════════════════════
 // 1. TRADE SETUP
 // ════════════════════════════════════════════════════════════════════════════
-export function TradeSetupCard({ setup, close }: { setup: TradeSetup | null; close: number }) {
+export function TradeSetupCard({ setup, close, csoGo = true }: { setup: TradeSetup | null; close: number; csoGo?: boolean }) {
   if (!setup) return null;
 
   const dir = setup.direction;
@@ -87,20 +87,52 @@ export function TradeSetupCard({ setup, close }: { setup: TradeSetup | null; clo
   const stopDistPct = setup.stop_dist_pct ? Math.abs(setup.stop_dist_pct) : null;
 
   return (
-    <SideCard glow>
-      {/* Top gradient bar */}
+    <SideCard glow={csoGo}>
+      {/* Top gradient bar — muted when CSO says wait */}
       <div className="h-[2px] w-full" style={{
-        background: "linear-gradient(90deg, #7c5cfc, #00d4aa)"
+        background: csoGo
+          ? "linear-gradient(90deg, #7c5cfc, #00d4aa)"
+          : "linear-gradient(90deg, #1e293b, #334155)"
       }} />
       <div className="flex items-center justify-between px-4 py-3 border-b border-border/50">
         <div className="flex items-center gap-2 text-[10px] font-mono font-bold uppercase tracking-[0.1em] text-text-muted">
           <span>⚡ TRADE SETUP</span>
         </div>
-        <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded border ${dirBg} ${dirColor}`}>
-          {dir === "LONG" ? "LONG ↑" : dir === "SHORT" ? "SHORT ↓" : "NO TRADE"}
-        </span>
+        {/* When CSO says WAIT, override direction badge to NO TRADE */}
+        {!csoGo ? (
+          <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded border bg-surface-2 border-border/50 text-text-muted">
+            NO TRADE
+          </span>
+        ) : (
+          <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded border ${dirBg} ${dirColor}`}>
+            {dir === "LONG" ? "LONG ↑" : dir === "SHORT" ? "SHORT ↓" : "NO TRADE"}
+          </span>
+        )}
       </div>
-      <div className="p-4">
+      {/* CSO WAIT lockout — shown instead of trade details when CSO verdict is not GO */}
+      {!csoGo && (
+        <div className="px-4 py-5 flex flex-col items-center gap-3 text-center">
+          <div style={{ fontSize: 28, opacity: 0.4 }}>&#x26A0;</div>
+          <div className="text-[11px] font-mono font-bold text-text-muted uppercase tracking-wide">
+            CSO says WAIT
+          </div>
+          <div className="text-[10px] font-mono text-text-muted/60 leading-relaxed max-w-[220px]">
+            The Chief Signal Officer has not cleared this trade. Setup levels are shown for reference only — do not act until CSO gives GO.
+          </div>
+          <div className="w-full mt-1" style={{ opacity: 0.35, pointerEvents: "none" }}>
+            <div className="space-y-1">
+              {levels.map(({ label, price, type }) => (
+                <div key={label} className="flex items-center gap-2.5 px-2.5 py-2 rounded-lg border bg-white/2 border-border/20">
+                  <div className="w-[6px] h-[6px] rounded-full flex-shrink-0 bg-border" />
+                  <span className="text-[9px] font-mono text-text-muted/40 uppercase tracking-wide min-w-[55px]">{label}</span>
+                  <span className="text-[11px] font-mono font-bold ml-auto text-text-muted/40">{fmtPrice(price)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+      <div className={`p-4 ${!csoGo ? "hidden" : ""}`}>
         {/* Price level stack */}
         <div className="space-y-1 mb-4">
           {levels.map(({ label, price, type }) => (

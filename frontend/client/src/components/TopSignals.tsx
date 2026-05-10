@@ -53,6 +53,7 @@ export function TopSignals({ onSelect, interval = "1h", onBuySignalsChange }: Pr
   const [elapsed,  setElapsed]  = useState(0);
   const [universe, setUniverse] = useState(0);
   const [error,    setError]    = useState<string | null>(null);
+  const [cacheAge, setCacheAge] = useState<number | null>(null);
   const [sortBy,   setSortBy]   = useState<SortCol>("score");
   const [tab,      setTab]      = useState<FilterTab>("buy");
   const [page,     setPage]     = useState(1);
@@ -110,6 +111,7 @@ export function TopSignals({ onSelect, interval = "1h", onBuySignalsChange }: Pr
         setSignals(all);
         setUniverse(data.universe ?? all.length);
         setLastScan(new Date().toLocaleTimeString());
+        setCacheAge(data.cached ? (data.cached_age_mins ?? null) : null);
         setError(null);
         if (onBuySignalsChange) {
           const buyList = all
@@ -234,6 +236,13 @@ export function TopSignals({ onSelect, interval = "1h", onBuySignalsChange }: Pr
               {" "}· showing {(pageClamped - 1) * PAGE_SIZE + 1}–{Math.min(pageClamped * PAGE_SIZE, sorted.length)} of {sorted.length}
             </span>
           )}
+        </div>
+      )}
+
+      {/* Stale cache warning — scores may differ from manual analysis */}
+      {cacheAge !== null && cacheAge >= 5 && (
+        <div style={{ fontSize: 9, color: "#f59e0b", background: "#1a1200", border: "1px solid #451a00", borderRadius: 4, padding: "4px 8px", marginBottom: 6 }}>
+          Cached {cacheAge}m ago — tap a coin for live score. Scores may differ slightly.
         </div>
       )}
 

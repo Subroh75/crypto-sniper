@@ -48,7 +48,7 @@ function calcConfidence(sig: any, kron: any, fg: any): number {
 }
 
 // ── Verdict logic ─────────────────────────────────────────────────────────────
-function buildVerdict(sig: any, kron: any, fg: any) {
+export function buildVerdict(sig: any, kron: any, fg: any) {
   if (!sig?.signal) return { verdict: "WAIT", go: false, goLabel: "NO GO", color: "#f59e0b", reason: "Run an analysis first.", note: null };
 
   const label    = (sig.signal?.label ?? "").toUpperCase();

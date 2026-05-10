@@ -77,7 +77,7 @@ class WatchlistRequest(BaseModel):
 
 # ── Scan cache ───────────────────────────────────────────────────────────────
 _scan_cache: dict = {}
-_SCAN_TTL  = 3600  # 1-hour cache (matches frontend auto-refresh interval)
+_SCAN_TTL  = 1200  # 20-min cache — balances freshness vs API load (was 3600)
 
 # ── SQLite persistence for scan cache (survives Render sleep/restart) ─────────
 _SCAN_DB_PATH = os.path.join(os.path.dirname(__file__), "data.db")
@@ -315,21 +315,25 @@ def scan_top_signals(
     cache_key = f"{interval}:{min_score}:{max_coins}:{int(min_volume)}"
     # Check in-memory cache first (fast)
     if _scan_cache.get("key") == cache_key and now - _scan_cache.get("ts", 0) < _SCAN_TTL:
+        age_mins = round((now - _scan_cache["ts"]) / 60, 1)
         return {
-            "signals":  _scan_cache["data"],
-            "cached":   True,
-            "universe": _scan_cache.get("universe", 0),
-            "timestamp": _scan_cache["ts"],
+            "signals":       _scan_cache["data"],
+            "cached":        True,
+            "cached_age_mins": age_mins,
+            "universe":      _scan_cache.get("universe", 0),
+            "timestamp":     _scan_cache["ts"],
         }
     # Fall back to SQLite (survives Render sleep/restart)
     db_cached = _scan_db_read(cache_key)
     if db_cached:
         _scan_cache.update({"key": cache_key, "ts": db_cached["ts"], "data": db_cached["data"], "universe": db_cached["universe"]})
+        age_mins = round((now - db_cached["ts"]) / 60, 1)
         return {
-            "signals":  db_cached["data"],
-            "cached":   True,
-            "universe": db_cached["universe"],
-            "timestamp": db_cached["ts"],
+            "signals":       db_cached["data"],
+            "cached":        True,
+            "cached_age_mins": age_mins,
+            "universe":      db_cached["universe"],
+            "timestamp":     db_cached["ts"],
         }
 
     # ── Step 1: Get full Binance universe ──────────────────────────────────────────

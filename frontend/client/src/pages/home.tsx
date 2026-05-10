@@ -15,7 +15,7 @@ import {
   ScannerCumulativeCard, DipScannerCard,
 } from "@/components/Sidebar";
 import { TopSignals } from "@/components/TopSignals";
-import { CSOVerdict } from "@/components/CSOVerdict";
+import { CSOVerdict, buildVerdict } from "@/components/CSOVerdict";
 import {
   TrendingSection, NewsSection, MacroSection, OptionsIntelligenceSection,
 } from "@/components/BottomSections";
@@ -981,7 +981,7 @@ export default function Home() {
                   listMode={false}
                 />}
                 {isMobile && <SignalStreakHeatmap />}
-                <TradeSetupCard setup={sig?.trade_setup ?? null} close={sig?.quote?.price ?? 0} />
+                <TradeSetupCard setup={sig?.trade_setup ?? null} close={sig?.quote?.price ?? 0} csoGo={buildVerdict(sig, kronosHk.data, sig?.fear_greed).go} />
                 <ConvictionMeter conviction={sig.conviction} />
                 <KeyLevelsCard levels={sig.key_levels} />
               </div>
