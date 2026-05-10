@@ -279,19 +279,40 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
 #  Main
 # ─────────────────────────────────────────────
 
+def _seconds_to_next_hour() -> int:
+    """
+    Compute seconds until the next UTC hour boundary.
+    Returns a value in [0, 3600).
+    Clamps to a minimum of 30s so the job doesn't fire immediately on a
+    near-boundary restart, giving the API a moment to warm up.
+    If we're within 2 minutes past the hour, fire almost immediately (30s)
+    so we don't skip this hour's scan.
+    """
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc)
+    secs_past = now.minute * 60 + now.second
+    secs_until_next = 3600 - secs_past
+    # If we just crossed the hour (within 2 min past), fire quickly
+    if secs_past <= 120:
+        return 30
+    # Otherwise fire at the top of the next hour, minus 2s buffer
+    return max(30, secs_until_next - 2)
+
+
 async def post_init(application: Application):
     await init_db()
     logger.info("DB initialised")
 
-    # Schedule hourly scanner
+    # Schedule hourly scanner — fires at the top of every UTC hour
+    first_in = _seconds_to_next_hour()
     job_queue = application.job_queue
     job_queue.run_repeating(
         hourly_scan_job,
-        interval=3600,   # every hour
-        first=60,        # first run 60s after bot starts (gives API time to wake)
+        interval=3600,        # every hour on the dot
+        first=first_in,       # align to next UTC hour boundary
         name="hourly_scanner",
     )
-    logger.info("Hourly scanner scheduled (first run in 60s)")
+    logger.info(f"Hourly scanner scheduled — first run in {first_in}s (next UTC hour boundary)")
 
 
 def main():

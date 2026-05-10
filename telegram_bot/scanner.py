@@ -73,6 +73,44 @@ async def _analyse_symbol(session: aiohttp.ClientSession, symbol: str) -> dict |
 
 
 # ─────────────────────────────────────────────
+#  Step 2b: fetch Kronos AI forecast for a hit
+# ─────────────────────────────────────────────
+
+async def _fetch_kronos(session: aiohttp.ClientSession, symbol: str, analyse_data: dict) -> dict:
+    """
+    Calls /kronos with the signal context from the /analyse result.
+    Returns the forecast dict, or {} on failure.
+    """
+    try:
+        sig    = analyse_data.get("signal", {})
+        struct = analyse_data.get("structure", {})
+        timing = analyse_data.get("timing", {})
+        quote  = analyse_data.get("quote", {})
+        # Build the signal_ctx that Kronos expects
+        ctx = {
+            "total":      sig.get("total", 0),
+            "direction":  sig.get("direction", "NEUTRAL"),
+            "close":      struct.get("close") or quote.get("price") or 0,
+            "rsi":        timing.get("rsi") or 0,
+            "adx":        timing.get("adx") or 0,
+            "change_24h": quote.get("change_24h") or 0,
+            "rel_volume": timing.get("rel_volume") or 0,
+        }
+        async with session.post(
+            f"{API_BASE}/kronos",
+            json={"symbol": symbol, "signal_ctx": ctx},
+            timeout=aiohttp.ClientTimeout(total=30)
+        ) as r:
+            if r.status != 200:
+                return {}
+            resp = await r.json()
+            return resp.get("forecast", {})
+    except Exception as e:
+        logger.debug(f"Kronos fetch error {symbol}: {e}")
+    return {}
+
+
+# ─────────────────────────────────────────────
 #  Step 3: format a Telegram alert block
 # ─────────────────────────────────────────────
 
@@ -95,6 +133,7 @@ def _format_scan_message(hits: list[dict], scan_time: str) -> str:
         quote  = data.get("quote", {})
         trade  = data.get("trade_setup") or {}
         comp   = data.get("components", {})
+        kronos = data.get("kronos") or {}  # injected by hourly_scan_job after _fetch_kronos
 
         close  = struct.get("close") or quote.get("price") or 0
         chg    = quote.get("change_24h") or 0
@@ -122,6 +161,18 @@ def _format_scan_message(hits: list[dict], scan_time: str) -> str:
             if rr:
                 block += f"  R:R {rr:.2f}"
             block += "\n"
+
+        # Kronos AI forecast line
+        if kronos:
+            kdir  = kronos.get("direction", "")
+            kmove = kronos.get("expected_move_pct", 0)
+            kq    = kronos.get("trade_quality", "")
+            kbull = kronos.get("bull_conviction", 0)
+            kbear = kronos.get("bear_conviction", 0)
+            block += (
+                f"Kronos:  {kdir}  {kmove:+.2f}%  |  "
+                f"Bull {kbull:.0f}% / Bear {kbear:.0f}%  |  {kq}\n"
+            )
 
         blocks.append(block)
 
@@ -195,6 +246,20 @@ async def hourly_scan_job(context) -> None:
     if not top:
         logger.info("[Scanner] No STRONG BUY signals this hour — staying silent")
         return
+
+    # 4a. Enrich top hits with Kronos AI forecast (parallel, best-effort)
+    async with aiohttp.ClientSession() as kron_session:
+        kronos_tasks = [
+            _fetch_kronos(kron_session, d.get("symbol", ""), d)
+            for d in top
+        ]
+        kronos_results = await asyncio.gather(*kronos_tasks, return_exceptions=True)
+
+    for coin_data, kron in zip(top, kronos_results):
+        if isinstance(kron, dict) and kron:
+            coin_data["kronos"] = kron
+        else:
+            coin_data["kronos"] = {}
 
     msg = _format_scan_message(top, scan_time)
 
