@@ -36,6 +36,16 @@ const TH: React.CSSProperties = {
 type FilterTab = "buy" | "wait" | "all";
 type SortCol   = "score" | "change" | "rsi";
 
+function useIsMobile() {
+  const [isMobile, setIsMobile] = useState(() => window.innerWidth < 480);
+  useEffect(() => {
+    const handler = () => setIsMobile(window.innerWidth < 480);
+    window.addEventListener("resize", handler);
+    return () => window.removeEventListener("resize", handler);
+  }, []);
+  return isMobile;
+}
+
 export function TopSignals({ onSelect, interval = "1h", onBuySignalsChange }: Props) {
   const [signals,  setSignals]  = useState<Signal[]>([]);
   const [loading,  setLoading]  = useState(false);
@@ -46,6 +56,7 @@ export function TopSignals({ onSelect, interval = "1h", onBuySignalsChange }: Pr
   const [sortBy,   setSortBy]   = useState<SortCol>("score");
   const [tab,      setTab]      = useState<FilterTab>("buy");
   const [page,     setPage]     = useState(1);
+  const isMobile = useIsMobile();
 
   const elapsedRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const abortRef   = useRef<AbortController | null>(null);
@@ -81,7 +92,7 @@ export function TopSignals({ onSelect, interval = "1h", onBuySignalsChange }: Pr
       const all: Signal[] = (data.signals ?? []).map((s: Record<string, unknown>) => ({
         symbol:    String(s.symbol ?? ""),
         score:     Number(s.score ?? 0),
-        max_score: Number(s.max_score ?? 16),
+        max_score: Number(s.max_score ?? 13),
         signal:    String(s.signal ?? ""),
         v:         Number(s.v ?? 0),
         p:         Number(s.p ?? 0),
@@ -249,17 +260,17 @@ export function TopSignals({ onSelect, interval = "1h", onBuySignalsChange }: Pr
       {pageRows.length > 0 && (
         <div style={{ borderRadius: 8, overflow: "hidden", border: "1px solid #1e293b", opacity: loading ? 0.6 : 1, transition: "opacity 0.3s" }}>
           {/* Column headers */}
-          <div style={{ display: "grid", gridTemplateColumns: "28px 80px 54px 56px 34px 34px 34px 34px 36px 48px", background: "#0a0f1e", borderBottom: "1px solid #1e293b" }}>
+          <div style={{ display: "grid", gridTemplateColumns: isMobile ? "24px 1fr 52px 58px 38px 44px" : "28px 80px 54px 56px 34px 34px 34px 34px 36px 48px", background: "#0a0f1e", borderBottom: "1px solid #1e293b" }}>
             <span style={TH}>#</span>
             <span style={TH}>Symbol</span>
             <SortBtn col="change" label="Chg%" />
             <SortBtn col="score" label="Score" />
-            <span style={TH}>V</span>
-            <span style={TH}>P</span>
-            <span style={TH}>R</span>
-            <span style={TH}>T</span>
+            {isMobile ? null : <span style={TH}>V</span>}
+            {isMobile ? null : <span style={TH}>P</span>}
+            {isMobile ? null : <span style={TH}>R</span>}
+            {isMobile ? null : <span style={TH}>T</span>}
             <SortBtn col="rsi" label="RSI" />
-            <span style={{ ...TH, textAlign: "center" as const }}>Action</span>
+            <span style={{ ...TH, textAlign: "center" as const }}>{isMobile ? "" : "Action"}</span>
           </div>
 
           {/* Rows — only current page */}
@@ -275,7 +286,7 @@ export function TopSignals({ onSelect, interval = "1h", onBuySignalsChange }: Pr
                 onClick={() => onSelect(sig.symbol)}
                 style={{
                   display: "grid",
-                  gridTemplateColumns: "28px 80px 54px 56px 34px 34px 34px 34px 36px 48px",
+                  gridTemplateColumns: isMobile ? "24px 1fr 52px 58px 38px 44px" : "28px 80px 54px 56px 34px 34px 34px 34px 36px 48px",
                   width: "100%", background: rowBg,
                   border: "none", borderBottom: "1px solid #0f172a",
                   cursor: "pointer", textAlign: "left" as const,
@@ -300,20 +311,20 @@ export function TopSignals({ onSelect, interval = "1h", onBuySignalsChange }: Pr
                 </div>
 
                 {/* Chg% */}
-                <span style={{ fontSize: 11, fontWeight: 700, color: "#22c55e", fontFamily: "monospace", padding: "0 4px" }}>
-                  +{chg.toFixed(1)}%
+                <span style={{ fontSize: 11, fontWeight: 700, color: chg >= 0 ? "#22c55e" : "#ef4444", fontFamily: "monospace", padding: "0 4px" }}>
+                  {chg >= 0 ? "+" : ""}{chg.toFixed(1)}%
                 </span>
 
                 {/* Score */}
-                <span style={{ fontSize: 11, fontWeight: 800, color: scoreColor(sig.score, sig.max_score ?? 16), fontFamily: "monospace", padding: "0 4px" }}>
-                  {sig.score}/{sig.max_score ?? 16}
+                <span style={{ fontSize: 11, fontWeight: 800, color: scoreColor(sig.score, sig.max_score ?? 13), fontFamily: "monospace", padding: "0 4px" }}>
+                  {sig.score}/{sig.max_score ?? 13}
                 </span>
 
-                {/* V P R T */}
-                <span style={{ fontSize: 10, fontWeight: 700, color: subScoreColor(sig.v, 5), fontFamily: "monospace", padding: "0 2px" }}>{sig.v}</span>
-                <span style={{ fontSize: 10, fontWeight: 700, color: subScoreColor(sig.p, 3), fontFamily: "monospace", padding: "0 2px" }}>{sig.p}</span>
-                <span style={{ fontSize: 10, fontWeight: 700, color: subScoreColor(sig.r, 2), fontFamily: "monospace", padding: "0 2px" }}>{sig.r}</span>
-                <span style={{ fontSize: 10, fontWeight: 700, color: subScoreColor(sig.t, 3), fontFamily: "monospace", padding: "0 2px" }}>{sig.t}</span>
+                {/* V P R T — desktop only */}
+                {!isMobile && <span style={{ fontSize: 10, fontWeight: 700, color: subScoreColor(sig.v, 5), fontFamily: "monospace", padding: "0 2px" }}>{sig.v}</span>}
+                {!isMobile && <span style={{ fontSize: 10, fontWeight: 700, color: subScoreColor(sig.p, 3), fontFamily: "monospace", padding: "0 2px" }}>{sig.p}</span>}
+                {!isMobile && <span style={{ fontSize: 10, fontWeight: 700, color: subScoreColor(sig.r, 2), fontFamily: "monospace", padding: "0 2px" }}>{sig.r}</span>}
+                {!isMobile && <span style={{ fontSize: 10, fontWeight: 700, color: subScoreColor(sig.t, 3), fontFamily: "monospace", padding: "0 2px" }}>{sig.t}</span>}
 
                 {/* RSI */}
                 <span style={{ fontSize: 10, fontWeight: 600, color: sig.rsi > 70 ? "#ef4444" : sig.rsi < 30 ? "#22c55e" : "#94a3b8", fontFamily: "monospace", padding: "0 2px" }}>
