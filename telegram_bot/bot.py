@@ -30,9 +30,7 @@ from analyse import fetch_analysis
 from escalation import escalate
 from scanner import hourly_scan_job
 
-# DEX scanner imports
-import sys, pathlib
-sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
+# DEX scanner imports (dex_scanner/ lives inside telegram_bot/)
 from dex_scanner.scanner import dex_scan_job, gem_lookup, get_last_sweep, SUPPORTED_CHAINS
 from dex_scanner.blackboard import compose_rate_limited
 
