@@ -1,6 +1,6 @@
 // SignalStreakHeatmap.tsx
-// Calendar heatmap: which coins had repeated strong signals over the last 30 days.
-// Colours: grey = no signal, amber = 7-8, green = 9-11, bright green = 12+
+// Calendar heatmap: which coins had repeated strong signals over the last N days.
+// Colours: grey = no signal, amber = 7-8, green = 9-11, purple = 12+
 
 import { useState, useEffect } from "react";
 
@@ -16,16 +16,16 @@ interface StreakData {
 
 function scoreColor(score: number | null): string {
   if (score == null) return "#0f172a";
-  if (score >= 12)   return "#22c55e";
-  if (score >= 9)    return "#16a34a";
+  if (score >= 12)   return "#a78bfa";  // purple — distinct from green 9-11
+  if (score >= 9)    return "#22c55e";
   if (score >= 7)    return "#f59e0b";
   return "#0f172a";
 }
 
 function scoreBorder(score: number | null): string {
   if (score == null) return "#1e293b";
-  if (score >= 12)   return "#22c55e55";
-  if (score >= 9)    return "#16a34a55";
+  if (score >= 12)   return "#a78bfa55";
+  if (score >= 9)    return "#22c55e55";
   if (score >= 7)    return "#f59e0b55";
   return "#1e293b";
 }
@@ -44,7 +44,7 @@ export function SignalStreakHeatmap() {
   const [data, setData]       = useState<StreakData | null>(null);
   const [loading, setLoading] = useState(false);
   const [minScore, setMinScore] = useState(7);
-  const [days, setDays]       = useState(30);
+  const [days, setDays]       = useState(5);
   const [tooltip, setTooltip] = useState<{ sym: string; date: string; score: number } | null>(null);
 
   async function load() {
@@ -85,7 +85,7 @@ export function SignalStreakHeatmap() {
             Signal Streak
           </span>
           <span style={{ fontSize: 9, color: "#7c3aed", background: "#1e0a3c", padding: "1px 5px", borderRadius: 3, border: "1px solid #4c1d95", fontWeight: 700 }}>
-            30D
+            {days}D
           </span>
         </div>
         <div style={{ display: "flex", gap: 4 }}>
@@ -105,8 +105,8 @@ export function SignalStreakHeatmap() {
         {[
           { color: "#0f172a", border: "#1e293b", label: "No signal" },
           { color: "#f59e0b", border: "#f59e0b55", label: "7–8" },
-          { color: "#16a34a", border: "#16a34a55", label: "9–11" },
-          { color: "#22c55e", border: "#22c55e55", label: "12+" },
+          { color: "#22c55e", border: "#22c55e55", label: "9–11" },
+          { color: "#a78bfa", border: "#a78bfa55", label: "12+" },
         ].map(l => (
           <div key={l.label} style={{ display: "flex", alignItems: "center", gap: 4 }}>
             <div style={{ width: 10, height: 10, borderRadius: 2, background: l.color, border: `1px solid ${l.border}` }} />
@@ -183,7 +183,7 @@ export function SignalStreakHeatmap() {
                   ))}
 
                   {/* Max score badge */}
-                  <span style={{ fontSize: 8, color: maxScore >= 12 ? "#22c55e" : maxScore >= 9 ? "#16a34a" : "#f59e0b", marginLeft: 4, fontFamily: "monospace", fontWeight: 700 }}>
+                  <span style={{ fontSize: 8, color: maxScore >= 12 ? "#a78bfa" : maxScore >= 9 ? "#22c55e" : "#f59e0b", marginLeft: 4, fontFamily: "monospace", fontWeight: 700 }}>
                     {maxScore}
                   </span>
                 </div>
@@ -205,8 +205,8 @@ export function SignalStreakHeatmap() {
           {" "}&mdash;{" "}
           {fmtDate(tooltip.date)}
           {": "}
-          <strong style={{ color: tooltip.score >= 12 ? "#22c55e" : tooltip.score >= 9 ? "#16a34a" : "#f59e0b" }}>
-            {tooltip.score}/16
+          <strong style={{ color: tooltip.score >= 12 ? "#a78bfa" : tooltip.score >= 9 ? "#22c55e" : "#f59e0b" }}>
+            {tooltip.score}/13
           </strong>
         </div>
       )}
