@@ -597,35 +597,9 @@ export function WatchlistCard({
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// 5. SUBSCRIBE CTA — crypto payments
+// 5. SUBSCRIBE CTA — Telegram Stars
 // ════════════════════════════════════════════════════════════════════════════
-const COINS = [
-  { sym: "USDT", net: "SOL", icon: "💵" },
-  { sym: "USDC", net: "SOL", icon: "💵" },
-  { sym: "BTC",  net: "BTC", icon: "₿"  },
-  { sym: "ETH",  net: "ETH", icon: "⟠"  },
-] as const;
-
-const COIN_DATA: Record<string, { addr: string; amount: string; chain: string }> = {
-  USDT: { addr: "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU", amount: "29.00 USDT", chain: "SOLANA NETWORK" },
-  USDC: { addr: "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM", amount: "29.00 USDC", chain: "SOLANA NETWORK" },
-  BTC:  { addr: "bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh",  amount: "0.000372 BTC", chain: "BITCOIN NETWORK" },
-  ETH:  { addr: "0x71C7656EC7ab88b098defB751B7401B5f6d8976F",   amount: "0.01598 ETH",  chain: "ETHEREUM NETWORK" },
-};
-
 export function SubscribeCard() {
-  const [plan,        setPlan]        = useState<"monthly" | "annual">("monthly");
-  const [selectedCoin, setSelectedCoin] = useState<string>("USDT");
-  const [copied,      setCopied]      = useState(false);
-
-  const coin = COIN_DATA[selectedCoin];
-
-  const copyAddr = () => {
-    navigator.clipboard.writeText(coin.addr).catch(() => {});
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
-  };
-
   return (
     <div className="rounded-xl overflow-hidden mb-3 border border-purple/30 relative"
          style={{ background: "var(--color-surface-card)" }}>
@@ -642,153 +616,46 @@ export function SubscribeCard() {
             Unlock the Full Signal Engine
           </div>
           <div className="text-[11px] text-text-muted leading-snug">
-            Free: 5 analyses/day · Pro: unlimited + live alerts + whale tracking
+            Unlimited analyses · Live alerts · Scanner · Kronos AI
           </div>
-        </div>
-
-        {/* Pricing tabs */}
-        <div className="grid grid-cols-2 gap-1.5 mb-4">
-          {(["monthly","annual"] as const).map(p => (
-            <button
-              key={p}
-              onClick={() => setPlan(p)}
-              className={`relative rounded-lg p-2.5 border text-center transition-all ${
-                plan === p ? "border-purple bg-purple/8" : "border-border/50 bg-surface-2"
-              }`}
-            >
-              {p === "annual" && (
-                <div className="absolute -top-2 right-1.5 text-[8px] font-mono font-black bg-teal text-black px-1.5 py-0.5 rounded">
-                  SAVE 28%
-                </div>
-              )}
-              <div className="text-[9px] font-mono text-text-muted/70 uppercase tracking-wide mb-0.5">
-                {p === "monthly" ? "Monthly" : "Annual"}
-              </div>
-              <div className="text-[18px] font-mono font-black text-text">
-                {p === "monthly" ? "$29" : "$249"}
-              </div>
-              <div className="text-[9px] font-mono text-text-muted">
-                USDT / {p === "monthly" ? "month" : "year"}
-              </div>
-            </button>
-          ))}
         </div>
 
         {/* Features */}
-        <div className="space-y-1.5 mb-4">
+        <div className="space-y-1.5 mb-5">
           {[
-            ["Unlimited coin analyses",        false],
-            ["All timeframes incl. 1m/5m",     true],
-            ["Real-time Telegram alerts",       true],
-            ["Whale tracker — on-chain data",   false],
-            ["Perplexity deep research",        false],
-            ["Watchlist scanner — 20 coins",    false],
-            ["Fear & Greed + CryptoPanic",     false],
-            ["PDF export + trade history",      false],
-          ].map(([feature, isPro]) => (
-            <div key={feature as string} className="flex items-center gap-2 text-[10px] font-mono text-text-muted">
+            "Unlimited coin analyses",
+            "All timeframes incl. 1m/5m",
+            "Real-time Telegram alerts",
+            "Watchlist scanner — 20 coins",
+            "Kronos AI trade intelligence",
+            "Fear & Greed + CryptoPanic",
+            "PDF export + trade history",
+          ].map((feature) => (
+            <div key={feature} className="flex items-center gap-2 text-[10px] font-mono text-text-muted">
               <span className="text-teal flex-shrink-0">✓</span>
-              <span>{feature as string}</span>
-              {isPro && (
-                <span className="ml-auto text-[8px] font-bold px-1.5 py-0.5 rounded bg-orange/10 text-orange border border-orange/15">
-                  PRO
-                </span>
-              )}
+              <span>{feature}</span>
             </div>
           ))}
-        </div>
-
-        {/* Coin selector */}
-        <div className="mb-3">
-          <div className="flex items-center gap-2 mb-2">
-            <span className="text-[9px] font-mono text-text-muted/70 uppercase tracking-[0.1em]">Pay with</span>
-            <div className="flex-1 h-px bg-border/40" />
-          </div>
-          <div className="grid grid-cols-4 gap-1">
-            {COINS.map(({ sym, net, icon }) => (
-              <button
-                key={sym}
-                onClick={() => setSelectedCoin(sym)}
-                className={`flex flex-col items-center gap-1 py-2 px-1 rounded-lg border transition-all ${
-                  selectedCoin === sym
-                    ? "border-teal bg-teal/6"
-                    : "border-border/50 bg-surface-2 hover:border-purple/30"
-                }`}
-              >
-                <span className="text-[15px]">{icon}</span>
-                <span className="text-[9px] font-mono font-black text-text">{sym}</span>
-                <span className="text-[7px] font-mono text-text-muted/60">{net}</span>
-              </button>
-            ))}
-          </div>
-          <div className="flex gap-1.5 mt-1.5 flex-wrap">
-            {["SOL","BNB","MATIC","LTC"].map(s => (
-              <span key={s} className="text-[9px] font-mono px-2 py-0.5 rounded border border-border/40 bg-surface-2 text-text-muted/70 cursor-pointer hover:border-text-muted">
-                {s}
-              </span>
-            ))}
-            <span className="text-[9px] font-mono px-2 py-0.5 rounded border border-border/40 bg-surface-2 text-text-muted/60">
-              +340 more
-            </span>
-          </div>
-        </div>
-
-        {/* Payment address */}
-        <div className="bg-surface-2 rounded-lg border border-border/50 p-3 mb-3">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[9px] font-mono text-text-muted/70 uppercase tracking-wide">
-              Send to this address
-            </span>
-            <span className="text-[8px] font-mono font-bold px-1.5 py-0.5 rounded bg-teal/10 text-teal border border-teal/15">
-              {coin.chain}
-            </span>
-          </div>
-          <div
-            onClick={copyAddr}
-            className="text-[9px] font-mono text-text bg-surface-offset rounded px-2 py-2 border border-border/40 cursor-pointer hover:border-purple/40 break-all leading-relaxed mb-2 transition-all"
-            title="Click to copy"
-          >
-            {coin.addr}
-          </div>
-          <div className="flex items-center justify-between">
-            <span className="text-[13px] font-mono font-black text-teal">{coin.amount}</span>
-            <button onClick={copyAddr} className="text-[9px] font-mono font-bold px-2.5 py-1.5 rounded bg-purple/10 border border-purple/20 text-purple hover:bg-purple/18 transition-all">
-              {copied ? "✓ Copied!" : "⎘ Copy address"}
-            </button>
-          </div>
-        </div>
-
-        {/* QR + instructions */}
-        <div className="flex items-start gap-3 mb-4">
-          <div className="w-16 h-16 flex-shrink-0 bg-white rounded flex items-center justify-center text-[8px] text-gray-800 font-mono text-center leading-snug p-1">
-            QR<br />{coin.amount}<br />{selectedCoin}
-          </div>
-          <div className="text-[10px] font-mono text-text-muted leading-relaxed">
-            <strong className="text-text">1.</strong> Open your {selectedCoin} wallet<br />
-            <strong className="text-text">2.</strong> Send exactly <strong className="text-text">{coin.amount}</strong><br />
-            <strong className="text-text">3.</strong> Pro activates <strong className="text-teal">within 60s</strong><br />
-            <strong className="text-text">4.</strong> No account — wallet = identity
-          </div>
         </div>
 
         {/* CTA button */}
-        <button className="w-full py-3 rounded-lg font-sans font-black text-[13px] text-white flex items-center justify-center gap-2 transition-all"
-                style={{
-                  background: "linear-gradient(135deg, #7c5cfc, #5b3fd4)",
-                  boxShadow: "0 4px 24px rgba(124,92,252,0.45)",
-                }}>
-          <span className="text-base">⚡</span>
-          <span>I've sent payment — Activate Pro</span>
-        </button>
+        <a
+          href="https://t.me/Niftysnipabot?start=subscribe"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="w-full py-3 rounded-lg font-sans font-black text-[13px] text-white flex items-center justify-center gap-2 transition-all hover:opacity-90 active:scale-[0.98]"
+          style={{
+            background: "linear-gradient(135deg, #7c5cfc, #5b3fd4)",
+            boxShadow: "0 4px 24px rgba(124,92,252,0.45)",
+          }}
+        >
+          <span className="text-base">✈</span>
+          <span>Get Full Access via Telegram</span>
+        </a>
 
-        {/* Trust row */}
-        <div className="flex items-center justify-center gap-4 mt-3 flex-wrap">
-          {[["🔒","Non-custodial"],["⚡","Instant"],["🌍","No KYC"],["↩","Cancel anytime"]].map(([ic,txt]) => (
-            <div key={txt} className="flex items-center gap-1 text-[9px] font-mono text-text-muted/60">
-              <span>{ic}</span><span>{txt}</span>
-            </div>
-          ))}
-        </div>
+        <p className="text-center text-[9px] font-mono text-text-muted/50 mt-2">
+          Paid via Telegram Stars · No card required
+        </p>
       </div>
     </div>
   );
