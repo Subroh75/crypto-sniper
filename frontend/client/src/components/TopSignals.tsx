@@ -17,16 +17,6 @@ interface Signal {
 interface BuySignal { symbol: string; score: number; change: number; }
 interface Props { onSelect: (symbol: string) => void; interval?: string; listMode?: boolean; onBuySignalsChange?: (signals: BuySignal[]) => void; }
 
-function scoreColor(score: number, max: number): string {
-  if (score === 0) return "#4a5470";
-  const r = score / max;
-  return r >= 0.67 ? "#22c55e" : r >= 0.34 ? "#f59e0b" : "#ef4444";
-}
-
-function subScoreColor(val: number, max: number): string {
-  const r = val / max;
-  return r >= 0.67 ? "#22c55e" : r >= 0.34 ? "#f59e0b" : "#64748b";
-}
 
 const TH: React.CSSProperties = {
   fontSize: 8, fontWeight: 700, letterSpacing: "0.08em",
@@ -272,24 +262,18 @@ export function TopSignals({ onSelect, interval = "1h", onBuySignalsChange }: Pr
       {pageRows.length > 0 && (
         <div style={{ borderRadius: 8, overflow: "hidden", border: "1px solid #1e293b", opacity: loading ? 0.6 : 1, transition: "opacity 0.3s" }}>
           {/* Column headers */}
-          <div style={{ display: "grid", gridTemplateColumns: isMobile ? "24px 1fr 52px 58px 38px 44px" : "28px 80px 54px 56px 34px 34px 34px 34px 36px 48px", background: "#0a0f1e", borderBottom: "1px solid #1e293b" }}>
+          <div style={{ display: "grid", gridTemplateColumns: isMobile ? "24px 1fr 52px 42px 64px" : "28px 1fr 60px 42px 80px", background: "#0a0f1e", borderBottom: "1px solid #1e293b" }}>
             <span style={TH}>#</span>
             <span style={TH}>Symbol</span>
             <SortBtn col="change" label="Chg%" />
-            <SortBtn col="score" label="Score" />
-            {isMobile ? null : <span style={TH}>V</span>}
-            {isMobile ? null : <span style={TH}>P</span>}
-            {isMobile ? null : <span style={TH}>R</span>}
-            {isMobile ? null : <span style={TH}>T</span>}
             <SortBtn col="rsi" label="RSI" />
-            <span style={{ ...TH, textAlign: "center" as const }}>{isMobile ? "" : "Action"}</span>
+            <span style={{ ...TH, textAlign: "center" as const }}>Action</span>
           </div>
 
           {/* Rows — only current page */}
           {pageRows.map((sig, i) => {
             const globalIndex = (pageClamped - 1) * PAGE_SIZE + i + 1;
             const chg   = sig.change ?? 0;
-            const isBuy = sig.score >= BUY_THRESHOLD;
             const rowBg = i % 2 === 0 ? "#060b17" : "#080e1c";
 
             return (
@@ -298,7 +282,7 @@ export function TopSignals({ onSelect, interval = "1h", onBuySignalsChange }: Pr
                 onClick={() => onSelect(sig.symbol)}
                 style={{
                   display: "grid",
-                  gridTemplateColumns: isMobile ? "24px 1fr 52px 58px 38px 44px" : "28px 80px 54px 56px 34px 34px 34px 34px 36px 48px",
+                  gridTemplateColumns: isMobile ? "24px 1fr 52px 42px 64px" : "28px 1fr 60px 42px 80px",
                   width: "100%", background: rowBg,
                   border: "none", borderBottom: "1px solid #0f172a",
                   cursor: "pointer", textAlign: "left" as const,
@@ -312,7 +296,7 @@ export function TopSignals({ onSelect, interval = "1h", onBuySignalsChange }: Pr
                   {globalIndex}
                 </span>
 
-                {/* Symbol */}
+                {/* Symbol + price */}
                 <div style={{ display: "flex", flexDirection: "column" as const, gap: 1, padding: "9px 0 9px 4px" }}>
                   <span style={{ fontSize: 11, fontWeight: 800, color: "#f1f5f9", fontFamily: "monospace", letterSpacing: "0.04em" }}>
                     {sig.symbol}
@@ -331,29 +315,16 @@ export function TopSignals({ onSelect, interval = "1h", onBuySignalsChange }: Pr
                   {chg >= 0 ? "+" : ""}{chg.toFixed(1)}%
                 </span>
 
-                {/* Score */}
-                <span style={{ fontSize: 11, fontWeight: 800, color: scoreColor(sig.score, sig.max_score ?? 13), fontFamily: "monospace", padding: "0 4px" }}>
-                  {sig.score}/{sig.max_score ?? 13}
-                </span>
-
-                {/* V P R T — desktop only */}
-                {!isMobile && <span style={{ fontSize: 10, fontWeight: 700, color: subScoreColor(sig.v, 5), fontFamily: "monospace", padding: "0 2px" }}>{sig.v}</span>}
-                {!isMobile && <span style={{ fontSize: 10, fontWeight: 700, color: subScoreColor(sig.p, 3), fontFamily: "monospace", padding: "0 2px" }}>{sig.p}</span>}
-                {!isMobile && <span style={{ fontSize: 10, fontWeight: 700, color: subScoreColor(sig.r, 2), fontFamily: "monospace", padding: "0 2px" }}>{sig.r}</span>}
-                {!isMobile && <span style={{ fontSize: 10, fontWeight: 700, color: subScoreColor(sig.t, 3), fontFamily: "monospace", padding: "0 2px" }}>{sig.t}</span>}
-
                 {/* RSI */}
                 <span style={{ fontSize: 10, fontWeight: 600, color: sig.rsi > 70 ? "#ef4444" : sig.rsi < 30 ? "#22c55e" : "#94a3b8", fontFamily: "monospace", padding: "0 2px" }}>
                   {sig.rsi.toFixed(0)}
                 </span>
 
-                {/* BUY / WAIT badge */}
-                <div style={{ textAlign: "center" as const, padding: "0 4px" }}>
-                  {isBuy ? (
-                    <span style={{ fontSize: 8, fontWeight: 800, letterSpacing: "0.06em", color: "#22c55e", background: "#0d2212", padding: "2px 6px", borderRadius: 3, border: "1px solid #14532d" }}>BUY</span>
-                  ) : (
-                    <span style={{ fontSize: 8, fontWeight: 800, letterSpacing: "0.06em", color: "#f59e0b", background: "#1a1200", padding: "2px 5px", borderRadius: 3, border: "1px solid #451a00" }}>WAIT</span>
-                  )}
+                {/* Analyse CTA */}
+                <div style={{ textAlign: "center" as const, padding: "0 6px" }}>
+                  <span style={{ fontSize: 8, fontWeight: 800, letterSpacing: "0.05em", color: "#a78bfa", background: "#1e0a3c", padding: "3px 7px", borderRadius: 3, border: "1px solid #4c1d95", whiteSpace: "nowrap" as const }}>
+                    Analyse →
+                  </span>
                 </div>
               </button>
             );
