@@ -209,6 +209,172 @@ def get_derivatives(symbol: str) -> dict:
     return _deriv_cached(symbol.upper(), ts_bucket)
 
 
+# ── Market Microstructure (Binance Spot) ──────────────────────────────────────
+# data-api.binance.vision is the geo-unrestricted CDN mirror — use as primary
+BINANCE_SPOT   = "https://data-api.binance.vision/api/v3"
+BINANCE_SPOT_2 = "https://api.binance.com/api/v3"   # fallback (may 451 in some regions)
+
+
+def _binance_sym(symbol: str) -> str:
+    """BTC → BTCUSDT for Binance spot endpoints."""
+    s = symbol.upper().strip()
+    if not s.endswith("USDT"):
+        s = s + "USDT"
+    return s
+
+
+def get_order_book_pressure(symbol: str) -> dict:
+    """
+    Fetches top-20 bid/ask levels from Binance and computes USD-weighted
+    buy vs sell pressure within ~1% of mid price.
+
+    pressure_ratio > 0.6  → buy-side dominant (bullish)
+    pressure_ratio < 0.4  → ask-side dominant (bearish)
+    0.4–0.6               → balanced
+    """
+    sym = _binance_sym(symbol)
+    try:
+        r = requests.get(
+            f"{BINANCE_SPOT}/depth",
+            params={"symbol": sym, "limit": 20},
+            timeout=6,
+        )
+        r.raise_for_status()
+        data = r.json()
+        bids = data.get("bids", [])  # [[price, qty], ...]
+        asks = data.get("asks", [])  # [[price, qty], ...]
+
+        if not bids or not asks:
+            raise ValueError("Empty order book")
+
+        mid = (float(bids[0][0]) + float(asks[0][0])) / 2
+        threshold = mid * 0.01  # 1% of mid price
+
+        bid_vol = sum(
+            float(p) * float(q)
+            for p, q in bids
+            if mid - float(p) <= threshold
+        )
+        ask_vol = sum(
+            float(p) * float(q)
+            for p, q in asks
+            if float(p) - mid <= threshold
+        )
+
+        total = bid_vol + ask_vol
+        ratio = round(bid_vol / total, 4) if total > 0 else 0.5
+        imbalance = round((bid_vol - ask_vol) / total * 100, 1) if total > 0 else 0.0
+
+        label = "buy" if ratio > 0.6 else "sell" if ratio < 0.4 else "neutral"
+
+        return {
+            "pressure_ratio": ratio,
+            "pressure_label": label,
+            "imbalance_pct":  imbalance,
+            "bid_vol_usd":    round(bid_vol),
+            "ask_vol_usd":    round(ask_vol),
+            "mid":            round(mid, 8),
+            "source":         "Binance",
+        }
+    except Exception as e:
+        logger.warning(f"Order book pressure failed for {symbol}: {e}")
+        return {
+            "pressure_ratio": 0.5,
+            "pressure_label": "neutral",
+            "imbalance_pct":  0.0,
+            "bid_vol_usd":    0,
+            "ask_vol_usd":    0,
+            "mid":            0,
+            "source":         "unavailable",
+        }
+
+
+def get_book_ticker(symbol: str) -> dict:
+    """
+    Best bid/ask from Binance. Spread % indicates liquidity quality.
+    tight  < 0.05%  — liquid, fills reliably
+    normal 0.05–0.15% — acceptable
+    wide   > 0.15%  — thin book, expect slippage
+    """
+    sym = _binance_sym(symbol)
+    try:
+        r = requests.get(
+            f"{BINANCE_SPOT}/ticker/bookTicker",
+            params={"symbol": sym},
+            timeout=6,
+        )
+        r.raise_for_status()
+        d = r.json()
+        bid = float(d.get("bidPrice", 0))
+        ask = float(d.get("askPrice", 0))
+        mid = (bid + ask) / 2 if bid and ask else 0
+        spread_pct = round((ask - bid) / mid * 100, 4) if mid else 0
+
+        quality = (
+            "tight"  if spread_pct < 0.05  else
+            "wide"   if spread_pct > 0.15  else
+            "normal"
+        )
+
+        return {
+            "bid":              round(bid, 8),
+            "ask":              round(ask, 8),
+            "mid":              round(mid, 8),
+            "spread_pct":       spread_pct,
+            "liquidity_quality": quality,
+            "source":           "Binance",
+        }
+    except Exception as e:
+        logger.warning(f"Book ticker failed for {symbol}: {e}")
+        return {
+            "bid":              0,
+            "ask":              0,
+            "mid":              0,
+            "spread_pct":       0,
+            "liquidity_quality": "unknown",
+            "source":           "unavailable",
+        }
+
+
+@lru_cache(maxsize=128)
+def _micro_cached(symbol: str, ts_bucket: int) -> dict:
+    """30-second cached microstructure snapshot."""
+    pressure = get_order_book_pressure(symbol)
+    ticker   = get_book_ticker(symbol)
+
+    ratio   = pressure["pressure_ratio"]
+    quality = ticker["liquidity_quality"]
+
+    # Combined signal: only call directional if book is liquid
+    if quality == "wide":
+        combined = "thin_book"
+    elif ratio > 0.6 and quality in ("tight", "normal"):
+        combined = "bullish"
+    elif ratio < 0.4 and quality in ("tight", "normal"):
+        combined = "bearish"
+    else:
+        combined = "neutral"
+
+    return {
+        "pressure_ratio":    pressure["pressure_ratio"],
+        "pressure_label":    pressure["pressure_label"],
+        "imbalance_pct":     pressure["imbalance_pct"],
+        "bid_vol_usd":       pressure["bid_vol_usd"],
+        "ask_vol_usd":       pressure["ask_vol_usd"],
+        "spread_pct":        ticker["spread_pct"],
+        "liquidity_quality": ticker["liquidity_quality"],
+        "bid":               ticker["bid"],
+        "ask":               ticker["ask"],
+        "signal":            combined,
+    }
+
+
+def get_market_microstructure(symbol: str) -> dict:
+    """Public entry point — 30s cache bucket."""
+    ts_bucket = int(time.time() // 30)
+    return _micro_cached(symbol.upper(), ts_bucket)
+
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 def _fmt_large(n: float) -> str:
     if n >= 1_000_000_000: return f"${n/1_000_000_000:.2f}B"

@@ -20,7 +20,7 @@ from signals import calculate_signals, get_key_levels
 from agents import run_agent_council
 from kronos import run_kronos_forecast
 from perplexity_research import run_deep_research
-from derivatives import get_derivatives
+from derivatives import get_derivatives, get_market_microstructure
 from history import (
     record_signal, get_symbol_history, get_hit_rate,
     get_scanner_performance, record_scan_result, get_backtest,
@@ -202,6 +202,7 @@ async def analyse(req: AnalyseRequest):
         "fear_greed":fear_greed,"cp_news":cp_news[:3],"key_levels":levels,
         "ohlcv":ohlcv[-48:],
         "derivatives": get_derivatives(symbol),
+        "microstructure": get_market_microstructure(symbol),
         "social_delta":    social_delta,
         "santiment":       san_signals,
         "events":          coindar_events[:5] if coindar_events else [],
