@@ -16,37 +16,55 @@ ADMIN_CHAT = int(os.environ.get("ADMIN_CHAT_ID", "5861457546"))
 MIN_SCORE  = int(os.environ.get("SCANNER_MIN_SCORE", "9"))
 TOP_N      = int(os.environ.get("SCANNER_TOP_N", "10"))
 
+BINANCE_TICKER = "https://data-api.binance.vision/api/v3/ticker/24hr"
 STABLECOINS = {
     "USDT","USDC","BUSD","DAI","TUSD","USDP","USDD","GUSD","FRAX","LUSD",
     "FDUSD","PYUSD","STETH","WBTC","WETH","WBETH","EZETH","WEETH","SUSDE","USDE"
 }
+MIN_VOLUME_USD = 500_000   # filter out ultra-thin pairs
 
 # ─────────────────────────────────────────────
-#  Step 1: fetch top 200 symbols from CoinGecko
+#  Step 1: fetch top N symbols from Binance (volume-sorted)
 # ─────────────────────────────────────────────
 
 async def _get_top_symbols(n: int = 200) -> list[str]:
-    symbols = []
+    """
+    Fetches all Binance USDT spot pairs in one call, filters stables and
+    low-volume pairs, sorts by 24h quote volume, returns top N symbols.
+    Single request, real-time data, no rate limit concerns.
+    """
     async with aiohttp.ClientSession() as session:
-        for page in range(1, 3):
-            try:
-                url = (
-                    f"https://api.coingecko.com/api/v3/coins/markets"
-                    f"?vs_currency=usd&order=market_cap_desc&per_page=100&page={page}&sparkline=false"
-                )
-                async with session.get(url, timeout=aiohttp.ClientTimeout(total=20)) as r:
-                    if r.status != 200:
-                        logger.warning(f"CoinGecko page {page} returned {r.status}")
-                        continue
-                    coins = await r.json()
-                    for coin in coins:
-                        sym = coin.get("symbol", "").upper().strip()
-                        if sym and sym not in STABLECOINS and sym not in symbols:
-                            symbols.append(sym)
-            except Exception as e:
-                logger.error(f"CoinGecko fetch error page {page}: {e}")
-            await asyncio.sleep(0.6)
-    return symbols[:n]
+        try:
+            async with session.get(
+                BINANCE_TICKER,
+                timeout=aiohttp.ClientTimeout(total=15)
+            ) as r:
+                if r.status != 200:
+                    logger.error(f"Binance ticker returned {r.status}")
+                    return []
+                tickers = await r.json()
+        except Exception as e:
+            logger.error(f"Binance universe fetch failed: {e}")
+            return []
+
+    coins = []
+    for t in tickers:
+        pair = t.get("symbol", "")
+        if not pair.endswith("USDT"):
+            continue
+        sym = pair[:-4]  # strip USDT suffix
+        if sym in STABLECOINS:
+            continue
+        vol = float(t.get("quoteVolume", 0))
+        if vol < MIN_VOLUME_USD:
+            continue
+        coins.append((sym, vol))
+
+    # Sort by 24h USD volume descending — most liquid first
+    coins.sort(key=lambda x: x[1], reverse=True)
+    symbols = [sym for sym, _ in coins[:n]]
+    logger.info(f"[Scanner] Binance universe: {len(symbols)} symbols (from {len(coins)} USDT pairs)")
+    return symbols
 
 
 # ─────────────────────────────────────────────
