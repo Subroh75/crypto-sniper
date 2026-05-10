@@ -766,9 +766,92 @@ export default function Home() {
                 );
               })()}
 
-              {/* 06: Kronos AI Forecast */}
+              {/* 06: Order Book Microstructure */}
+              {sig.microstructure && (() => {
+                const ms = sig.microstructure;
+                const sigColor =
+                  ms.signal === "bullish"   ? "text-teal"  :
+                  ms.signal === "bearish"   ? "text-red"   :
+                  ms.signal === "thin_book" ? "text-amber" : "text-text-muted";
+                const sigBg =
+                  ms.signal === "bullish"   ? "bg-teal/8 border-teal/20"   :
+                  ms.signal === "bearish"   ? "bg-red/8 border-red/20"     :
+                  ms.signal === "thin_book" ? "bg-amber/8 border-amber/20" : "bg-surface-2 border-border/40";
+                const totalVol = (ms.bid_vol_usd ?? 0) + (ms.ask_vol_usd ?? 0);
+                const bidPct   = totalVol > 0 ? (ms.bid_vol_usd / totalVol) * 100 : 50;
+                const askPct   = 100 - bidPct;
+                const fmtVol   = (v: number) => v >= 1_000_000 ? `$${(v/1_000_000).toFixed(2)}M` : v >= 1_000 ? `$${(v/1_000).toFixed(0)}K` : `$${v}`;
+                return (
+                  <Card>
+                    <CardHeader num="06" title="ORDER BOOK" badge="LIVE" />
+                    <div className="p-4">
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-3">
+
+                        {/* Combined signal */}
+                        <div className={`rounded-lg border p-3 ${sigBg}`}>
+                          <div className="text-[9px] font-mono text-text-muted/70 uppercase tracking-wide mb-1">Book Signal</div>
+                          <div className={`text-[18px] font-mono font-black uppercase ${sigColor}`}>
+                            {ms.signal === "thin_book" ? "THIN BOOK" : ms.signal}
+                          </div>
+                          <div className={`text-[9px] font-mono mt-0.5 ${sigColor} opacity-80`}>
+                            {ms.signal === "bullish"   ? "Bids dominating asks" :
+                             ms.signal === "bearish"   ? "Asks dominating bids" :
+                             ms.signal === "thin_book" ? "Wide spread — expect slippage" :
+                             "Balanced pressure"}
+                          </div>
+                        </div>
+
+                        {/* Spread */}
+                        <div className="bg-surface-2 rounded-lg border border-border/40 p-3">
+                          <div className="text-[9px] font-mono text-text-muted/70 uppercase tracking-wide mb-1">Spread</div>
+                          <div className={`text-[18px] font-mono font-black ${
+                            ms.liquidity_quality === "tight"  ? "text-teal"  :
+                            ms.liquidity_quality === "wide"   ? "text-red"   : "text-amber"
+                          }`}>{ms.spread_pct.toFixed(4)}%</div>
+                          <div className={`text-[9px] font-mono mt-0.5 capitalize ${
+                            ms.liquidity_quality === "tight"  ? "text-teal"  :
+                            ms.liquidity_quality === "wide"   ? "text-red"   : "text-amber"
+                          } opacity-80`}>{ms.liquidity_quality} liquidity</div>
+                        </div>
+
+                        {/* Imbalance */}
+                        <div className="bg-surface-2 rounded-lg border border-border/40 p-3">
+                          <div className="text-[9px] font-mono text-text-muted/70 uppercase tracking-wide mb-1">Imbalance</div>
+                          <div className={`text-[18px] font-mono font-black ${
+                            (ms.imbalance_pct ?? 0) > 10 ? "text-teal" : (ms.imbalance_pct ?? 0) < -10 ? "text-red" : "text-text-muted"
+                          }`}>
+                            {(ms.imbalance_pct ?? 0) >= 0 ? "+" : ""}{(ms.imbalance_pct ?? 0).toFixed(1)}%
+                          </div>
+                          <div className="text-[9px] font-mono text-text-muted/60 mt-0.5">
+                            {(ms.imbalance_pct ?? 0) > 0 ? "Bid-heavy" : (ms.imbalance_pct ?? 0) < 0 ? "Ask-heavy" : "Balanced"}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Bid / Ask depth bar */}
+                      <div className="bg-surface-2 rounded-lg border border-border/40 p-3">
+                        <div className="flex justify-between text-[9px] font-mono text-text-muted/70 mb-2">
+                          <span className="text-teal font-bold">BID {fmtVol(ms.bid_vol_usd ?? 0)} ({bidPct.toFixed(0)}%)</span>
+                          <span className="text-[9px] font-mono text-text-muted/40">within 1% of mid</span>
+                          <span className="text-red font-bold">ASK {fmtVol(ms.ask_vol_usd ?? 0)} ({askPct.toFixed(0)}%)</span>
+                        </div>
+                        {/* Stacked bar */}
+                        <div className="h-3 rounded-full overflow-hidden flex">
+                          <div className="h-full bg-teal/70 transition-all" style={{ width: `${bidPct}%` }} />
+                          <div className="h-full bg-red/60 transition-all" style={{ width: `${askPct}%` }} />
+                        </div>
+                        <div className="flex justify-between text-[7px] font-mono text-text-muted/40 mt-1">
+                          <span>Buyers</span><span>Sellers</span>
+                        </div>
+                      </div>
+                    </div>
+                  </Card>
+                );
+              })()}
+
+              {/* 07: Kronos AI Forecast */}
               <Card>
-                <CardHeader num="06" title="KRONOS AI FORECAST" badge={!isFullAccess ? "PREMIUM" : undefined} />
+                <CardHeader num="07" title="KRONOS AI FORECAST" badge={!isFullAccess ? "PREMIUM" : undefined} />
                 <div className="p-4">
                   {!isFullAccess && (
                     <PremiumModal open inline feature="Kronos AI forecast"
@@ -945,7 +1028,7 @@ export default function Home() {
 
               {/* 07: Agent Debate */}
               <Card>
-                <CardHeader num="07" icon="⚖" title="AI LAB - AGENT DEBATE" badge={!isFullAccess ? "PREMIUM" : undefined} />
+                <CardHeader num="08" icon="⚖" title="AI LAB - AGENT DEBATE" badge={!isFullAccess ? "PREMIUM" : undefined} />
                 <div className="p-3 space-y-2">
                   {!isFullAccess && (
                     <PremiumModal open inline feature="Agent debate"
