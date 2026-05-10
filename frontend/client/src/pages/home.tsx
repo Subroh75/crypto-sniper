@@ -536,6 +536,32 @@ export default function Home() {
                     <div className="text-[12px] font-mono text-text-muted mb-3">
                       {sig.signal.total} / {sig.signal.max}  {sig.signal.label === "STRONG BUY" ? "strong setup!" : sig.signal.label === "MODERATE" ? "approaching threshold" : "below threshold (<9)"}
                     </div>
+
+                    {/* Low liquidity / thin book warning */}
+                    {(sig.low_liquidity || sig.microstructure?.signal === "thin_book") && (
+                      <div className="flex items-start gap-2 bg-amber-950/40 border border-amber-800/50 rounded-lg px-3 py-2 mb-3 text-left">
+                        <span className="text-amber-400 text-[13px] flex-shrink-0 mt-px">⚠</span>
+                        <div>
+                          <div className="text-[10px] font-bold text-amber-400 tracking-wide mb-0.5">
+                            {sig.low_liquidity && sig.microstructure?.signal === "thin_book"
+                              ? "LOW LIQUIDITY — THIN BOOK"
+                              : sig.low_liquidity
+                              ? "LOW LIQUIDITY COIN"
+                              : "THIN ORDER BOOK"}
+                          </div>
+                          <div className="text-[9px] font-mono text-amber-200/70 leading-relaxed">
+                            {sig.low_liquidity && (
+                              <span>24h volume under $1M — VPRT scores can be inflated by single large trades. </span>
+                            )}
+                            {sig.microstructure?.signal === "thin_book" && (
+                              <span>Spread {sig.microstructure.spread_pct.toFixed(3)}% — expect slippage on entry. </span>
+                            )}
+                            <span className="text-amber-400/60">Raise your conviction threshold before acting.</span>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
                     <div className="flex justify-center gap-4 text-[11px] font-mono text-text-muted flex-wrap">
                       <span>CLOSE <span className={sig.quote.price > sig.structure.ema20 ? "text-teal font-bold" : "text-red font-bold"}>{fmtPrice((sig.quote?.price ?? 1))}</span></span>
                       <span>24H <span className={sig.quote.change_24h >= 0 ? "text-teal font-bold" : "text-red font-bold"}>{fmtPct(sig.quote.change_24h)}</span></span>

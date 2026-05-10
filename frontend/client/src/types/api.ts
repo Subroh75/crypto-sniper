@@ -102,10 +102,12 @@ export interface AnalyseResponse {
   conviction: Conviction;
   key_levels:  KeyLevel[];
   ohlcv:       OHLCVBar[];
-  fear_greed?:  { value: number; label: string } | null;
-  cp_news?:     unknown;
-  derivatives?: DerivativesData;
-  error?:       string;
+  fear_greed?:     { value: number; label: string } | null;
+  cp_news?:         unknown;
+  derivatives?:     DerivativesData;
+  microstructure?:  { signal: string; spread_pct: number; pressure_label: string; imbalance_pct: number; liquidity_quality: string };
+  low_liquidity?:   boolean;  // true when 24h vol < $1M — scores may be noisy
+  error?:           string;
 }
 
 // ── Kronos Forecast ───────────────────────────────────────────────────────────
