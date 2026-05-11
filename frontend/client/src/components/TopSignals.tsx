@@ -3,7 +3,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 const API = (import.meta as Record<string, unknown> & { env?: Record<string, string> })
   .env?.VITE_API_BASE ?? "https://crypto-sniper.onrender.com";
 
-const BUY_THRESHOLD = 9;
+const BUY_THRESHOLD = 5; // gate-based scoring: BUY/STRONG BUY uses signal label check
 const PAGE_SIZE     = 20;
 
 interface Signal {
@@ -107,7 +107,7 @@ export function TopSignals({ onSelect, interval = "1h", onBuySignalsChange }: Pr
         setError(null);
         if (onBuySignalsChange) {
           const buyList = all
-            .filter(s => s.score >= BUY_THRESHOLD)
+            .filter(s => s.signal === "STRONG BUY" || s.signal === "BUY")
             .sort((a, b) => b.score - a.score)
             .map(s => ({ symbol: s.symbol, score: s.score, change: s.change }));
           onBuySignalsChange(buyList);
@@ -134,13 +134,13 @@ export function TopSignals({ onSelect, interval = "1h", onBuySignalsChange }: Pr
   // Reset page when tab or sort changes
   useEffect(() => { setPage(1); }, [tab, sortBy]);
 
-  const buyCount  = signals.filter(s => s.score >= BUY_THRESHOLD).length;
+  const buyCount  = signals.filter(s => s.signal === "STRONG BUY" || s.signal === "BUY").length;
   const waitCount = signals.length - buyCount;
 
   // Filter by tab
   const filtered = [...signals].filter(s => {
-    if (tab === "buy")  return s.score >= BUY_THRESHOLD;
-    if (tab === "wait") return s.score < BUY_THRESHOLD;
+    if (tab === "buy")  return s.signal === "STRONG BUY" || s.signal === "BUY";
+    if (tab === "wait") return s.signal !== "STRONG BUY" && s.signal !== "BUY";
     return true;
   });
 

@@ -222,14 +222,15 @@ def _format_hit(hit: dict, rank: int) -> str:
     risk_emoji  = RISK_EMOJI.get(risk_level, "❓")
     setup       = hit.get("trade_setup", {})
 
-    bar = _score_bar(score)
+    v_detail = hit.get("v_detail", f"Vol: {rv:.1f}x")
+    t_detail = hit.get("t_detail", f"Trend: ADX {adx:.0f}")
 
     block  = f"\n#{rank}  {symbol}  {chain_emoji} {chain_name}\n"
-    block += f"Score:  {score}/13  {bar}\n"
     block += f"Signal: {signal}\n"
     block += f"Price:  {_fmt_price(price)}  ({chg_1h:+.1f}% 1h  /  {chg_24h:+.1f}% 24h)\n"
     block += f"Vol:    {_fmt_vol(vol)}  Liq: {_fmt_vol(liq)}  Age: {_fmt_age(age_h)}\n"
-    block += f"RSI {rsi:.0f}  ADX {adx:.0f}  Vol {rv:.1f}x\n"
+    block += f"V: {v_detail}\n"
+    block += f"T: {t_detail}\n"
     block += f"Risk:   {risk_emoji} {risk_level}"
 
     if risk.get("flags"):
@@ -275,8 +276,11 @@ def _format_hit_detail(hit: dict) -> str:
 
     risk_level = risk.get("level", "UNKNOWN")
     risk_emoji = RISK_EMOJI.get(risk_level, "❓")
-    bar        = _score_bar(score)
     pressure   = "buy pressure" if buys > sells * 1.2 else "sell pressure" if sells > buys * 1.2 else "balanced"
+    v_detail   = hit.get("v_detail",   f"Vol: {rv:.1f}x")
+    t_detail   = hit.get("t_detail",   f"Trend strength {adx:.0f}")
+    p_detail   = hit.get("p_detail",   "")
+    adx_detail = hit.get("adx_detail", "")
 
     out  = f"\n── MARKET ──────────────────\n"
     out += f"Price:    {_fmt_price(price)}\n"
@@ -299,9 +303,11 @@ def _format_hit_detail(hit: dict) -> str:
         if flags:
             out += f"Flags:     {', '.join(flags)}\n"
 
-    out += f"\n── SIGNAL  {score}/13  {bar} ──────\n"
-    out += f"{signal}\n"
-    out += f"RSI {rsi:.0f}  ADX {adx:.0f}  Vol {rv:.1f}x\n"
+    out += f"\n── SIGNAL  {signal} ─────────────\n"
+    out += f"V: {v_detail}\n"
+    out += f"T: {t_detail}\n"
+    if adx_detail: out += f"   {adx_detail}\n"
+    if p_detail:   out += f"P: {p_detail}\n"
 
     if setup.get("entry") and setup.get("stop") and setup.get("target"):
         rr = setup.get("rr", 0)
@@ -312,16 +318,16 @@ def _format_hit_detail(hit: dict) -> str:
             out += f"R:R      {rr:.1f}\n"
 
     verdict_parts = []
-    if risk_level == "LOW":   verdict_parts.append("Risk clear ✓")
-    if score >= 9:            verdict_parts.append("Signal confirmed ✓")
-    if buys > sells:          verdict_parts.append("Buy pressure ✓")
+    if risk_level == "LOW":                          verdict_parts.append("Risk clear ✓")
+    if signal in ("STRONG BUY", "BUY"):              verdict_parts.append("Signal confirmed ✓")
+    if buys > sells:                                 verdict_parts.append("Buy pressure ✓")
 
     if len(verdict_parts) == 3:
         verdict = "ALL CHECKS PASSED ✓"
     elif risk_level in ("CRITICAL", "HIGH"):
         verdict = "HIGH RISK — PROCEED WITH CAUTION ⚠️"
-    elif score < 9:
-        verdict = "SIGNAL BELOW THRESHOLD"
+    elif signal == "NO SIGNAL":
+        verdict = "GATES NOT MET — NO SIGNAL"
     else:
         verdict = " · ".join(verdict_parts) if verdict_parts else "MIXED SIGNALS"
 

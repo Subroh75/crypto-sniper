@@ -7,18 +7,27 @@ export interface AnalyseRequest {
 }
 
 // ── Signal ────────────────────────────────────────────────────────────────────
+export interface SignalGates {
+  v:   boolean;
+  t:   boolean;
+  adx: boolean;
+}
+
 export interface SignalOutput {
-  label:     string;  // "STRONG BUY" | "MODERATE" | "NO SIGNAL"
+  label:     string;  // "STRONG BUY" | "BUY" | "NO SIGNAL"
   total:     number;
   max:       number;
   direction: string;  // "LONG" | "SHORT" | "NEUTRAL"
+  gates?:    SignalGates;
 }
 
 export interface Component {
-  score:  number;
-  max:    number;
-  label:  string;
-  detail: string;
+  confirmed: boolean;
+  label:     string;
+  detail:    string;
+  // Legacy fields kept for backwards compat
+  score?:    number;
+  max?:      number;
 }
 
 export interface SignalComponents {
@@ -26,7 +35,7 @@ export interface SignalComponents {
   P: Component;
   R: Component;
   T: Component;
-  S: Component;
+  S?: Component;
 }
 
 // ── Market Structure ──────────────────────────────────────────────────────────

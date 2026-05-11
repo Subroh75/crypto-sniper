@@ -44,12 +44,14 @@ const QUICK_COINS = ["BTC","ETH","SOL","BNB","DOGE","KAVA"] as const;
 
 const VERDICT_COLOR: Record<string, string> = {
   "STRONG BUY": "text-teal",
+  "BUY":        "text-teal",
   "MODERATE":   "text-amber",
   "NO SIGNAL":  "text-text-muted",
 };
 
 const VERDICT_BG: Record<string, string> = {
   "STRONG BUY": "bg-teal/8 border-teal/20",
+  "BUY":        "bg-teal/5 border-teal/15",
   "MODERATE":   "bg-amber/8 border-amber/20",
   "NO SIGNAL":  "bg-surface-2 border-border/50",
 };
@@ -302,12 +304,12 @@ export default function Home() {
       total:        n(result.signal.total),
       direction:    result.signal.direction,
       change_24h:   n(result.quote.change_24h),
-      // VPRTS component scores
-      v_score:      n(result.components?.V?.score),
-      p_score:      n(result.components?.P?.score),
-      r_score:      n(result.components?.R?.score),
-      t_score:      n(result.components?.T?.score),
-      s_score:      n(result.components?.S?.score),
+      // VPRT gate confirmations (new) + legacy scores for compat
+      v_score:      n(result.components?.V?.score ?? 0),
+      p_score:      n(result.components?.P?.score ?? 0),
+      r_score:      n(result.components?.R?.score ?? 0),
+      t_score:      n(result.components?.T?.score ?? 0),
+      s_score:      0,
       // Trade setup — keep null for optional fields (backend guards these)
       entry:        result.trade_setup.entry ?? 0,
       stop:         result.trade_setup.stop ?? 0,
@@ -534,7 +536,7 @@ export default function Home() {
                       {sig.signal.label}
                     </div>
                     <div className="text-[12px] font-mono text-text-muted mb-3">
-                      {sig.signal.total} / {sig.signal.max}  {sig.signal.label === "STRONG BUY" ? "strong setup!" : sig.signal.label === "MODERATE" ? "approaching threshold" : "below threshold (<9)"}
+                      {sig.signal.total} / {sig.signal.max}  {sig.signal.label === "STRONG BUY" ? "all gates green!" : sig.signal.label === "BUY" ? "V + T + ADX confirmed" : "gates not met"}
                     </div>
 
                     {/* Low liquidity / thin book warning */}
@@ -581,34 +583,64 @@ export default function Home() {
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                     {(["V","P","R","T"] as const).map(key => {
                       const comp = sig.components[key];
-                      const ratio = comp.max > 0 ? comp.score / comp.max : 0;
-                      const color =
-                        comp.score === 0   ? "#4a5470"
-                        : ratio >= 0.67   ? "#22c55e"
-                        : ratio >= 0.34   ? "#f59e0b"
-                        : "#ef4444";
+                      // V and T are hard gates; P and R are context only
+                      const isGate = key === "V" || key === "T";
+                      const confirmed = comp.confirmed;
+                      const color = confirmed
+                        ? "#22c55e"
+                        : isGate
+                          ? "#ef4444"
+                          : "#f59e0b";
+                      const borderColor = confirmed
+                        ? "rgba(34,197,94,0.25)"
+                        : isGate
+                          ? "rgba(239,68,68,0.2)"
+                          : "rgba(245,158,11,0.15)";
+                      const statusLabel = confirmed
+                        ? (isGate ? "CONFIRMED" : "YES")
+                        : (isGate ? "NOT MET" : "NO");
                       return (
                         <div key={key} className="bg-surface-2 rounded-lg border p-3"
-                          style={{ borderColor:
-                            comp.score === 0 ? "rgba(74,84,112,0.3)"
-                            : ratio >= 0.67  ? "rgba(34,197,94,0.25)"
-                            : ratio >= 0.34  ? "rgba(245,158,11,0.25)"
-                            : "rgba(239,68,68,0.25)"
-                          }}>
-                          <div className="text-[22px] font-black mb-0.5" style={{ color }}>{key}</div>
+                          style={{ borderColor }}>
+                          <div className="flex items-start justify-between mb-1">
+                            <div className="text-[22px] font-black" style={{ color }}>{key}</div>
+                            <div className="text-[8px] font-mono font-bold px-1.5 py-0.5 rounded mt-1"
+                              style={{
+                                color,
+                                background: confirmed ? "rgba(34,197,94,0.1)" : isGate ? "rgba(239,68,68,0.1)" : "rgba(245,158,11,0.1)"
+                              }}>
+                              {statusLabel}
+                            </div>
+                          </div>
                           <div className="text-[9px] font-mono text-text-muted/70 uppercase tracking-wide mb-2">
                             <MetricTooltip id={key}>{comp.label}</MetricTooltip>
                           </div>
-                          <div className="text-[16px] font-mono font-bold mb-0.5" style={{ color }}>
-                            {comp.score}/{comp.max}
+                          <div className="text-[9px] font-mono leading-relaxed" style={{ color: confirmed ? "#22c55e" : "#94a3b8" }}>
+                            {comp.detail}
                           </div>
-                          <ScoreBar score={comp.score} max={comp.max} color={color} />
-                          <div className="text-[9px] font-mono text-text-muted/60 mt-1.5">{comp.detail}</div>
                         </div>
                       );
                     })}
 
                   </div>
+                  {/* Gate summary row */}
+                  {sig.signal && (
+                    <div className="mt-3 flex items-center gap-2 flex-wrap">
+                      {sig.signal.gates && (
+                        <>
+                          <span className={`text-[9px] font-mono font-bold px-2 py-0.5 rounded ${
+                            sig.signal.gates.v ? "bg-teal/10 text-teal" : "bg-red/10 text-red"
+                          }`}>VOL {sig.signal.gates.v ? "✓" : "✗"}</span>
+                          <span className={`text-[9px] font-mono font-bold px-2 py-0.5 rounded ${
+                            sig.signal.gates.t ? "bg-teal/10 text-teal" : "bg-red/10 text-red"
+                          }`}>TREND {sig.signal.gates.t ? "✓" : "✗"}</span>
+                          <span className={`text-[9px] font-mono font-bold px-2 py-0.5 rounded ${
+                            sig.signal.gates.adx ? "bg-teal/10 text-teal" : "bg-red/10 text-red"
+                          }`}>ADX {sig.signal.gates.adx ? "✓" : "✗"}</span>
+                        </>
+                      )}
+                    </div>
+                  )}
                 </div>
               </Card>
 

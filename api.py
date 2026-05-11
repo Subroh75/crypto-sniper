@@ -186,13 +186,12 @@ async def analyse(req: AnalyseRequest):
     return {
         "symbol":symbol,"interval":req.interval,"timestamp":int(time.time()),
         "latency_ms":round((time.time()-t_start)*1000),
-        "signal":{"label":sig.signal_label,"total":sig.total,"max":sig.max_score,"direction":sig.direction},
+        "signal":{"label":sig.signal_label,"total":sig.total,"max":sig.max_score,"direction":sig.direction,"gates":{"v":sig.v_confirmed,"t":sig.t_confirmed,"adx":sig.adx_confirmed}},
         "components":{
-            "V":{"score":sig.v_score,"max":5,"label":"Volume","detail":f"RV={sig.rel_volume:.2f}x"},
-            "P":{"score":sig.p_score,"max":3,"label":"Momentum","detail":f"chg={quote.get('change_24h',0):.1f}%"},
-            "R":{"score":sig.r_score,"max":2,"label":"Range Pos","detail":f"{sig.range_pos:.0f}%"},
-            "T":{"score":sig.t_score,"max":3,"label":"Trend","detail":f"ADX {sig.adx:.0f}"},
-            # S score removed — pure VPRT (max 13)
+            "V":{"confirmed":sig.v_confirmed,"label":"Volume","detail":sig.v_detail,"score":sig.v_score,"max":5},
+            "P":{"confirmed":sig.p_confirmed,"label":"Momentum","detail":sig.p_detail,"score":sig.p_score,"max":3},
+            "R":{"confirmed":sig.r_confirmed,"label":"Range","detail":sig.r_detail,"score":sig.r_score,"max":2},
+            "T":{"confirmed":sig.t_confirmed,"label":"Trend","detail":sig.t_detail,"score":sig.t_score,"max":3},
         },
         "structure":{"close":sig.close,"ema20":sig.ema20,"ema50":sig.ema50,"ema200":sig.ema200,"vwap":sig.vwap,"bb_upper":sig.bb_upper,"bb_lower":sig.bb_lower},
         "timing":{"rsi":sig.rsi,"adx":sig.adx,"atr":sig.atr,"rel_volume":sig.rel_volume},

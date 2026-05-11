@@ -71,7 +71,7 @@ class ChainAgent:
     min_txns_1h: int   = 50
 
     # ── Scoring threshold ────────────────────────────────────────────────────
-    MIN_SCORE = 9
+    MIN_SCORE = 4  # gate-based: BUY needs V+T+ADX (score ~4+), STRONG BUY ~6+
 
     # ────────────────────────────────────────────────────────────────────────
     # PUBLIC: sweep the chain, return list of blackboard entries
@@ -108,7 +108,7 @@ class ChainAgent:
         for r in results:
             if isinstance(r, Exception) or r is None:
                 continue
-            if r.get("score", 0) >= self.MIN_SCORE and \
+            if r.get("label", "NO SIGNAL") in ("BUY", "STRONG BUY") and \
                r.get("risk", {}).get("level") in ("LOW", "MEDIUM"):
                 hits.append(r)
 
@@ -455,27 +455,17 @@ def _unknown_risk() -> dict:
 
 def _score_market(market: dict) -> dict:
     """
-    VPRT-inspired scoring from DexScreener market data fields.
+    Gate-based VPRT signal from DexScreener market fields.
+    No OHLCV available, so trend is proxied from multi-TF price alignment.
 
-    V — Volume (0–5 pts)
-      1: vol_24h > min threshold
-      2: vol_24h > 5× liquidity
-      1: buy/sell ratio > 1.5 (buy-dominated)
-      1: buys_1h > 100
+    V gate  (flat): rel_vol >= 1.2x  (1h vol vs hourly avg)
+    T gate        : price rising across 3 TFs — 5m > 0, 1h > 0, 6h > 0
+    ADX proxy     : >= 3 of 4 TFs positive (5m/1h/6h/24h) = "trending"
 
-    P — Momentum (0–3 pts)
-      1: change_1h  > +1%
-      1: change_6h  > +3%
-      1: change_24h > +5%
-
-    R — Range (0–2 pts)
-      1: change_1h positive
-      1: change_6h and change_24h both positive (multi-TF alignment)
-
-    T — Trend (0–3 pts)
-      1: change_5m > 0 (immediate momentum)
-      1: change_1h > change_5m (accelerating)
-      1: change_24h > 0 AND change_6h > 0 (sustained)
+    BUY        = V + T + ADX proxy all confirmed
+    STRONG BUY = BUY + P confirmed (1h > 1% AND 24h > 3%)
+                     + R confirmed (buy-dominated, buy_ratio > 0.55)
+    NO SIGNAL  = any gate fails
     """
     vol_24h  = market.get("volume_24h",  0)
     liq      = max(market.get("liquidity", 1), 1)
@@ -486,70 +476,90 @@ def _score_market(market: dict) -> dict:
     chg_6h   = market.get("change_6h",   0)
     chg_24h  = market.get("change_24h",  0)
     vol_h1   = market.get("vol_h1",      0)
-    vol_h6   = market.get("vol_h6",      0)
 
-    # V — Volume (0–5)
-    v = 0
-    if vol_24h > 100_000:            v += 1
-    if vol_24h > liq * 3:            v += 1
-    if vol_24h > liq * 8:            v += 1  # high relative volume
-    total_txns = buys_1h + sells_1h
-    if total_txns > 0:
-        buy_ratio = buys_1h / total_txns
-        if buy_ratio > 0.55:         v += 1  # buy-dominated
-    if buys_1h > 100:                v += 1
-    v = min(v, 5)
-
-    # P — Momentum (0–3)
-    p = 0
-    if chg_1h  > 1.0:  p += 1
-    if chg_6h  > 3.0:  p += 1
-    if chg_24h > 5.0:  p += 1
-    p = min(p, 3)
-
-    # R — Range (0–2)
-    r = 0
-    if chg_1h  > 0:    r += 1
-    if chg_6h  > 0 and chg_24h > 0:  r += 1
-    r = min(r, 2)
-
-    # T — Trend (0–3)
-    t = 0
-    if chg_5m  > 0:                                    t += 1
-    if chg_1h  > 0 and abs(chg_1h) > abs(chg_5m):    t += 1  # accelerating
-    if chg_24h > 0 and chg_6h > 0:                    t += 1  # sustained trend
-    t = min(t, 3)
-
-    score = v + p + r + t
-
-    # Label
-    if score >= 9:   label = "STRONG BUY"
-    elif score >= 5: label = "MODERATE"
-    else:            label = "NO SIGNAL"
-
-    # Synthetic RSI proxy from price changes (50 = neutral, 0–100 range)
-    rsi_proxy = 50 + min(chg_24h * 2, 40)  # rough but directionally correct
-    rsi_proxy = max(10, min(90, rsi_proxy))
-
-    # Trend strength proxy (0–100) from multi-TF alignment
-    trend_pts = (1 if chg_5m > 0 else 0) + (1 if chg_1h > 0 else 0) + \
-                (1 if chg_6h > 0 else 0) + (1 if chg_24h > 0 else 0)
-    trend_strength = trend_pts * 25
-
-    # Relative volume proxy (1h vol / (24h vol / 24))
+    # ── Relative volume proxy (1h vol / hourly avg) ─────────────────────
     avg_hourly = vol_24h / 24 if vol_24h else 1
     rel_vol    = (vol_h1 / avg_hourly) if avg_hourly > 0 and vol_h1 > 0 else 1.0
+    rel_vol    = round(rel_vol, 2)
+
+    # ── V gate: flat — rel_vol >= 1.2x ─────────────────────────────────
+    v_confirmed = rel_vol >= 1.2
+    v_detail    = f"Vol: {rel_vol:.1f}x above average" if v_confirmed else f"Vol: {rel_vol:.1f}x — below threshold"
+
+    # ── T gate: multi-TF trend alignment ───────────────────────────────
+    # DEX has no EMAs — proxy: price rising in 5m, 1h, AND 6h
+    t_confirmed = chg_5m > 0 and chg_1h > 0 and chg_6h > 0
+    if t_confirmed:
+        t_detail = "Trend: rising 5m · 1h · 6h"
+    else:
+        tfs_up   = [tf for tf, v in [("5m", chg_5m), ("1h", chg_1h), ("6h", chg_6h), ("24h", chg_24h)] if v > 0]
+        tfs_down = [tf for tf, v in [("5m", chg_5m), ("1h", chg_1h), ("6h", chg_6h), ("24h", chg_24h)] if v <= 0]
+        if tfs_up:
+            t_detail = f"Trend: up on {' · '.join(tfs_up)} — down on {' · '.join(tfs_down)}"
+        else:
+            t_detail = "Trend: falling across all TFs"
+
+    # ── ADX proxy: >= 3 of 4 TFs positive ──────────────────────────────
+    tf_positive = sum(1 for v in [chg_5m, chg_1h, chg_6h, chg_24h] if v > 0)
+    adx_proxy   = tf_positive >= 3
+    adx_detail  = f"ADX proxy: {tf_positive}/4 TFs positive — {'trending' if adx_proxy else 'sideways'}"
+
+    # ── P confirmation: strong momentum ────────────────────────────────
+    p_confirmed = chg_1h > 1.0 and chg_24h > 3.0
+    p_detail    = f"Momentum: 1h {chg_1h:+.1f}% · 24h {chg_24h:+.1f}%"
+
+    # ── R confirmation: buy-dominated ──────────────────────────────────
+    total_txns  = buys_1h + sells_1h
+    buy_ratio   = buys_1h / total_txns if total_txns > 0 else 0.5
+    r_confirmed = buy_ratio > 0.55
+    r_detail    = f"Range: {buy_ratio*100:.0f}% buys in last 1h"
+
+    # ── Signal tier ────────────────────────────────────────────────────
+    buy_gates_met = v_confirmed and t_confirmed and adx_proxy
+    if buy_gates_met and p_confirmed and r_confirmed:
+        label = "STRONG BUY"
+    elif buy_gates_met:
+        label = "BUY"
+    else:
+        label = "NO SIGNAL"
+
+    # ── Legacy score fields (kept for blackboard compat) ────────────────
+    # Score reflects gates met: V(1) + T(1) + ADX(1) + P(1) + R(1) mapped to 0-13
+    v = 3 if rel_vol >= 2.0 else (2 if rel_vol >= 1.5 else (1 if v_confirmed else 0))
+    t = 3 if t_confirmed and adx_proxy else (2 if t_confirmed else (1 if adx_proxy else 0))
+    p = 2 if p_confirmed and chg_24h >= 5 else (1 if p_confirmed else 0)
+    r = 1 if r_confirmed else 0
+    score = v + t + p + r
+
+    # ── RSI / trend proxies (kept for blackboard display) ───────────────
+    rsi_proxy = 50 + min(chg_24h * 2, 40)
+    rsi_proxy = max(10, min(90, rsi_proxy))
+    trend_strength = tf_positive * 25  # 0/25/50/75/100
 
     return {
         "score":          score,
         "label":          label,
+        "gates": {
+            "v":   v_confirmed,
+            "t":   t_confirmed,
+            "adx": adx_proxy,
+        },
+        "v_confirmed":    v_confirmed,
+        "t_confirmed":    t_confirmed,
+        "p_confirmed":    p_confirmed,
+        "r_confirmed":    r_confirmed,
+        "v_detail":       v_detail,
+        "t_detail":       t_detail,
+        "p_detail":       p_detail,
+        "r_detail":       r_detail,
+        "adx_detail":     adx_detail,
         "v_score":        v,
         "p_score":        p,
         "r_score":        r,
         "t_score":        t,
         "rsi_proxy":      round(rsi_proxy, 1),
         "trend_strength": trend_strength,
-        "rel_vol":        round(rel_vol, 2),
+        "rel_vol":        rel_vol,
     }
 
 
@@ -563,7 +573,7 @@ def _build_trade_setup(market: dict, signal: dict) -> dict:
     Target: entry × (1 + 0.10)  (10% target, 2:1 R:R)
     """
     price = market.get("price", 0)
-    if not price or signal["score"] < 9:
+    if not price or signal.get("label", "NO SIGNAL") == "NO SIGNAL":
         return {}
 
     stop   = round(price * 0.95, 8)

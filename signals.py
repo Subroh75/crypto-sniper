@@ -1,16 +1,19 @@
 """
-signals.py — V/P/R/T scoring engine for Crypto Sniper
+signals.py — V/P/R/T gate-based signal engine for Crypto Sniper
 
-Signal Components:
-  V — Volume     (0–5 pts)  : relative volume vs 20-bar avg
-  P — Momentum   (0–3 pts)  : ATR-normalised price move
-  R — Range Pos  (0–2 pts)  : close position in bar range
-  T — Trend      (0–3 pts)  : EMA stack + ADX
+Signal Logic:
+  V — Volume gate  : rel_vol >= 1.2x  → confirmed (flat gate)
+  T — Trend gate   : close > EMA20 > EMA50 > EMA200 (all 3 MAs below price)
+  ADX gate         : ADX >= 25 → trending
 
-Total: 0–13 pts
-  STRONG BUY : >= 9
-  MODERATE   : >= 5
-  NO SIGNAL  : < 5
+Signal Tiers:
+  BUY         = V confirmed + T confirmed + ADX >= 25
+  STRONG BUY  = BUY + P confirmed + R confirmed
+                  P = change_24h > 0 AND atr_move > 0
+                  R = close in upper 50% of bar range
+  NO SIGNAL   = any gate fails
+
+Display: plain English, no raw scores
 """
 
 from dataclasses import dataclass, field
@@ -20,14 +23,27 @@ import math
 
 @dataclass
 class SignalResult:
-    # Scores
+    # Gate confirmations
+    v_confirmed: bool = False
+    t_confirmed: bool = False
+    adx_confirmed: bool = False
+    p_confirmed: bool = False
+    r_confirmed: bool = False
+
+    # Legacy score fields (kept for API compat / trade setup logic)
     v_score:   int = 0
     p_score:   int = 0
     r_score:   int = 0
     t_score:   int = 0
-    s_score:   int = 0   # kept for API compat, always 0
+    s_score:   int = 0   # always 0
     total:     int = 0
     max_score: int = 13
+
+    # Plain English detail strings
+    v_detail: str = ""
+    p_detail: str = ""
+    r_detail: str = ""
+    t_detail: str = ""
 
     # Raw values
     rel_volume: float = 0.0
@@ -39,7 +55,7 @@ class SignalResult:
     social_delta: float = 0.0
 
     # Verdict
-    signal: str = "NO SIGNAL"         # STRONG BUY / MODERATE / NO SIGNAL
+    signal: str = "NO SIGNAL"         # STRONG BUY / BUY / NO SIGNAL
     direction: str = "NEUTRAL"        # LONG / SHORT / NEUTRAL
 
     # Market structure
@@ -68,12 +84,7 @@ class SignalResult:
 
     @property
     def signal_label(self) -> str:
-        if self.total >= 9:
-            return "STRONG BUY"
-        elif self.total >= 5:
-            return "MODERATE"
-        else:
-            return "NO SIGNAL"
+        return self.signal
 
     @property
     def bull_conviction(self) -> int:
@@ -94,16 +105,16 @@ def calculate_signals(
     indicators: dict,
     fear_greed: dict = None,
     cp_news: list = None,
-    social_delta: float = 0.0,  # % change in social score
-    coindar_events: list = None,  # from get_coindar_events()
+    social_delta: float = 0.0,
+    coindar_events: list = None,
 ) -> SignalResult:
     """
-    Main signal calculation entry point.
+    Gate-based signal engine.
 
     Args:
-        ohlcv:        [[ts, o, h, l, c], ...] newest last
+        ohlcv:        [[ts, o, h, l, c, vol], ...] newest last
         quote:        {price, change_24h, volume_24h, high_24h, low_24h, ...}
-        indicators:   {rsi, adx, atr, ema20, ema50, ema200, bb_upper, bb_lower, macd, macd_hist}
+        indicators:   {rsi, adx, atr, ema20, ema50, ema200, bb_upper, bb_lower, macd_hist}
         social_delta: % change in social engagement score over 6H
 
     Returns:
@@ -113,13 +124,16 @@ def calculate_signals(
 
     if not ohlcv or len(ohlcv) < 21:
         result.signal = "NO SIGNAL"
+        result.v_detail = "Vol: insufficient data"
+        result.t_detail = "Trend: insufficient data"
+        result.p_detail = "Momentum: insufficient data"
+        result.r_detail = "Range: insufficient data"
         return result
 
     # ── Extract prices ─────────────────────────────────────────────────────
     closes  = [bar[4] for bar in ohlcv]
     highs   = [bar[2] for bar in ohlcv]
     lows    = [bar[3] for bar in ohlcv]
-    # Extract per-candle volume from index 5 if present (Binance includes it)
     volumes = [bar[5] for bar in ohlcv if len(bar) > 5]
 
     close  = closes[-1]
@@ -127,7 +141,7 @@ def calculate_signals(
     low    = lows[-1]
     open_  = ohlcv[-1][1]
 
-    # ── Indicators (prefer Twelve Data, fallback to manual calc) ───────────
+    # ── Indicators ─────────────────────────────────────────────────────────
     rsi       = indicators.get("rsi") or _calc_rsi(closes, 14)
     adx       = indicators.get("adx") or _calc_adx(highs, lows, closes, 14)
     atr       = indicators.get("atr") or _calc_atr(highs, lows, closes, 14)
@@ -138,108 +152,118 @@ def calculate_signals(
     bb_lower  = indicators.get("bb_lower") or (ema20 * 0.98 if ema20 else close * 0.98)
     macd_hist = indicators.get("macd_hist") or 0
 
-    # ── VWAP (approximate: use close * 0.98 as rough estimate) ────────────
-    # Real VWAP requires tick data; this is a reasonable intraday approximation
-    vwap = _calc_vwap_approx(ohlcv[-24:])  # last 24 bars
+    # ── VWAP ───────────────────────────────────────────────────────────────
+    vwap = _calc_vwap_approx(ohlcv[-24:])
 
     # ── Relative Volume ────────────────────────────────────────────────────
-    # Use actual per-candle volumes from OHLCV when available (Binance data).
-    # Fall back to price-change proxy when no candle volume data.
-    vol_24h = quote.get("volume_24h", 0)
     if volumes and len(volumes) >= 20:
-        # Real relative volume: current candle vs 20-bar average
-        avg_vol = sum(volumes[-21:-1]) / 20  # last 20 bars excluding current
+        avg_vol = sum(volumes[-21:-1]) / 20
         cur_vol = volumes[-1]
         rel_vol = round(cur_vol / avg_vol, 2) if avg_vol > 0 else 1.0
         rel_vol = max(0.5, min(rel_vol, 15.0))
     else:
-        # Fallback: approximate from price change magnitude
         price_chg_abs = abs(quote.get("change_24h", 0))
         rel_vol = 1.0 + (price_chg_abs / 10)
         rel_vol = max(0.5, min(rel_vol, 8.0))
 
-    # ── V: Volume Score (0–5) ──────────────────────────────────────────────
-    v_score = 0
-    if rel_vol >= 5:   v_score = 5
-    elif rel_vol >= 3: v_score = 4
-    elif rel_vol >= 2: v_score = 3
-    elif rel_vol >= 1.5: v_score = 2
-    elif rel_vol >= 1.2: v_score = 1
+    chg = quote.get("change_24h", 0)
 
-    # ── P: Momentum Score (0–3) ────────────────────────────────────────────
-    p_score = 0
+    # ── ATR move ───────────────────────────────────────────────────────────
     if atr > 0:
         price_move = close - open_
         atr_move_sigma = price_move / atr
     else:
         atr_move_sigma = 0.0
 
-    chg = quote.get("change_24h", 0)
-    if chg >= 5:    p_score = 3
-    elif chg >= 3:  p_score = 2
-    elif chg >= 1:  p_score = 1
-
-    # ── R: Range Position Score (0–2) ──────────────────────────────────────
-    r_score = 0
+    # ── Range position ─────────────────────────────────────────────────────
     bar_range = high - low
-    if bar_range > 0:
-        range_pos = (close - low) / bar_range
+    range_pos = (close - low) / bar_range if bar_range > 0 else 0.5
+
+    # ══════════════════════════════════════════════════════════════════════
+    # GATE LOGIC
+    # ══════════════════════════════════════════════════════════════════════
+
+    # ── V gate: flat — any rel_vol >= 1.2x is confirmed ────────────────
+    v_confirmed = rel_vol >= 1.2
+    if v_confirmed:
+        v_detail = f"Vol: {rel_vol:.1f}x above average"
     else:
-        range_pos = 0.5
-    if range_pos >= 0.75: r_score = 2
-    elif range_pos >= 0.50: r_score = 1
+        v_detail = f"Vol: {rel_vol:.1f}x — below threshold"
 
-    # ── T: Trend Score (0–3) ───────────────────────────────────────────────
-    t_score = 0
+    # ── T gate: close > EMA20 > EMA50 > EMA200 ─────────────────────────
     ema_stack = False
-    if ema20 and ema50 and close:
-        if close > ema20 > ema50:
-            t_score += 2
-            ema_stack = True
-        elif close > ema20:
-            t_score += 1
-    if adx >= 25:
-        t_score = min(t_score + 1, 3)
+    if ema20 and ema50 and ema200 and close:
+        t_confirmed = close > ema20 > ema50 > ema200
+        ema_stack   = t_confirmed
+        # Build plain English MA breakdown
+        above_mas = []
+        below_mas = []
+        for label, val in [("EMA20", ema20), ("EMA50", ema50), ("EMA200", ema200)]:
+            if val and close > val:
+                above_mas.append(label)
+            elif val:
+                below_mas.append(label)
+        if t_confirmed:
+            t_detail = "Trend: above EMA20 · EMA50 · EMA200"
+        elif above_mas and below_mas:
+            t_detail = f"Trend: above {' · '.join(above_mas)} — below {' · '.join(below_mas)}"
+        elif below_mas:
+            t_detail = f"Trend: below {' · '.join(below_mas)}"
+        else:
+            t_detail = "Trend: above all MAs"
+    else:
+        t_confirmed = False
+        t_detail = "Trend: EMA data unavailable"
 
-    # ── Bull / Bear Signal Lists (initialise early — S-score appends to them) ─
-    bull_signals = []
-    bear_signals = []
+    # ── ADX gate: >= 25 ────────────────────────────────────────────────
+    adx_confirmed = adx >= 25
+    if adx_confirmed:
+        adx_label = f"ADX: {adx:.0f} — trending"
+    else:
+        adx_label = f"ADX: {adx:.0f} — sideways"
 
-    # S score removed — pure technical scoring only (V+P+R+T = 13 max)
-    s_score = 0
-    fg = fear_greed or {}
-    fg_val = fg.get("value", 50)
-    news   = cp_news or []
-    bull_n = sum(1 for n in news if n.get("sentiment") == "bullish")
-    bear_n = sum(1 for n in news if n.get("sentiment") == "bearish")
-    events = coindar_events or []
-    # Keep conviction context for Fear&Greed and news (display only, not scored)
-    if fg_val <= 25:   bull_signals.append(f"Fear&Greed {fg_val} - extreme fear, potential reversal")
-    elif fg_val >= 75: bear_signals.append(f"Fear&Greed {fg_val} - extreme greed, fade risk")
-    if bull_n > bear_n: bull_signals.append(f"News {bull_n} bullish vs {bear_n} bearish")
-    elif bear_n > bull_n: bear_signals.append(f"News {bear_n} bearish vs {bull_n} bullish")
+    # ── P confirmation: change_24h > 0 AND atr_move > 0 ───────────────
+    p_confirmed = chg > 0 and atr_move_sigma > 0
+    p_detail = f"Momentum: {chg:+.2f}% · RSI {rsi:.0f}"
 
-    # ── Total (V+P+R+T only, max 13) ──────────────────────────────────────
-    total = v_score + p_score + r_score + t_score
+    # ── R confirmation: close in upper 50% of bar range ───────────────
+    r_confirmed = range_pos >= 0.5
+    if range_pos >= 0.75:
+        r_detail = "Range: upper quarter of bar"
+    elif range_pos >= 0.5:
+        r_detail = "Range: upper half of bar"
+    else:
+        r_detail = f"Range: lower half of bar ({range_pos*100:.0f}%)"
 
-    # ── Direction ──────────────────────────────────────────────────────────
-    direction = "NEUTRAL"
-    if total >= 5 and chg > 0 and ema_stack:
-        direction = "LONG"
-    elif rsi >= 75 or (chg < -3 and close < ema20):
-        direction = "SHORT"
+    # ══════════════════════════════════════════════════════════════════════
+    # SIGNAL TIER
+    # ══════════════════════════════════════════════════════════════════════
+    buy_gates_met = v_confirmed and t_confirmed and adx_confirmed
 
-    # ── Signal ─────────────────────────────────────────────────────────────
-    if total >= 9:
+    if buy_gates_met and p_confirmed and r_confirmed:
         signal = "STRONG BUY"
-    elif total >= 5:
-        signal = "MODERATE"
+    elif buy_gates_met:
+        signal = "BUY"
     else:
         signal = "NO SIGNAL"
 
-    # ── Trade Setup ────────────────────────────────────────────────────────
+    # ── Legacy score fields (kept for trade setup + API compat) ────────
+    v_score = 3 if rel_vol >= 2.0 else (2 if rel_vol >= 1.5 else (1 if v_confirmed else 0))
+    p_score = 2 if p_confirmed and chg >= 3 else (1 if p_confirmed else 0)
+    r_score = 1 if r_confirmed else 0
+    t_score = 3 if t_confirmed and adx_confirmed else (2 if t_confirmed else (1 if adx_confirmed else 0))
+    total   = v_score + p_score + r_score + t_score
+
+    # ── Direction ──────────────────────────────────────────────────────
+    direction = "NEUTRAL"
+    if signal in ("BUY", "STRONG BUY") and chg > 0:
+        direction = "LONG"
+    elif rsi >= 75 or (chg < -3 and ema20 and close < ema20):
+        direction = "SHORT"
+
+    # ── Trade Setup ────────────────────────────────────────────────────
     entry = stop = target = rr = None
-    if total >= 5 and direction == "LONG" and atr:
+    if signal in ("BUY", "STRONG BUY") and direction == "LONG" and atr:
         entry  = close
         stop   = round(close - (1.5 * atr), 2)
         target = round(close + (2.5 * atr), 2)
@@ -247,9 +271,23 @@ def calculate_signals(
         reward = target - entry
         rr     = round(reward / risk, 2) if risk > 0 else None
 
-    # Bull signals - price action
+    # ── Bull / Bear Signal Lists ────────────────────────────────────────
+    bull_signals = []
+    bear_signals = []
+
+    fg = fear_greed or {}
+    fg_val = fg.get("value", 50)
+    news   = cp_news or []
+    bull_n = sum(1 for n in news if n.get("sentiment") == "bullish")
+    bear_n = sum(1 for n in news if n.get("sentiment") == "bearish")
+
+    if fg_val <= 25:   bull_signals.append(f"Fear&Greed {fg_val} - extreme fear, potential reversal")
+    elif fg_val >= 75: bear_signals.append(f"Fear&Greed {fg_val} - extreme greed, fade risk")
+    if bull_n > bear_n: bull_signals.append(f"News {bull_n} bullish vs {bear_n} bearish")
+    elif bear_n > bull_n: bear_signals.append(f"News {bear_n} bearish vs {bull_n} bullish")
+
     if ema_stack:
-        bull_signals.append("EMA20 > EMA50 - bullish structure")
+        bull_signals.append("EMA20 > EMA50 > EMA200 - full bullish stack")
     if ema50 and close > ema50:
         bull_signals.append("Price above EMA50 - medium trend bullish")
     if ema200 and close > ema200:
@@ -258,36 +296,47 @@ def calculate_signals(
         bull_signals.append(f"24H change +{chg:.1f}% - momentum")
     if macd_hist > 0:
         bull_signals.append("MACD histogram positive")
-    if adx > 20 and chg > 0:
+    if adx_confirmed and chg > 0:
         bull_signals.append(f"ADX {adx:.0f} - trend has strength")
     if social_delta > 5:
         bull_signals.append(f"Social +{social_delta:.0f}% - retail accumulating")
-    if rel_vol > 2:
+    if rel_vol >= 2:
         bull_signals.append(f"Volume {rel_vol:.1f}x above average")
     if rsi <= 30:
         bull_signals.append(f"RSI {rsi:.0f} - oversold, bounce potential")
 
-    # Bear signals
     if rsi >= 70:
         bear_signals.append(f"RSI {rsi:.0f} - overbought, fade risk")
     if ema200 and close < ema200:
         bear_signals.append("Price below EMA200 - macro trend bearish")
     if ema50 and close < ema50:
         bear_signals.append("Price below EMA50 - medium trend bearish")
-    if adx > 20 and chg < 0:
+    if adx_confirmed and chg < 0:
         bear_signals.append(f"ADX {adx:.0f} - bearish trend has strength")
     if chg < -3:
         bear_signals.append(f"24H change {chg:.1f}% - selling pressure")
     if macd_hist < 0:
         bear_signals.append("MACD histogram negative")
-    if rel_vol > 2 and chg < 0:
+    if rel_vol >= 2 and chg < 0:
         bear_signals.append(f"Volume {rel_vol:.1f}x - heavy distribution")
-    # ── Populate result ─────────────────────────────────────────────────────
+
+    # ── Populate result ─────────────────────────────────────────────────
+    result.v_confirmed   = v_confirmed
+    result.t_confirmed   = t_confirmed
+    result.adx_confirmed = adx_confirmed
+    result.p_confirmed   = p_confirmed
+    result.r_confirmed   = r_confirmed
+
+    result.v_detail = v_detail
+    result.p_detail = p_detail
+    result.r_detail = r_detail
+    result.t_detail = f"{t_detail} · {adx_label}"
+
     result.v_score   = v_score
     result.p_score   = p_score
     result.r_score   = r_score
     result.t_score   = t_score
-    result.s_score   = s_score
+    result.s_score   = 0
     result.total     = total
     result.signal    = signal
     result.direction = direction
@@ -433,7 +482,6 @@ def get_key_levels(result: SignalResult) -> list[dict]:
     if result.target:
         add("AI Target",  result.target, "target")
 
-    # Sort: resistances above close, supports below
     above = sorted([l for l in levels if l["price"] > close],
                    key=lambda x: x["price"])
     now   = [{"label": "NOW", "price": close, "kind": "current", "dist_pct": 0}]

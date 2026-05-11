@@ -942,7 +942,7 @@ export function BasketScanner({
     setDone(false);
     setCalcResult(null);
     setResults(b.symbols.map(sym => ({
-      symbol: sym, score: 0, max: 16, label: "—",
+      symbol: sym, score: 0, max: 13, label: "—", signal: "—",
       change: 0, price: 0, done: false, error: false,
     })));
 
@@ -967,13 +967,14 @@ export function BasketScanner({
         if (!res.ok) throw new Error();
         const data = await res.json();
         const score  = data?.signal?.total    ?? 0;
-        const max    = data?.signal?.max      ?? 16;
+        const max    = data?.signal?.max      ?? 13;
         const label  = data?.signal?.label    ?? "—";
+        const signal = data?.signal?.label    ?? "—";
         const change = data?.quote?.change_24h ?? 0;
         const price  = data?.quote?.price      ?? 0;
         setResults(prev => prev.map(r =>
           r.symbol === sym
-            ? { ...r, score, max, label, change, price, done: true, error: false }
+            ? { ...r, score, max, label, signal, change, price, done: true, error: false }
             : r
         ));
       } catch {
@@ -1034,7 +1035,7 @@ export function BasketScanner({
 
   const top        = sorted.find(r => r.done && !r.error);
   const doneAll    = sorted.filter(r => r.done && !r.error);
-  const strongBuys = doneAll.filter(r => r.score >= 9).length;
+  const strongBuys = doneAll.filter(r => r.signal === "STRONG BUY" || r.signal === "BUY").length;
 
   // Donut data — use score as weight, min 1 for visibility
   // Colour by slot index so every wedge is vivid and distinct
@@ -1080,7 +1081,7 @@ export function BasketScanner({
             )}
             {done && (
               <span className={`text-[8px] font-mono font-bold ${strongBuys > 0 ? "text-teal" : "text-text-muted/50"}`}>
-                {strongBuys > 0 ? `${strongBuys} strong buy${strongBuys > 1 ? "s" : ""}` : "no strong buys"}
+                {strongBuys > 0 ? `${strongBuys} buy signal${strongBuys > 1 ? "s" : ""}` : "no signals"}
               </span>
             )}
           </div>
@@ -1090,10 +1091,10 @@ export function BasketScanner({
         {results.length > 0 && (
           <div className="space-y-1 mb-3">
             {sorted.map((r, i) => {
-              const isTop    = r === top && done && r.score >= 9;
+              const isTop    = r === top && done && (r.signal === "STRONG BUY" || r.signal === "BUY");
               const pct      = Math.round((r.score / r.max) * 100);
               const bColor   = scoreColor(r.score, r.max);
-              const sColor   = r.score >= 9 ? "text-teal" : r.score >= 6 ? "text-amber" : "text-text-muted/40";
+              const sColor   = r.signal === "STRONG BUY" ? "text-teal" : r.signal === "BUY" ? "text-teal" : r.score >= 4 ? "text-amber" : "text-text-muted/40";
               return (
                 <button
                   key={r.symbol}
