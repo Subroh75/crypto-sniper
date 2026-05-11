@@ -5,11 +5,13 @@ import {
   getMarketOverview, getTrending, getGainers,
   getNews, getMacro, getWatchlistScores,
   getHitRate, getScannerPerformance, createAlert, getAlerts, deleteAlert,
+  dexAnalyse as dexAnalyseApi,
 } from "@/lib/api";
 import type {
   AnalyseResponse, KronosResponse, DeepResearchResponse,
   MarketOverview, TrendingCoin, NewsArticle,
   MacroData, WatchlistScore, HitRateData, ScannerPerformance, AlertItem,
+  DexAnalyseResponse,
 } from "@/types/api";
 
 // ââ Generic async hook ââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
@@ -651,4 +653,58 @@ export function useAuth() {
   }, []);
 
   return { user, loading, error, linkSent, login, verify, logout };
+}
+
+// ── Smart input detection ─────────────────────────────────────────────────────
+/**
+ * Detect whether the user typed a symbol (CEX) or a contract address (DEX).
+ * Returns: "cex" | "dex" | "ambiguous"
+ *
+ * EVM address:  0x + 40 hex chars
+ * Solana pubkey: 32–44 base58 chars (no 0x prefix)
+ */
+export function detectInputType(raw: string): "cex" | "dex" | "ambiguous" {
+  const q = raw.trim();
+  if (!q) return "cex";
+
+  // EVM contract
+  if (/^0x[0-9a-fA-F]{40}$/.test(q)) return "dex";
+
+  // DexScreener URL pasted
+  if (q.includes("dexscreener.com")) return "dex";
+
+  // Solana pubkey — base58, 32–44 chars, no lowercase l, O, 0, I
+  if (/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(q) && !q.includes("/")) return "dex";
+
+  // Short uppercase symbol
+  if (/^[A-Z0-9]{1,12}$/.test(q)) return "cex";
+
+  return "ambiguous";
+}
+
+/** DEX token analysis by contract address */
+export function useDexAnalyse() {
+  const [data, setData]       = useState<DexAnalyseResponse | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError]     = useState<string | null>(null);
+
+  const run = useCallback(async (query: string, chain = "auto") => {
+    setLoading(true);
+    setError(null);
+    setData(null);
+    try {
+      const result = await dexAnalyseApi(query, chain);
+      if (result.error) throw new Error(result.error);
+      setData(result);
+      return result;
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "DEX analysis failed";
+      setError(msg);
+      return null;
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  return { data, loading, error, run };
 }

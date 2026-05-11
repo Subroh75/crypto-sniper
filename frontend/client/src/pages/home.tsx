@@ -32,10 +32,11 @@ import {
   useAnalyse, useKronos, useWatchlist, usePdfExport,
   useHitRate, useAlerts,
   useEditableWatchlist, useAuth, tierAtLeast,
+  useDexAnalyse, detectInputType,
 } from "@/hooks/useApi";
 import { fmtPrice, fmtPct } from "@/lib/api";
 import { MetricTooltip } from "@/components/Tooltip";
-import type { AnalyseResponse, KronosResponse, DerivativesData } from "@/types/api";
+import type { AnalyseResponse, KronosResponse, DerivativesData, DexAnalyseResponse } from "@/types/api";
 import { ComposedChart, Bar, Line, ResponsiveContainer, YAxis, XAxis, CartesianGrid, ReferenceLine } from "recharts";
 
 //  Constants 
@@ -258,8 +259,11 @@ export default function Home() {
     setPremiumOpen(true);
   }
 
-  const analyse  = useAnalyse();
-  const kronosHk = useKronos();
+  const analyse    = useAnalyse();
+  const dexAnalyse  = useDexAnalyse();
+  const kronosHk   = useKronos();
+  // "cex" | "dex" — tracks which engine returned the current result
+  const [activeSource, setActiveSource] = useState<"cex"|"dex">("cex");
 
   // Editable watchlist from backend DB
   const editableWL = useEditableWatchlist(userId);
@@ -271,14 +275,27 @@ export default function Home() {
 
   const inputRef = useRef<HTMLInputElement>(null);
 
-  //  Run full analysis 
+  //  Smart router — detects symbol vs contract address and routes accordingly 
   const runAnalysis = useCallback(async (sym?: string, iv?: string) => {
-    const s = (sym ?? (input.trim().toUpperCase() || symbol));
+    const raw = sym ?? input.trim();
+    if (!raw) return;
+
+    const inputType = detectInputType(raw);
+
+    if (inputType === "dex") {
+      // ── DEX path: contract address or DexScreener URL ──────────────────
+      setInput(raw);
+      setActiveSource("dex");
+      await dexAnalyse.run(raw, "auto");
+      return;
+    }
+
+    // ── CEX path: symbol (default) ─────────────────────────────────────
+    const s = raw.toUpperCase();
     const i = iv ?? interval;
-    if (!s) return;
     setSymbol(s);
     setInput(s);
-
+    setActiveSource("cex");
 
     const result = await analyse.run(s, i);
     if (!result) return;
@@ -304,34 +321,31 @@ export default function Home() {
       total:        n(result.signal.total),
       direction:    result.signal.direction,
       change_24h:   n(result.quote.change_24h),
-      // VPRT gate confirmations (new) + legacy scores for compat
       v_score:      n(result.components?.V?.score ?? 0),
       p_score:      n(result.components?.P?.score ?? 0),
       r_score:      n(result.components?.R?.score ?? 0),
       t_score:      n(result.components?.T?.score ?? 0),
       s_score:      0,
-      // Trade setup — keep null for optional fields (backend guards these)
       entry:        result.trade_setup.entry ?? 0,
       stop:         result.trade_setup.stop ?? 0,
       target:       result.trade_setup.target ?? 0,
       rr_ratio:     result.trade_setup.rr_ratio ?? 0,
       stop_dist_pct: result.trade_setup.stop_dist_pct ?? 0,
-      // Conviction signals
       bull_pct:     n(result.conviction?.bull_pct),
       bear_pct:     n(result.conviction?.bear_pct),
       bull_signals: result.conviction?.bull_signals ?? [],
       bear_signals: result.conviction?.bear_signals ?? [],
-      // Sentiment
       fg_value:     result.fear_greed?.value ?? 50,
       fg_label:     result.fear_greed?.label ?? "Neutral",
     } as Record<string, unknown>;
 
     kronosHk.run(s, i, ctx);
-  }, [input, symbol, interval, analyse, kronosHk]);
+  }, [input, symbol, interval, analyse, dexAnalyse, kronosHk]);
 
-  const sig    = analyse.data;
-  const kron   = kronosHk.data;
-  const loading = analyse.loading;
+  const sig     = analyse.data;
+  const dexSig  = dexAnalyse.data;
+  const kron    = kronosHk.data;
+  const loading = activeSource === "dex" ? dexAnalyse.loading : analyse.loading;
   const isMobile = useMobile();
   // Mobile tab: which panel is visible
   const [mobileTab, setMobileTab] = useState<"analyse"|"signals"|"sidebar"|"scanner">("analyse");
@@ -415,11 +429,16 @@ export default function Home() {
           <input
             ref={inputRef}
             value={input}
-            onChange={e => setInput(e.target.value.toUpperCase())}
+            onChange={e => {
+              const v = e.target.value;
+              // Don't force uppercase for contract addresses (0x...) or URLs
+              const isContract = v.startsWith("0x") || v.startsWith("http") || v.length > 12;
+              setInput(isContract ? v : v.toUpperCase());
+            }}
             onKeyDown={e => e.key === "Enter" && requireFull("Deep analysis", () => { runAnalysis(); })}
             onClick={() => { if (!isFullAccess) requireFull("Deep analysis", () => {}); }}
             readOnly={!isFullAccess}
-            placeholder={isFullAccess ? "BTC  ETH  SOL  KAVA..." : "Full App only — upgrade to search any coin"}
+            placeholder={isFullAccess ? "BTC, ETH, SOL  or paste a contract address..." : "Full App only — upgrade to search any coin"}
             className={`flex-1 h-[48px] rounded-lg border border-border/60 bg-surface px-4 text-[15px] font-sans font-medium text-text placeholder:text-text-muted/50 outline-none focus:border-purple transition-all w-full ${
               !isFullAccess ? "cursor-pointer opacity-70" : ""
             }`}
@@ -433,6 +452,19 @@ export default function Home() {
             {loading && isFullAccess ? "Analysing..." : isFullAccess ? "Analyse" : "🔒 Upgrade to Analyse"}
           </button>
         </div>
+
+        {/* Smart input hint */}
+        {input && (() => {
+          const t = detectInputType(input);
+          if (t === "dex") return (
+            <div className="flex justify-center mb-2">
+              <span className="text-[9px] font-mono font-bold px-2 py-0.5 rounded border border-blue/40 bg-blue/10 text-blue">
+                Contract detected — will run DEX analysis
+              </span>
+            </div>
+          );
+          return null;
+        })()}
 
         {/* Quick coins */}
         <div className="flex justify-center gap-1.5 flex-wrap">
@@ -493,11 +525,233 @@ export default function Home() {
                 <div key={i} className="w-2 h-2 rounded-full bg-purple animate-bounce" style={{ animationDelay: `${i*0.15}s` }} />
               ))}
             </div>
-            Analysing {symbol}...
+            {activeSource === "dex" ? "Scanning DEX..." : `Analysing ${symbol}...`}
           </div>
         )}
 
-        {sig && !loading && (
+        {/* ── DEX RESULT ─────────────────────────────────────────────────────── */}
+        {dexSig && !loading && activeSource === "dex" && (() => {
+          const ds = dexSig;
+          const RISK_COLOR: Record<string, string> = {
+            LOW: "#22c55e", MEDIUM: "#f59e0b", HIGH: "#ef4444", CRITICAL: "#ef4444", UNKNOWN: "#94a3b8"
+          };
+          const riskColor = RISK_COLOR[ds.risk?.level ?? "UNKNOWN"] ?? "#94a3b8";
+          const verdictColor = ds.signal.label === "STRONG BUY" ? "#22c55e" : ds.signal.label === "BUY" ? "#22c55e" : "#94a3b8";
+          const fmtUsd = (n: number) => n >= 1e9 ? `$${(n/1e9).toFixed(2)}B` : n >= 1e6 ? `$${(n/1e6).toFixed(2)}M` : n >= 1e3 ? `$${(n/1e3).toFixed(1)}K` : `$${n.toFixed(2)}`;
+          const fmtAge = (h: number) => h >= 720 ? `${Math.floor(h/720)}mo` : h >= 24 ? `${Math.floor(h/24)}d` : `${Math.round(h)}h`;
+          return (
+            <div className={isMobile ? "flex flex-col gap-3" : "grid gap-3"} style={isMobile ? undefined : { gridTemplateColumns: "1fr 320px" }}>
+              <div className={isMobile && mobileTab !== "analyse" ? "hidden" : ""}>
+
+                {/* DEX 01: Signal Output */}
+                <Card>
+                  <CardHeader num="01" icon="!" title="SIGNAL OUTPUT"
+                    right={<span className="text-[9px] font-mono font-bold px-2 py-0.5 rounded border border-blue/40 bg-blue/10 text-blue">DEX • {ds.chain?.toUpperCase()}</span>}
+                  />
+                  <div className="p-4">
+                    <div className="bg-surface-2 rounded-xl border border-border/50 p-5 text-center">
+                      <div className="text-[10px] font-mono text-text-muted/70 mb-2 tracking-wide">
+                        {ds.symbol}  ·  {ds.dex?.toUpperCase()}  ·  {new Date(ds.timestamp * 1000).toUTCString().slice(0,-4)} UTC
+                      </div>
+                      <div className="text-[34px] font-black mb-1" style={{ color: verdictColor }}>
+                        {ds.signal.label}
+                      </div>
+                      <div className="text-[12px] font-mono text-text-muted mb-3">
+                        {ds.signal.label === "STRONG BUY" ? "all gates confirmed" : ds.signal.label === "BUY" ? "VOL + TREND + ADX confirmed" : "conditions not met"}
+                      </div>
+                      {/* Gate summary chips */}
+                      <div className="flex justify-center gap-2 mb-4 flex-wrap">
+                        {(["v","t","adx"] as const).map(g => (
+                          <span key={g} className={`text-[9px] font-mono font-bold px-2 py-0.5 rounded ${
+                            ds.signal.gates[g] ? "bg-teal/10 text-teal" : "bg-red/10 text-red"
+                          }`}>
+                            {g.toUpperCase()} {ds.signal.gates[g] ? "✓" : "✗"}
+                          </span>
+                        ))}
+                      </div>
+                      {/* Key metrics */}
+                      <div className="flex justify-center gap-4 text-[11px] font-mono text-text-muted flex-wrap">
+                        <span>PRICE <span className="text-text font-bold">{ds.market.price < 0.01 ? ds.market.price.toExponential(3) : fmtPrice(ds.market.price)}</span></span>
+                        <span>24H <span className={ds.market.change_24h >= 0 ? "text-teal font-bold" : "text-red font-bold"}>{ds.market.change_24h >= 0 ? "+" : ""}{ds.market.change_24h.toFixed(2)}%</span></span>
+                        <span>LIQ <span className="text-amber font-bold">{fmtUsd(ds.market.liquidity)}</span></span>
+                        <span>VOL <span className="text-text font-bold">{fmtUsd(ds.market.volume_24h)}</span></span>
+                        <span>AGE <span className="text-text-muted font-bold">{fmtAge(ds.market.pair_age_h)}</span></span>
+                      </div>
+                    </div>
+                    {/* Low liquidity warning */}
+                    {ds.market.liquidity < 100_000 && (
+                      <div className="flex items-start gap-2 bg-amber-950/40 border border-amber-800/50 rounded-lg px-3 py-2 mt-3 text-left">
+                        <span className="text-amber-400 text-[13px] flex-shrink-0 mt-px">⚠</span>
+                        <div>
+                          <div className="text-[10px] font-bold text-amber-400 tracking-wide mb-0.5">LOW LIQUIDITY</div>
+                          <div className="text-[9px] font-mono text-amber-200/70">Under $100K liquidity — high slippage risk. Small orders can move the price significantly.</div>
+                        </div>
+                      </div>
+                    )}
+                    {/* Plain-English AI summary */}
+                    <div className="mt-3 bg-purple/5 border border-purple/20 rounded-lg px-4 py-3">
+                      <div className="text-[8px] font-mono font-bold text-purple/70 tracking-widest uppercase mb-1">Analysis</div>
+                      <div className="text-[12px] font-sans text-text/80 leading-relaxed">{ds.summary}</div>
+                    </div>
+                  </div>
+                </Card>
+
+                {/* DEX 02: VPRT Components */}
+                <Card>
+                  <CardHeader num="02" title="SIGNAL COMPONENTS" />
+                  <div className="p-4">
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                      {(["V","P","R","T"] as const).map(key => {
+                        const comp = ds.components[key];
+                        const isGate = key === "V" || key === "T";
+                        const confirmed = comp.confirmed;
+                        const color = confirmed ? "#22c55e" : isGate ? "#ef4444" : "#f59e0b";
+                        const borderColor = confirmed ? "rgba(34,197,94,0.25)" : isGate ? "rgba(239,68,68,0.2)" : "rgba(245,158,11,0.15)";
+                        return (
+                          <div key={key} className="bg-surface-2 rounded-lg border p-3" style={{ borderColor }}>
+                            <div className="flex items-start justify-between mb-1">
+                              <div className="text-[22px] font-black" style={{ color }}>{key}</div>
+                              <div className="text-[8px] font-mono font-bold px-1.5 py-0.5 rounded mt-1" style={{ color, background: confirmed ? "rgba(34,197,94,0.1)" : isGate ? "rgba(239,68,68,0.1)" : "rgba(245,158,11,0.1)" }}>
+                                {confirmed ? (isGate ? "CONFIRMED" : "YES") : (isGate ? "NOT MET" : "NO")}
+                              </div>
+                            </div>
+                            <div className="text-[9px] font-mono text-text-muted/70 uppercase tracking-wide mb-2">{comp.label}</div>
+                            <div className="text-[9px] font-mono leading-relaxed" style={{ color: confirmed ? "#22c55e" : "#94a3b8" }}>{comp.detail}</div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </Card>
+
+                {/* DEX 03: Price Timeframes */}
+                <Card>
+                  <CardHeader num="03" icon="-" title="PRICE ACROSS TIMEFRAMES" />
+                  <div className="p-4">
+                    <div className="grid grid-cols-4 gap-2">
+                      {(["5m","1h","6h","24h"] as const).map(tf => {
+                        const v = tf === "5m" ? ds.market.change_5m : tf === "1h" ? ds.market.change_1h : tf === "6h" ? ds.market.change_6h : ds.market.change_24h;
+                        return (
+                          <div key={tf} className="bg-surface-2 rounded-lg border border-border/40 p-3 text-center">
+                            <div className="text-[9px] font-mono text-text-muted/70 uppercase mb-1">{tf}</div>
+                            <div className={`text-[16px] font-mono font-black ${v >= 0 ? "text-teal" : "text-red"}`}>{v >= 0 ? "+" : ""}{v.toFixed(2)}%</div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    {/* Buy/Sell pressure */}
+                    {(ds.market.buys_1h + ds.market.sells_1h) > 0 && (() => {
+                      const total = ds.market.buys_1h + ds.market.sells_1h;
+                      const buyPct = Math.round(ds.market.buys_1h / total * 100);
+                      return (
+                        <div className="mt-3">
+                          <div className="flex justify-between text-[9px] font-mono mb-1">
+                            <span className="text-teal font-bold">BUY {buyPct}%</span>
+                            <span className="text-text-muted/60">1H TXN FLOW</span>
+                            <span className="text-red font-bold">SELL {100-buyPct}%</span>
+                          </div>
+                          <div className="h-2 rounded-full bg-red/30 overflow-hidden">
+                            <div className="h-full rounded-full bg-teal" style={{ width: `${buyPct}%` }} />
+                          </div>
+                        </div>
+                      );
+                    })()}
+                  </div>
+                </Card>
+
+                {/* DEX 04: Risk Scan */}
+                <Card>
+                  <CardHeader num="04" icon="!" title="RISK SCAN"
+                    right={<span className="text-[9px] font-mono font-bold px-2 py-0.5 rounded" style={{ color: riskColor, background: `${riskColor}15` }}>{ds.risk?.level ?? "UNKNOWN"}</span>}
+                  />
+                  <div className="p-4">
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3">
+                      {[
+                        { label: "Honeypot",  val: ds.risk?.honeypot,  good: false },
+                        { label: "Verified",  val: ds.risk?.verified,  good: true  },
+                        { label: "Renounced", val: ds.risk?.renounced, good: true  },
+                        { label: "Mintable",  val: ds.risk?.mintable,  good: false },
+                      ].map(({ label, val, good }) => (
+                        <div key={label} className="bg-surface-2 rounded-lg border border-border/40 p-2.5 text-center">
+                          <div className="text-[9px] font-mono text-text-muted/70 mb-1">{label}</div>
+                          <div className={`text-[11px] font-mono font-bold ${
+                            val === null ? "text-text-muted/50" :
+                            (val === good) ? "text-teal" : "text-red"
+                          }`}>
+                            {val === null ? "—" : val ? "YES" : "NO"}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    {ds.risk?.buy_tax !== null && (
+                      <div className="flex gap-3 text-[10px] font-mono mb-2">
+                        <span>BUY TAX <span className={`font-bold ${(ds.risk?.buy_tax ?? 0) > 5 ? "text-red" : "text-teal"}`}>{ds.risk?.buy_tax?.toFixed(1)}%</span></span>
+                        <span>SELL TAX <span className={`font-bold ${(ds.risk?.sell_tax ?? 0) > 5 ? "text-red" : "text-teal"}`}>{ds.risk?.sell_tax?.toFixed(1)}%</span></span>
+                        {ds.risk?.top10_pct !== null && <span>TOP 10 HOLD <span className={`font-bold ${(ds.risk?.top10_pct ?? 0) > 60 ? "text-red" : "text-amber"}`}>{ds.risk?.top10_pct?.toFixed(1)}%</span></span>}
+                      </div>
+                    )}
+                    {ds.risk?.flags && ds.risk.flags.length > 0 && (
+                      <div className="flex flex-wrap gap-1">
+                        {ds.risk.flags.map(f => (
+                          <span key={f} className="text-[8px] font-mono font-bold px-1.5 py-0.5 rounded bg-red/10 text-red border border-red/20">{f}</span>
+                        ))}
+                      </div>
+                    )}
+                    {(ds.risk?.flags?.length === 0) && (
+                      <div className="text-[10px] font-mono text-teal">No risk flags detected</div>
+                    )}
+                  </div>
+                </Card>
+
+                {/* DEX 05: Trade Setup */}
+                {ds.trade_setup?.entry > 0 && (
+                  <Card>
+                    <CardHeader num="05" icon="-" title="TRADE SETUP" />
+                    <div className="p-4">
+                      <div className="grid grid-cols-3 gap-2">
+                        {[
+                          { label: "Entry",   val: ds.trade_setup.entry,  color: "text-text" },
+                          { label: "Stop",    val: ds.trade_setup.stop,   color: "text-red"  },
+                          { label: "Target",  val: ds.trade_setup.target, color: "text-teal" },
+                        ].map(({ label, val, color }) => (
+                          <div key={label} className="bg-surface-2 rounded-lg border border-border/40 p-3 text-center">
+                            <div className="text-[9px] font-mono text-text-muted/70 mb-1">{label}</div>
+                            <div className={`text-[13px] font-mono font-bold ${color}`}>
+                              {val < 0.01 ? val.toExponential(3) : fmtPrice(val)}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="mt-2 text-center text-[10px] font-mono text-text-muted/70">
+                        R:R {ds.trade_setup.rr?.toFixed(1)}:1  ·  5% stop  ·  10% target
+                      </div>
+                      {ds.dex_url && (
+                        <a href={ds.dex_url} target="_blank" rel="noopener noreferrer"
+                          className="mt-3 flex items-center justify-center gap-1.5 text-[10px] font-mono font-bold text-purple hover:text-purple/80 transition-colors">
+                          View on DexScreener ↗
+                        </a>
+                      )}
+                    </div>
+                  </Card>
+                )}
+
+              </div>
+              {/* DEX sidebar — minimal for now */}
+              <div className={isMobile && mobileTab !== "sidebar" ? "hidden" : ""}>
+                <WatchlistCard
+                  scores={wlScores}
+                  loading={wlLoading}
+                  editableSymbols={editableWL.symbols}
+                  onAdd={editableWL.add}
+                  onRemove={editableWL.remove}
+                  onSelect={(sym) => { runAnalysis(sym); if(isMobile) setMobileTab("analyse"); }}
+                />
+              </div>
+            </div>
+          );
+        })()}
+
+        {sig && !loading && activeSource === "cex" && (
           <div
             className={isMobile ? "flex flex-col gap-3" : "grid gap-3"}
             style={isMobile ? undefined : { gridTemplateColumns: "1fr 320px" }}
@@ -570,9 +824,34 @@ export default function Home() {
                       <span>VOL <span className={(sig.timing?.rel_volume ?? 0) >= 2 ? "text-teal font-bold" : "text-amber font-bold"}>{(sig.timing?.rel_volume ?? 0).toFixed(1)}x</span></span>
                       <span>ADX <span className={(sig.timing?.adx ?? 0) >= 25 ? "text-teal font-bold" : "text-amber font-bold"}>{(sig.timing?.adx ?? 0).toFixed(0)}</span></span>
                       <span>RSI <span className={(sig.timing?.rsi ?? 50) >= 70 ? "text-red font-bold" : (sig.timing?.rsi ?? 50) <= 30 ? "text-teal font-bold" : "text-amber font-bold"}>{(sig.timing?.rsi ?? 50).toFixed(0)}</span></span>
-
                     </div>
                   </div>
+                  {/* Plain-English summary — one line any trader can act on */}
+                  {(() => {
+                    const label = sig.signal.label;
+                    const vol   = (sig.timing?.rel_volume ?? 0).toFixed(1);
+                    const adx   = sig.timing?.adx ?? 0;
+                    const chg   = sig.quote.change_24h ?? 0;
+                    const rsi   = sig.timing?.rsi ?? 50;
+                    let summary = "";
+                    if (label === "STRONG BUY") {
+                      summary = `${symbol} is showing strong conditions — volume is ${vol}x above average, trend is fully aligned, and momentum is confirmed. All gates are green.`;
+                    } else if (label === "BUY") {
+                      summary = `${symbol} has volume up ${vol}x and trend is aligned${adx >= 25 ? " with a trending market (ADX " + adx.toFixed(0) + ")" : ""} — conditions are building but not fully confirmed yet.`;
+                    } else {
+                      const issues = [];
+                      if (!sig.signal.gates?.v) issues.push("volume is below threshold");
+                      if (!sig.signal.gates?.t) issues.push("trend is not aligned across all MAs");
+                      if (!sig.signal.gates?.adx) issues.push(`ADX is ${adx.toFixed(0)} — market is ranging, not trending`);
+                      summary = `No clear signal for ${symbol} right now — ${issues.join(" and ")}. Worth watching if conditions improve.`;
+                    }
+                    return (
+                      <div className="mt-3 mx-4 mb-0 bg-purple/5 border border-purple/20 rounded-lg px-4 py-3">
+                        <div className="text-[8px] font-mono font-bold text-purple/70 tracking-widest uppercase mb-1">Analysis</div>
+                        <div className="text-[12px] font-sans text-text/80 leading-relaxed">{summary}</div>
+                      </div>
+                    );
+                  })()}
                 </div>
               </Card>
 

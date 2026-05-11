@@ -1712,3 +1712,239 @@ async def pdf_report(payload: dict):
             "Access-Control-Expose-Headers": "Content-Disposition",
         }
     )
+
+
+# ── DEX Analyse ───────────────────────────────────────────────────────────────
+class DexAnalyseRequest(BaseModel):
+    query: str          # contract address (0x...), Solana pubkey, or DexScreener pair URL
+    chain: str = "auto" # "auto"|"eth"|"bsc"|"sol"|"base"|"arb"
+
+@app.post("/dex-analyse")
+async def dex_analyse(req: DexAnalyseRequest):
+    """
+    Single-token DEX analysis via DexScreener + GoPlus.
+    Accepts contract address, Solana pubkey, or DexScreener URL.
+    Returns VPRT-style gate signal + risk scan + trade setup.
+    """
+    import aiohttp, re, sys
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "telegram_bot"))
+    from dex_scanner.base_agent import ChainAgent, _score_market, _build_trade_setup, _unknown_risk
+
+    t_start = time.time()
+    query   = req.query.strip()
+
+    # ── Extract address from DexScreener URL if pasted ───────────────────
+    url_match = re.search(r"dexscreener\.com/[^/]+/([A-Za-z0-9]{32,})", query)
+    if url_match:
+        query = url_match.group(1)
+
+    # ── Detect input type ─────────────────────────────────────────────────
+    is_evm    = bool(re.match(r"^0x[0-9a-fA-F]{40}$", query))
+    is_sol    = bool(re.match(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$", query)) and not is_evm
+    is_symbol = not is_evm and not is_sol
+
+    DEXSCREENER = "https://api.dexscreener.com"
+    GOPLUS      = "https://api.gopluslabs.io/api/v1"
+
+    # Chain → GoPlus chain ID map
+    CHAIN_GOPLUS = {"eth": "1", "bsc": "56", "base": "8453", "arb": "42161", "sol": "solana", "auto": "1"}
+
+    async def fetch_pairs(session, address: str, chain: str) -> list:
+        """Search DexScreener for pairs matching address, optionally filtered by chain."""
+        try:
+            async with session.get(
+                f"{DEXSCREENER}/latest/dex/search?q={address}",
+                timeout=aiohttp.ClientTimeout(total=12)
+            ) as r:
+                if r.status != 200:
+                    return []
+                data  = await r.json()
+                pairs = data.get("pairs") or []
+                if chain != "auto":
+                    chain_pairs = [p for p in pairs if p.get("chainId","").lower() == chain.lower()]
+                    return chain_pairs or pairs  # fallback to all if none on requested chain
+                return pairs
+        except Exception as e:
+            logger.warning(f"dex_analyse fetch_pairs: {e}")
+            return []
+
+    async def check_risk(session, address: str, chain: str) -> dict:
+        if not address or is_sol:
+            return _unknown_risk()
+        goplus_chain = CHAIN_GOPLUS.get(chain, "1")
+        try:
+            url = f"{GOPLUS}/token_security/{goplus_chain}?contract_addresses={address}"
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as r:
+                if r.status != 200:
+                    return _unknown_risk()
+                data   = await r.json()
+                result = (data.get("result") or {}).get(address.lower()) or \
+                         (data.get("result") or {}).get(address) or {}
+                if not result:
+                    return _unknown_risk()
+
+                honeypot     = result.get("is_honeypot",    "0") == "1"
+                verified     = result.get("is_open_source", "0") == "1"
+                mintable     = result.get("is_mintable",     "0") == "1"
+                blacklist    = result.get("is_blacklisted",  "0") == "1"
+                hidden_owner = result.get("hidden_owner",    "0") == "1"
+                renounced    = result.get("owner_address", "x") in (
+                    "", "0x0000000000000000000000000000000000000000"
+                )
+                buy_tax  = float(result.get("buy_tax",  0) or 0) * 100
+                sell_tax = float(result.get("sell_tax", 0) or 0) * 100
+                holders  = result.get("holders") or []
+                top10_pct= sum(float(h.get("percent",0))*100 for h in holders[:10])
+
+                flags = []
+                if honeypot:        flags.append("HONEYPOT")
+                if sell_tax > 10:   flags.append(f"HIGH SELL TAX {sell_tax:.0f}%")
+                if buy_tax  > 10:   flags.append(f"HIGH BUY TAX {buy_tax:.0f}%")
+                if mintable:        flags.append("MINTABLE")
+                if hidden_owner:    flags.append("HIDDEN OWNER")
+                if blacklist:       flags.append("BLACKLIST FUNCTION")
+                if top10_pct > 80:  flags.append(f"TOP 10 HOLD {top10_pct:.0f}%")
+                if not verified:    flags.append("UNVERIFIED CONTRACT")
+
+                if honeypot or sell_tax > 20 or hidden_owner:
+                    level = "CRITICAL"
+                elif len(flags) >= 3 or top10_pct > 70 or sell_tax > 10:
+                    level = "HIGH"
+                elif len(flags) >= 1 or top10_pct > 50 or not renounced:
+                    level = "MEDIUM"
+                else:
+                    level = "LOW"
+
+                return {
+                    "level": level, "honeypot": honeypot, "verified": verified,
+                    "renounced": renounced, "mintable": mintable,
+                    "buy_tax": round(buy_tax,1), "sell_tax": round(sell_tax,1),
+                    "top10_pct": round(top10_pct,1), "flags": flags, "source": "GoPlus",
+                }
+        except Exception as e:
+            logger.warning(f"GoPlus risk check failed: {e}")
+            return _unknown_risk()
+
+    def normalise_pair(p: dict) -> dict:
+        base    = p.get("baseToken",  {})
+        liq     = p.get("liquidity")  or {}
+        vol     = p.get("volume")     or {}
+        txns    = p.get("txns")       or {}
+        chg     = p.get("priceChange") or {}
+        txns_1h = txns.get("h1") or {}
+        created_at = p.get("pairCreatedAt", 0) or 0
+        import time as _time
+        age_h = (_time.time() - created_at / 1000) / 3600 if created_at else 0
+        symbol = f"{base.get('symbol','?')}/{(p.get('quoteToken') or {}).get('symbol','?')}"
+        return {
+            "symbol":       symbol,
+            "base_symbol":  base.get("symbol", "?"),
+            "base_address": base.get("address", ""),
+            "pool_address": p.get("pairAddress", ""),
+            "chain_id":     p.get("chainId", ""),
+            "dex_id":       p.get("dexId", ""),
+            "price":        float(p.get("priceUsd", 0) or 0),
+            "change_5m":    float(chg.get("m5",  0) or 0),
+            "change_1h":    float(chg.get("h1",  0) or 0),
+            "change_6h":    float(chg.get("h6",  0) or 0),
+            "change_24h":   float(chg.get("h24", 0) or 0),
+            "volume_24h":   float(vol.get("h24", 0) or 0),
+            "volume_6h":    float(vol.get("h6",  0) or 0),
+            "vol_h1":       float(vol.get("h1",  0) or 0),
+            "liquidity":    float(liq.get("usd",  0) or 0),
+            "pair_age_h":   round(age_h, 1),
+            "buys_1h":      int(txns_1h.get("buys",  0) or 0),
+            "sells_1h":     int(txns_1h.get("sells", 0) or 0),
+            "buys_24h":     int((txns.get("h24") or {}).get("buys",  0) or 0),
+            "sells_24h":    int((txns.get("h24") or {}).get("sells", 0) or 0),
+            "market_cap":   float(p.get("marketCap", 0) or 0),
+            "fdv":          float(p.get("fdv", 0) or 0),
+            "dex_url":      p.get("url", ""),
+        }
+
+    def build_summary(market: dict, signal: dict, risk: dict) -> str:
+        """One plain-English sentence any retail trader can act on."""
+        label    = signal.get("label", "NO SIGNAL")
+        sym      = market.get("base_symbol", market.get("symbol","?").split("/")[0])
+        rel_vol  = signal.get("rel_vol", 1.0)
+        chg_24h  = market.get("change_24h", 0)
+        liq      = market.get("liquidity", 0)
+        risk_lvl = risk.get("level", "UNKNOWN")
+
+        if label == "STRONG BUY":
+            vol_txt = f"volume is surging {rel_vol:.1f}x above average"
+            return (f"{sym} looks strong right now — {vol_txt}, "
+                    f"price is up {chg_24h:+.1f}% in 24h with trend and momentum confirmed. "
+                    f"Risk level: {risk_lvl}.")
+        elif label == "BUY":
+            return (f"{sym} has volume picking up ({rel_vol:.1f}x) and trend is aligned — "
+                    f"conditions are building but not fully confirmed yet. "
+                    f"Risk level: {risk_lvl}.")
+        else:
+            failed = []
+            if not signal.get("v_confirmed"): failed.append("volume is low")
+            if not signal.get("t_confirmed"): failed.append("trend is not aligned")
+            if not signal.get("gates", {}).get("adx", False): failed.append("momentum is weak")
+            reason = " and ".join(failed) if failed else "conditions are not met"
+            return (f"No clear signal for {sym} right now — {reason}. "
+                    f"Worth watching if conditions improve.")
+
+    # ── Run analysis ──────────────────────────────────────────────────────
+    chain = req.chain.lower()
+    async with aiohttp.ClientSession() as session:
+        pairs = await fetch_pairs(session, query, chain)
+        if not pairs:
+            raise HTTPException(status_code=404, detail=f"No pairs found for: {query}")
+
+        # Best pair = highest liquidity
+        best_raw = max(pairs, key=lambda p: float((p.get("liquidity") or {}).get("usd", 0) or 0))
+        market   = normalise_pair(best_raw)
+
+        detected_chain = market.get("chain_id", chain)
+        risk = await check_risk(session, market.get("base_address", ""), detected_chain)
+
+    signal = _score_market(market)
+    setup  = _build_trade_setup(market, signal)
+    summary = build_summary(market, signal, risk)
+
+    return {
+        "query":       query,
+        "symbol":      market["symbol"],
+        "base_symbol": market["base_symbol"],
+        "chain":       detected_chain,
+        "dex":         market["dex_id"],
+        "dex_url":     market["dex_url"],
+        "address":     market["base_address"],
+        "pool":        market["pool_address"],
+        "timestamp":   int(time.time()),
+        "latency_ms":  round((time.time() - t_start) * 1000),
+        # Signal
+        "signal": {
+            "label":  signal["label"],
+            "gates":  signal["gates"],
+        },
+        "components": {
+            "V": {"confirmed": signal["v_confirmed"], "label": "Volume",    "detail": signal["v_detail"]},
+            "P": {"confirmed": signal["p_confirmed"], "label": "Momentum",  "detail": signal["p_detail"]},
+            "R": {"confirmed": signal["r_confirmed"], "label": "Range/Flow","detail": signal["r_detail"]},
+            "T": {"confirmed": signal["t_confirmed"], "label": "Trend",     "detail": signal["t_detail"]},
+        },
+        # Market data
+        "market": {
+            "price":       market["price"],
+            "change_5m":   market["change_5m"],
+            "change_1h":   market["change_1h"],
+            "change_6h":   market["change_6h"],
+            "change_24h":  market["change_24h"],
+            "volume_24h":  market["volume_24h"],
+            "liquidity":   market["liquidity"],
+            "pair_age_h":  market["pair_age_h"],
+            "buys_1h":     market["buys_1h"],
+            "sells_1h":    market["sells_1h"],
+            "market_cap":  market["market_cap"],
+        },
+        "risk":        risk,
+        "trade_setup": setup,
+        "summary":     summary,
+        "source":      "dex",
+    }

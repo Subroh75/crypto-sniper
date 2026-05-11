@@ -275,3 +275,8 @@ export function getScorePerformance(topN = 15): Promise<ScorePerformanceData> {
   return get(`/score-performance?top_n=${topN}`, 1);
 }
 
+
+/** DEX token analysis by contract address or symbol */
+export function dexAnalyse(query: string, chain = "auto"): Promise<import("@/types/api").DexAnalyseResponse> {
+  return post("/dex-analyse", { query, chain });
+}

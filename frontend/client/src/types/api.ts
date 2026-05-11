@@ -552,3 +552,67 @@ export interface WatchlistItemsResponse {
   symbols:  string[];
   timestamp: number;
 }
+
+// ── DEX Analyse ───────────────────────────────────────────────────────────────
+export interface DexRisk {
+  level:     "LOW" | "MEDIUM" | "HIGH" | "CRITICAL" | "UNKNOWN";
+  honeypot:  boolean | null;
+  verified:  boolean | null;
+  renounced: boolean | null;
+  mintable:  boolean | null;
+  buy_tax:   number | null;
+  sell_tax:  number | null;
+  top10_pct: number | null;
+  flags:     string[];
+  source:    string;
+}
+
+export interface DexTradeSetup {
+  entry:  number;
+  stop:   number;
+  target: number;
+  rr:     number;
+}
+
+export interface DexMarket {
+  price:       number;
+  change_5m:   number;
+  change_1h:   number;
+  change_6h:   number;
+  change_24h:  number;
+  volume_24h:  number;
+  liquidity:   number;
+  pair_age_h:  number;
+  buys_1h:     number;
+  sells_1h:    number;
+  market_cap:  number;
+}
+
+export interface DexAnalyseResponse {
+  query:       string;
+  symbol:      string;
+  base_symbol: string;
+  chain:       string;
+  dex:         string;
+  dex_url:     string;
+  address:     string;
+  pool:        string;
+  timestamp:   number;
+  latency_ms:  number;
+  signal: {
+    label: string;   // "STRONG BUY" | "BUY" | "NO SIGNAL"
+    gates: { v: boolean; t: boolean; adx: boolean };
+  };
+  components: {
+    V: { confirmed: boolean; label: string; detail: string };
+    P: { confirmed: boolean; label: string; detail: string };
+    R: { confirmed: boolean; label: string; detail: string };
+    T: { confirmed: boolean; label: string; detail: string };
+  };
+  market:      DexMarket;
+  risk:        DexRisk;
+  trade_setup: DexTradeSetup;
+  summary:     string;  // plain-English one-liner
+  source:      "dex";
+  error?:      string;
+}
