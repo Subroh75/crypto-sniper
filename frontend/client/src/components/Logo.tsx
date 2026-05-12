@@ -5,23 +5,64 @@ export function Logo({ size = 32 }: { size?: number }) {
       height={size}
       viewBox="0 0 32 32"
       fill="none"
-      aria-label="crypto.guru logo"
+      aria-label="Crypto Sniper logo"
       xmlns="http://www.w3.org/2000/svg"
     >
-      {/* Outer ring — gradient */}
       <defs>
-        <linearGradient id="logoGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+        <linearGradient id="hexOuter" x1="0%" y1="0%" x2="100%" y2="100%">
           <stop offset="0%" stopColor="#7c3aed" />
-          <stop offset="50%" stopColor="#818cf8" />
+          <stop offset="100%" stopColor="#6d28d9" />
+        </linearGradient>
+        <linearGradient id="hexInner" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stopColor="#0f0a1a" />
+          <stop offset="100%" stopColor="#1a0f2e" />
+        </linearGradient>
+        <linearGradient id="crosshair" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stopColor="#22d3ee" />
           <stop offset="100%" stopColor="#38bdf8" />
         </linearGradient>
       </defs>
-      <circle cx="16" cy="16" r="14" stroke="url(#logoGrad)" strokeWidth="2" />
-      {/* Inner G letterform */}
-      <path
-        d="M20 11.5C18.7 10.5 17.4 10 16 10C12.7 10 10 12.7 10 16C10 19.3 12.7 22 16 22C18.6 22 20.8 20.3 21.7 17.9H16.5V15.5H24C24 15.7 24 15.9 24 16C24 20.4 20.4 24 16 24C11.6 24 8 20.4 8 16C8 11.6 11.6 8 16 8C18.2 8 20.2 8.9 21.7 10.3L20 11.5Z"
-        fill="url(#logoGrad)"
+
+      {/* Outer hexagon */}
+      <polygon
+        points="16,1.5 27,7.75 27,20.25 16,26.5 5,20.25 5,7.75"
+        fill="url(#hexOuter)"
       />
+
+      {/* Cyan edge highlight */}
+      <polygon
+        points="16,1.5 27,7.75 27,20.25 16,26.5 5,20.25 5,7.75"
+        fill="none"
+        stroke="#22d3ee"
+        strokeWidth="0.5"
+        opacity="0.6"
+      />
+
+      {/* Inner dark hexagon */}
+      <polygon
+        points="16,6 22.5,9.75 22.5,20.25 16,24 9.5,20.25 9.5,9.75"
+        fill="url(#hexInner)"
+      />
+
+      {/* Crosshair — vertical */}
+      <line
+        x1="16" y1="10.5"
+        x2="16" y2="18.5"
+        stroke="url(#crosshair)"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+      />
+      {/* Crosshair — horizontal */}
+      <line
+        x1="11.5" y1="14.5"
+        x2="20.5" y2="14.5"
+        stroke="url(#crosshair)"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+      />
+
+      {/* Centre dot */}
+      <circle cx="16" cy="14.5" r="1.8" fill="#22d3ee" />
     </svg>
   );
 }
