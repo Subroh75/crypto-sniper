@@ -796,6 +796,17 @@ def _seconds_to_next_hour() -> int:
     return max(30, secs_until_next - 2)
 
 
+def _seconds_to_next_daily_dex() -> int:
+    """Seconds until next 22:00 UTC (8 AM AEST) — DEX daily scan trigger."""
+    from datetime import datetime, timezone, timedelta
+    now = datetime.now(timezone.utc)
+    target = now.replace(hour=22, minute=0, second=0, microsecond=0)
+    if now >= target:
+        target += timedelta(days=1)
+    secs = int((target - now).total_seconds())
+    return max(30, secs)
+
+
 # ─────────────────────────────────────────────
 #  Post-init: DB + JobQueue
 # ─────────────────────────────────────────────
@@ -818,15 +829,15 @@ async def post_init(application: Application):
     )
     logger.info(f"Hourly CEX scanner scheduled — first run in {first_in}s")
 
-    dex_first_in = first_in + 90
+    dex_first_in = _seconds_to_next_daily_dex()
     job_queue.run_repeating(
         dex_scan_job,
-        interval=3600,
+        interval=86400,          # once per day
         first=dex_first_in,
         name="dex_scanner",
         data={"chat_id": ADMIN_CHAT_ID},
     )
-    logger.info(f"DEX scanner scheduled — first run in {dex_first_in}s")
+    logger.info(f"DEX daily scanner scheduled — first run in {dex_first_in}s (next 22:00 UTC)")
 
     monitor_first_in = first_in + 180
     job_queue.run_repeating(

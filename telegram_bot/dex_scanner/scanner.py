@@ -4,8 +4,8 @@ dex_scanner/scanner.py
 Orchestrator — spawns all chain agents in parallel, writes to blackboard,
 sends the Telegram sweep message.
 
-  22:00 UTC (8 AM AEST)  →  daily sweep   — tighter filters, top 5 per chain
-  Every other hour        →  hourly sweep  — looser filters, fresher momentum
+  22:00 UTC (8 AM AEST)  →  daily sweep only — tighter filters, top 5 per chain
+  Hourly DEX removed     →  too noisy, pump & dump false positives on short TFs
 
 Also exposes:
   gem_lookup(address, bot, chat_id)  — single-token /gem command handler
@@ -70,10 +70,10 @@ def get_last_sweep() -> tuple[Blackboard | None, str]:
 
 async def dex_scan_job(context) -> None:
     """
-    JobQueue callback — fires every hour.
+    JobQueue callback — fires once per day at 22:00 UTC (8 AM AEST).
 
-    At 22:00 UTC (8 AM AEST): daily sweep — tighter filters, top gems.
-    All other hours:           hourly sweep — standard filters, intraday momentum.
+    Daily-only: tighter filters, cleaner signals, no intraday noise.
+    Hourly DEX scans removed — too many pump & dump false positives on short TFs.
     """
     global _last_sweep_board, _last_sweep_time
 
@@ -82,11 +82,11 @@ async def dex_scan_job(context) -> None:
     now_utc   = datetime.now(timezone.utc)
     scan_time = now_utc.strftime("%d %b %Y %H:%M UTC")
 
-    is_daily = (now_utc.hour == DAILY_HOUR_UTC)
-    mode     = "DAILY" if is_daily else "HOURLY"
-    top_n    = DAILY_TOP_N if is_daily else HOURLY_TOP_N
+    is_daily = True   # always daily mode now
+    mode     = "DAILY"
+    top_n    = DAILY_TOP_N
 
-    logger.info(f"[DEX Scanner] Starting {mode} sweep — {scan_time}")
+    logger.info(f"[DEX Scanner] Starting DAILY sweep — {scan_time}")
 
     board = Blackboard()
     for agent in AGENTS:

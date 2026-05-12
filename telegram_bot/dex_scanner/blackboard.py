@@ -224,8 +224,6 @@ def _format_hit(hit: dict, rank: int) -> str:
 
     v_detail   = hit.get("v_detail", f"Vol: {rv:.1f}x")
     t_detail   = hit.get("t_detail", f"Trend: ADX {adx:.0f}")
-    z_quality  = hit.get("z_quality", "")
-    z_detail   = hit.get("z_detail", "")
 
     block  = f"\n#{rank}  {symbol}  {chain_emoji} {chain_name}\n"
     block += f"Signal: {signal}\n"
@@ -233,9 +231,6 @@ def _format_hit(hit: dict, rank: int) -> str:
     block += f"Vol:    {_fmt_vol(vol)}  Liq: {_fmt_vol(liq)}  Age: {_fmt_age(age_h)}\n"
     block += f"V: {v_detail}\n"
     block += f"T: {t_detail}\n"
-    if z_quality and z_quality not in ("", "UNKNOWN"):
-        q_icon = {"IDEAL": "\u2705", "GOOD": "\U0001f7e1", "CAUTION": "\U0001f7e0", "AVOID": "\U0001f534"}.get(z_quality, "\u26aa")
-        block += f"Entry Q: {q_icon} {z_quality}  {z_detail}\n"
     block += f"Risk:   {risk_emoji} {risk_level}"
 
     if risk.get("flags"):
@@ -286,11 +281,6 @@ def _format_hit_detail(hit: dict) -> str:
     t_detail   = hit.get("t_detail",   f"Trend strength {adx:.0f}")
     p_detail   = hit.get("p_detail",   "")
     adx_detail = hit.get("adx_detail", "")
-    z_quality  = hit.get("z_quality", "")
-    z_detail   = hit.get("z_detail",  "")
-    z_price    = hit.get("z_price",   0.0)
-    z_vol      = hit.get("z_vol",     0.0)
-    z_return   = hit.get("z_return",  0.0)
 
     out  = f"\n── MARKET ──────────────────\n"
     out += f"Price:    {_fmt_price(price)}\n"
@@ -318,14 +308,6 @@ def _format_hit_detail(hit: dict) -> str:
     out += f"T: {t_detail}\n"
     if adx_detail: out += f"   {adx_detail}\n"
     if p_detail:   out += f"P: {p_detail}\n"
-    # Z-score entry quality (Phase 1 — display only)
-    if z_quality and z_quality not in ("", "UNKNOWN"):
-        q_icon = {"IDEAL": "\u2705", "GOOD": "\U0001f7e1", "CAUTION": "\U0001f7e0", "AVOID": "\U0001f534"}.get(z_quality, "\u26aa")
-        out += f"\n── ENTRY QUALITY ─────────────\n"
-        out += f"{q_icon} {z_quality}  (Phase 1: observing — not blocking signals)\n"
-        out += f"Price Z:  {z_price:+.2f}σ  {'\u2191 extended' if z_price > 1.5 else '\u2193 depressed' if z_price < -1.5 else 'in range'}\n"
-        out += f"Vol Z:    {z_vol:+.2f}  {'\u2713 genuine spike' if z_vol >= 0.5 else '~ low volume'}\n"
-        out += f"Return Z: {z_return:+.2f}σ  {'\u26a0 chasing' if z_return > 2.0 else '\u2713 not exhausted'}\n"
 
     if setup.get("entry") and setup.get("stop") and setup.get("target"):
         rr = setup.get("rr", 0)
