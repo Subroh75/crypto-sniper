@@ -456,10 +456,16 @@ def _unknown_risk() -> dict:
 def _score_market(market: dict) -> dict:
     """
     Gate-based VPRT signal from DexScreener market fields.
-    No OHLCV available, so trend is proxied from multi-TF price alignment.
+    No OHLCV available — trend proxied from multi-TF price alignment.
 
-    V gate  (flat): rel_vol >= 1.2x  (1h vol vs hourly avg)
-    T gate        : price rising across 3 TFs — 5m > 0, 1h > 0, 6h > 0
+    V gate  (flat): rel_vol >= 1.2x  (1h vol vs 6h hourly avg)
+                    Baseline: vol_h6/6  (responsive to recent activity)
+                    Fallback: vol_24h/24 if vol_h6 unavailable
+
+    T gate        : >= 2 of 3 short TFs rising (5m, 1h, 6h)
+                    Requiring all 3 is too strict — normal oscillation
+                    causes brief dips. 2/3 confirms real momentum.
+
     ADX proxy     : >= 3 of 4 TFs positive (5m/1h/6h/24h) = "trending"
 
     BUY        = V + T + ADX proxy all confirmed
@@ -468,39 +474,42 @@ def _score_market(market: dict) -> dict:
     NO SIGNAL  = any gate fails
     """
     vol_24h  = market.get("volume_24h",  0)
-    liq      = max(market.get("liquidity", 1), 1)
+    vol_h6   = market.get("vol_h6",      0)
+    vol_h1   = market.get("vol_h1",      0)
     buys_1h  = market.get("buys_1h",     0)
     sells_1h = market.get("sells_1h",    0)
     chg_5m   = market.get("change_5m",   0)
     chg_1h   = market.get("change_1h",   0)
     chg_6h   = market.get("change_6h",   0)
     chg_24h  = market.get("change_24h",  0)
-    vol_h1   = market.get("vol_h1",      0)
 
-    # ── Relative volume proxy (1h vol / hourly avg) ─────────────────────
-    avg_hourly = vol_24h / 24 if vol_24h else 1
-    rel_vol    = (vol_h1 / avg_hourly) if avg_hourly > 0 and vol_h1 > 0 else 1.0
-    rel_vol    = round(rel_vol, 2)
+    # ── Relative volume: 1h vs 6h hourly avg (fallback to 24h avg) ─────
+    if vol_h6 > 0:
+        avg_hourly = vol_h6 / 6
+    elif vol_24h > 0:
+        avg_hourly = vol_24h / 24
+    else:
+        avg_hourly = 1
+    rel_vol = (vol_h1 / avg_hourly) if avg_hourly > 0 and vol_h1 > 0 else 1.0
+    rel_vol = round(rel_vol, 2)
 
     # ── V gate: flat — rel_vol >= 1.2x ─────────────────────────────────
     v_confirmed = rel_vol >= 1.2
-    v_detail    = f"Vol: {rel_vol:.1f}x above average" if v_confirmed else f"Vol: {rel_vol:.1f}x — below threshold"
+    v_detail    = f"Vol: {rel_vol:.1f}x above average" if v_confirmed else f"Vol: {rel_vol:.1f}x (below threshold)"
 
-    # ── T gate: multi-TF trend alignment ───────────────────────────────
-    # DEX has no EMAs — proxy: price rising in 5m, 1h, AND 6h
-    t_confirmed = chg_5m > 0 and chg_1h > 0 and chg_6h > 0
+    # ── T gate: >= 2 of 3 short TFs rising ─────────────────────────────
+    tfs_label    = [("5m", chg_5m), ("1h", chg_1h), ("6h", chg_6h), ("24h", chg_24h)]
+    short_tfs_up = sum(1 for v in [chg_5m, chg_1h, chg_6h] if v > 0)
+    t_confirmed  = short_tfs_up >= 2
+    tfs_up   = [tf for tf, v in tfs_label if v > 0]
+    tfs_down = [tf for tf, v in tfs_label if v <= 0]
     if t_confirmed:
-        t_detail = "Trend: rising 5m · 1h · 6h"
+        t_detail = f"Trend: rising {' · '.join(tfs_up)}" + (f" (down {' · '.join(tfs_down)})" if tfs_down else "")
     else:
-        tfs_up   = [tf for tf, v in [("5m", chg_5m), ("1h", chg_1h), ("6h", chg_6h), ("24h", chg_24h)] if v > 0]
-        tfs_down = [tf for tf, v in [("5m", chg_5m), ("1h", chg_1h), ("6h", chg_6h), ("24h", chg_24h)] if v <= 0]
-        if tfs_up:
-            t_detail = f"Trend: up on {' · '.join(tfs_up)} — down on {' · '.join(tfs_down)}"
-        else:
-            t_detail = "Trend: falling across all TFs"
+        t_detail = f"Trend: only {short_tfs_up}/3 short TFs rising — weak"
 
     # ── ADX proxy: >= 3 of 4 TFs positive ──────────────────────────────
-    tf_positive = sum(1 for v in [chg_5m, chg_1h, chg_6h, chg_24h] if v > 0)
+    tf_positive = sum(1 for _, v in tfs_label if v > 0)
     adx_proxy   = tf_positive >= 3
     adx_detail  = f"ADX proxy: {tf_positive}/4 TFs positive — {'trending' if adx_proxy else 'sideways'}"
 
@@ -508,13 +517,13 @@ def _score_market(market: dict) -> dict:
     p_confirmed = chg_1h > 1.0 and chg_24h > 3.0
     p_detail    = f"Momentum: 1h {chg_1h:+.1f}% · 24h {chg_24h:+.1f}%"
 
-    # ── R confirmation: buy-dominated ──────────────────────────────────
+    # ── R confirmation: buy-dominated txn flow ──────────────────────────
     total_txns  = buys_1h + sells_1h
     buy_ratio   = buys_1h / total_txns if total_txns > 0 else 0.5
     r_confirmed = buy_ratio > 0.55
     r_detail    = f"Range: {buy_ratio*100:.0f}% buys in last 1h"
 
-    # ── Signal tier ────────────────────────────────────────────────────
+    # ── Signal tier ─────────────────────────────────────────────────────
     buy_gates_met = v_confirmed and t_confirmed and adx_proxy
     if buy_gates_met and p_confirmed and r_confirmed:
         label = "STRONG BUY"
@@ -523,18 +532,16 @@ def _score_market(market: dict) -> dict:
     else:
         label = "NO SIGNAL"
 
-    # ── Legacy score fields (kept for blackboard compat) ────────────────
-    # Score reflects gates met: V(1) + T(1) + ADX(1) + P(1) + R(1) mapped to 0-13
+    # ── Legacy score (0-13 scale for blackboard compat) ─────────────────
     v = 3 if rel_vol >= 2.0 else (2 if rel_vol >= 1.5 else (1 if v_confirmed else 0))
     t = 3 if t_confirmed and adx_proxy else (2 if t_confirmed else (1 if adx_proxy else 0))
     p = 2 if p_confirmed and chg_24h >= 5 else (1 if p_confirmed else 0)
     r = 1 if r_confirmed else 0
     score = v + t + p + r
 
-    # ── RSI / trend proxies (kept for blackboard display) ───────────────
-    rsi_proxy = 50 + min(chg_24h * 2, 40)
-    rsi_proxy = max(10, min(90, rsi_proxy))
-    trend_strength = tf_positive * 25  # 0/25/50/75/100
+    rsi_proxy      = 50 + min(chg_24h * 2, 40)
+    rsi_proxy      = max(10, min(90, rsi_proxy))
+    trend_strength = tf_positive * 25
 
     return {
         "score":          score,
