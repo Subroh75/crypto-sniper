@@ -119,6 +119,24 @@ def _format_result(data: dict, symbol: str, interval: str) -> str:
                 f"R:R     {rr:.2f}" if rr else "",
             ]
 
+    # Z-Score entry quality (Phase 1 — display only)
+    z_quality = timing.get("z_quality", "")
+    z_detail  = timing.get("z_detail", "")
+    if z_quality and z_quality != "UNKNOWN":
+        q_icon = {"IDEAL": "✅", "GOOD": "🟡", "CAUTION": "🟠", "AVOID": "🔴"}.get(z_quality, "⚪")
+        z_price  = timing.get("z_price",  0)
+        z_vol    = timing.get("z_vol",    0)
+        z_return = timing.get("z_return", 0)
+        lines += [
+            "",
+            "── ENTRY QUALITY ────────────────",
+            f"{q_icon} {z_quality}",
+            f"Price Z:  {z_price:+.2f}σ  {'↑ extended' if z_price > 1.5 else '↓ depressed' if z_price < -1.5 else 'in range'}",
+            f"Vol Z:    {z_vol:+.2f}σ  {'✓ genuine spike' if z_vol >= 1.5 else '~ noise'}",
+            f"Return Z: {z_return:+.2f}σ  {'⚠ chasing' if z_return > 2.0 else '✓ not exhausted'}",
+            "(Phase 1: observing — not blocking signals)",
+        ]
+
     lines += [
         "",
         "─" * 34,

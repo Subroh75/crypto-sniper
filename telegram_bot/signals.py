@@ -68,6 +68,13 @@ class SignalResult:
     bb_lower: float = 0.0
     atr:      float = 0.0
 
+    # Z-score suite (Phase 1 — display only)
+    z_price:   float = 0.0
+    z_vol:     float = 0.0
+    z_return:  float = 0.0
+    z_quality: str   = "UNKNOWN"
+    z_detail:  str   = ""
+
     # Trade setup (auto-calculated)
     entry:     Optional[float] = None
     stop:      Optional[float] = None
@@ -365,6 +372,13 @@ def calculate_signals(
 
     result.bull_signals = bull_signals
     result.bear_signals = bear_signals
+
+    # Z-score fields (Phase 1 — display + tracker storage)
+    result.z_price   = round(z_price,  2)
+    result.z_vol     = round(z_vol,    2)
+    result.z_return  = round(z_return, 2)
+    result.z_quality = z_quality
+    result.z_detail  = z_detail
 
     return result
 

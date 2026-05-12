@@ -180,6 +180,12 @@ class ChainAgent:
                 "risk":         risk if isinstance(risk, dict) else _unknown_risk(),
                 "agent":        self.chain_id.upper(),
                 "scanned_at":   int(time.time()),
+                # Z-score Phase 1 (display only — not blocking signals)
+                "z_price":      signal.get("z_price", 0.0),
+                "z_vol":        signal.get("z_vol", 0.0),
+                "z_return":     signal.get("z_return", 0.0),
+                "z_quality":    signal.get("z_quality", "UNKNOWN"),
+                "z_detail":     signal.get("z_detail", ""),
             }
         except Exception as e:
             logger.debug(f"[{self.chain_id.upper()}] analyse failed for {symbol}: {e}")
@@ -611,6 +617,35 @@ def _score_market(market: dict) -> dict:
     rsi_proxy      = max(10, min(90, rsi_proxy))
     trend_strength = tf_positive * 25
 
+    # ── Z-score proxies (Phase 1 — display only, no blocking) ───────────
+    # DEX has no OHLCV candle data, so we use the 4-TF change array as a
+    # distribution proxy. "Mean" = average of abs changes, "std" = spread.
+    # z_price  : how far the 1h move is from the 24h mean move
+    # z_vol    : how elevated current 1h vol is vs 6h hourly baseline
+    # z_return : whether the 24h return is already exhausted vs historical
+    changes = [chg_5m, chg_1h, chg_6h, chg_24h]
+    mean_chg = sum(changes) / len(changes)
+    std_chg  = (sum((c - mean_chg) ** 2 for c in changes) / len(changes)) ** 0.5
+    z_price_dex  = round((chg_1h - mean_chg) / std_chg, 2) if std_chg > 0 else 0.0
+
+    # z_vol: 1h vol vs 6h/6 baseline (rel_vol - 1) / 1  normalised
+    z_vol_dex    = round((rel_vol - 1.0), 2)  # >0.5 = genuine spike, >1.5 = strong
+
+    # z_return: 24h return vs mean of all TFs
+    z_return_dex = round((chg_24h - mean_chg) / std_chg, 2) if std_chg > 0 else 0.0
+
+    # Entry quality label
+    good_z_price  = z_price_dex  <  2.0   # not extended
+    good_z_vol    = z_vol_dex    >= 0.5   # genuine volume
+    good_z_return = z_return_dex <  2.5   # not chasing
+    quality_pts   = sum([good_z_price, good_z_vol, good_z_return])
+    if quality_pts == 3:   z_quality_dex = "IDEAL"
+    elif quality_pts == 2: z_quality_dex = "GOOD"
+    elif quality_pts == 1: z_quality_dex = "CAUTION"
+    else:                  z_quality_dex = "AVOID"
+
+    z_detail_dex = f"PrZ {z_price_dex:+.1f} VolZ {z_vol_dex:+.1f} RetZ {z_return_dex:+.1f}"
+
     return {
         "score":          score,
         "label":          label,
@@ -635,6 +670,12 @@ def _score_market(market: dict) -> dict:
         "rsi_proxy":      round(rsi_proxy, 1),
         "trend_strength": trend_strength,
         "rel_vol":        rel_vol,
+        # Z-score Phase 1 (display only)
+        "z_price":        z_price_dex,
+        "z_vol":          z_vol_dex,
+        "z_return":       z_return_dex,
+        "z_quality":      z_quality_dex,
+        "z_detail":       z_detail_dex,
     }
 
 

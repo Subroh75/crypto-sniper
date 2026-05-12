@@ -228,6 +228,13 @@ def _coin_block(data: dict, rank: int, interval: str) -> str:
             block += f"  R:R {rr:.2f}"
         block += "\n"
 
+    # Z-Score entry quality (Phase 1 — display only)
+    z_quality = timing.get("z_quality", "")
+    z_detail  = timing.get("z_detail", "")
+    if z_quality and z_detail:
+        q_icon = {"IDEAL": "✅", "GOOD": "🟡", "CAUTION": "🟠", "AVOID": "🔴"}.get(z_quality, "⚪")
+        block += f"Entry Q: {q_icon} {z_quality}  {z_detail}\n"
+
     if kronos:
         kdir  = kronos.get("direction", "")
         kmove = kronos.get("expected_move_pct", 0)
@@ -417,6 +424,7 @@ async def hourly_scan_job(context) -> None:
                     r_confirmed  = bool(comp.get("R", {}).get("confirmed", False)),
                     rel_vol      = float(timing.get("rel_volume") or 0),
                     atr          = atr_val,
+                    z_price      = float(timing.get("z_price") or 0),
                 )
             except Exception as e:
                 logger.warning(f"[Scanner] Tracker record failed for {coin.get('symbol','?')}: {e}")

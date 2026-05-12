@@ -155,6 +155,7 @@ async def dex_scan_job(context) -> None:
                 r_confirmed   = False,
                 rel_vol       = float(hit.get("rel_vol", 0)),
                 atr           = atr_dex,
+                z_price       = float(hit.get("z_price", 0)),
             )
         except Exception as e:
             logger.warning(f"[DEX Scanner] Tracker record failed for {hit.get('symbol','?')}: {e}")
