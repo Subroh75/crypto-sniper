@@ -108,8 +108,8 @@ class ChainAgent:
         for r in results:
             if isinstance(r, Exception) or r is None:
                 continue
-            if r.get("label", "NO SIGNAL") in ("BUY", "STRONG BUY") and \
-               r.get("risk", {}).get("level") in ("LOW", "MEDIUM"):
+            if r.get("signal", "NO SIGNAL") in ("BUY", "STRONG BUY") and \
+               r.get("risk", {}).get("level") not in ("CRITICAL",):
                 hits.append(r)
 
         hits.sort(key=lambda x: (x["score"], x.get("change_1h", 0)), reverse=True)
@@ -190,79 +190,147 @@ class ChainAgent:
     # ────────────────────────────────────────────────────────────────────────
     async def _get_candidates(self, session: aiohttp.ClientSession) -> list[dict]:
         """
-        Primary:  GeckoTerminal trending_pools per network (no rate limit on this endpoint)
-        Fallback: DexScreener token-boosts/top/v1 (cross-chain, filter by chain)
+        Multi-source token discovery with fallback tiers:
+        1. GeckoTerminal trending_pools (best quality, but rate-limited to 30/min)
+        2. GeckoTerminal top pools by volume (different endpoint, different limit)
+        3. DexScreener chain-native search (always available, no rate limit)
+        4. DexScreener token boosts (cross-chain fallback)
 
-        Both routes resolve to normalised pair dicts via DexScreener for
-        consistent market data fields.
+        Deduplicates by base_address. Caps at 25 candidates for speed.
         """
         raw_addresses: list[str] = []
 
-        # ── Primary: GeckoTerminal trending pools ──────────────────────────
+        # Tier 1: GeckoTerminal trending pools
         try:
             url = f"https://api.geckoterminal.com/api/v2/networks/{self.gecko_net}/trending_pools?page=1"
             async with session.get(
                 url,
                 headers={"Accept": "application/json"},
-                timeout=aiohttp.ClientTimeout(total=12)
+                timeout=aiohttp.ClientTimeout(total=10)
             ) as r:
                 if r.status == 200:
                     data = await r.json()
                     for pool in (data.get("data") or []):
-                        attrs   = pool.get("attributes", {})
-                        address = attrs.get("address", "")
-                        # We want the base token address, not the pool address
-                        # Get it from pool relationships
                         rels = pool.get("relationships", {})
                         base_token = rels.get("base_token", {}).get("data", {})
-                        # GeckoTerminal token IDs are like "bsc_0xABCD..."
                         token_id = base_token.get("id", "")
                         if "_" in token_id:
                             raw_addresses.append(token_id.split("_", 1)[1])
-                        elif address:
-                            raw_addresses.append(address)
-                    logger.debug(f"[{self.chain_id.upper()}] GeckoTerminal trending: {len(raw_addresses)} addresses")
+                        else:
+                            addr = (pool.get("attributes") or {}).get("address", "")
+                            if addr:
+                                raw_addresses.append(addr)
+                    logger.debug(f"[{self.chain_id.upper()}] GT trending: {len(raw_addresses)} addresses")
+                elif r.status == 429:
+                    logger.debug(f"[{self.chain_id.upper()}] GeckoTerminal rate-limited")
         except Exception as e:
-            logger.debug(f"[{self.chain_id.upper()}] GeckoTerminal trending failed: {e}")
+            logger.debug(f"[{self.chain_id.upper()}] GT trending failed: {e}")
 
-        # ── Fallback: DexScreener token boosts ────────────────────────────
+        # Tier 2: GeckoTerminal top pools by volume (if trending was rate-limited/empty)
         if len(raw_addresses) < 5:
             try:
+                url = (
+                    f"https://api.geckoterminal.com/api/v2/networks/{self.gecko_net}"
+                    f"/pools?page=1&sort=h24_volume_usd_liquidity_desc"
+                )
                 async with session.get(
-                    f"{DEXSCREENER}/token-boosts/top/v1",
-                    timeout=aiohttp.ClientTimeout(total=12)
+                    url,
+                    headers={"Accept": "application/json"},
+                    timeout=aiohttp.ClientTimeout(total=10)
                 ) as r:
                     if r.status == 200:
                         data = await r.json()
-                        for item in (data if isinstance(data, list) else []):
-                            if item.get("chainId", "").lower() == self.chain_id.lower():
-                                addr = item.get("tokenAddress", "")
-                                if addr and addr not in raw_addresses:
+                        for pool in (data.get("data") or []):
+                            rels = pool.get("relationships", {})
+                            base_token = rels.get("base_token", {}).get("data", {})
+                            token_id = base_token.get("id", "")
+                            if "_" in token_id:
+                                addr = token_id.split("_", 1)[1]
+                                if addr not in raw_addresses:
                                     raw_addresses.append(addr)
-                        logger.debug(f"[{self.chain_id.upper()}] DexScreener boosts added — total {len(raw_addresses)}")
+                        logger.debug(f"[{self.chain_id.upper()}] GT top pools: total {len(raw_addresses)}")
             except Exception as e:
-                logger.debug(f"[{self.chain_id.upper()}] DexScreener boosts failed: {e}")
+                logger.debug(f"[{self.chain_id.upper()}] GT top pools failed: {e}")
+
+        # Tier 3: DexScreener chain-native search (always available)
+        # Search for the chain's native token pairs — returns fresh active pairs
+        if len(raw_addresses) < 5:
+            search_terms = [
+                self.chain_id.upper(),    # e.g. "BSC"
+                "USDT",                   # most active quote token
+            ]
+            for term in search_terms:
+                if len(raw_addresses) >= 15:
+                    break
+                try:
+                    url = f"{DEXSCREENER}/latest/dex/search?q={term}"
+                    async with session.get(
+                        url,
+                        timeout=aiohttp.ClientTimeout(total=10)
+                    ) as r:
+                        if r.status == 200:
+                            data  = await r.json()
+                            pairs = data.get("pairs") or []
+                            for p in pairs:
+                                if p.get("chainId", "").lower() == self.chain_id.lower():
+                                    addr = (p.get("baseToken") or {}).get("address", "")
+                                    if addr and addr not in raw_addresses:
+                                        raw_addresses.append(addr)
+                    logger.debug(f"[{self.chain_id.upper()}] DexScreener search '{term}': {len(raw_addresses)} total")
+                except Exception as e:
+                    logger.debug(f"[{self.chain_id.upper()}] DexScreener search failed: {e}")
+
+        # Tier 4: DexScreener token boosts (cross-chain, last resort)
+        if len(raw_addresses) < 5:
+            for endpoint in ["/token-boosts/top/v1", "/token-boosts/latest/v1", "/token-profiles/latest/v1"]:
+                try:
+                    async with session.get(
+                        f"{DEXSCREENER}{endpoint}",
+                        timeout=aiohttp.ClientTimeout(total=10)
+                    ) as r:
+                        if r.status == 200:
+                            data = await r.json()
+                            for item in (data if isinstance(data, list) else []):
+                                if item.get("chainId", "").lower() == self.chain_id.lower():
+                                    addr = item.get("tokenAddress", "")
+                                    if addr and addr not in raw_addresses:
+                                        raw_addresses.append(addr)
+                            logger.debug(f"[{self.chain_id.upper()}] DexScreener {endpoint}: {len(raw_addresses)} total")
+                except Exception as e:
+                    logger.debug(f"[{self.chain_id.upper()}] {endpoint} failed: {e}")
 
         if not raw_addresses:
+            logger.warning(f"[{self.chain_id.upper()}] All discovery sources returned 0 addresses")
             return []
 
-        # ── Resolve addresses to full DexScreener pair data ───────────────
+        # Deduplicate, cap at 25 for speed
+        seen = set()
+        unique = []
+        for a in raw_addresses:
+            al = a.lower()
+            if al not in seen:
+                seen.add(al)
+                unique.append(a)
+        raw_addresses = unique[:25]
+
+        logger.info(f"[{self.chain_id.upper()}] {len(raw_addresses)} unique addresses to resolve")
+
+        # Resolve addresses to full DexScreener pair data
         sem = asyncio.Semaphore(4)
 
         async def resolve(addr):
             async with sem:
-                await asyncio.sleep(0.1)
+                await asyncio.sleep(0.05)
                 return await self._resolve_address(session, addr)
 
         resolved_raw = await asyncio.gather(
-            *[resolve(a) for a in raw_addresses[:25]],
+            *[resolve(a) for a in raw_addresses],
             return_exceptions=True
         )
 
         resolved = [r for r in resolved_raw if isinstance(r, dict) and r is not None]
-
-        # Apply universe filter
         filtered = [p for p in resolved if self._passes_filter(p)]
+        logger.info(f"[{self.chain_id.upper()}] {len(resolved)} resolved, {len(filtered)} passed filters")
         return filtered
 
     async def _resolve_address(self, session: aiohttp.ClientSession, address: str) -> dict | None:
@@ -497,22 +565,22 @@ def _score_market(market: dict) -> dict:
     v_confirmed = rel_vol >= 1.2
     v_detail    = f"Vol: {rel_vol:.1f}x above average" if v_confirmed else f"Vol: {rel_vol:.1f}x (below threshold)"
 
-    # ── T gate: >= 2 of 3 short TFs rising ─────────────────────────────
+    # T gate: use ALL 4 TFs (5m/1h/6h/24h), need >= 2 positive to confirm trend
+    # Including 24h means strong daily moves aren't killed by brief 5m/6h pullbacks
     tfs_label    = [("5m", chg_5m), ("1h", chg_1h), ("6h", chg_6h), ("24h", chg_24h)]
-    short_tfs_up = sum(1 for v in [chg_5m, chg_1h, chg_6h] if v > 0)
-    t_confirmed  = short_tfs_up >= 2
+    all_tfs_up   = sum(1 for _, v in tfs_label if v > 0)
+    t_confirmed  = all_tfs_up >= 2
     tfs_up   = [tf for tf, v in tfs_label if v > 0]
     tfs_down = [tf for tf, v in tfs_label if v <= 0]
     if t_confirmed:
-        t_detail = f"Trend: rising {' · '.join(tfs_up)}" + (f" (down {' · '.join(tfs_down)})" if tfs_down else "")
+        t_detail = f"Trend: rising {' / '.join(tfs_up)}" + (f" (down {' / '.join(tfs_down)})" if tfs_down else "")
     else:
-        t_detail = f"Trend: only {short_tfs_up}/3 short TFs rising — weak"
+        t_detail = f"Trend: only {all_tfs_up}/4 TFs rising -- weak"
 
-    # ── ADX proxy: >= 3 of 4 TFs positive ──────────────────────────────
-    tf_positive = sum(1 for _, v in tfs_label if v > 0)
+    # ADX proxy: >= 3 of 4 TFs positive = strong directional trend
+    tf_positive = all_tfs_up
     adx_proxy   = tf_positive >= 3
-    adx_detail  = f"ADX proxy: {tf_positive}/4 TFs positive — {'trending' if adx_proxy else 'sideways'}"
-
+    adx_detail  = f"ADX proxy: {tf_positive}/4 TFs positive -- {'trending' if adx_proxy else 'sideways'}"
     # ── P confirmation: strong momentum ────────────────────────────────
     p_confirmed = chg_1h > 1.0 and chg_24h > 3.0
     p_detail    = f"Momentum: 1h {chg_1h:+.1f}% · 24h {chg_24h:+.1f}%"
