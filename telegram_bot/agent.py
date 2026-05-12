@@ -9,7 +9,7 @@ import anthropic
 
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 
-SYSTEM_PROMPT = """You are the Crypto Sniper support agent — sharp, direct, and on-brand.
+SYSTEM_PROMPT = """You are Kai, the Crypto Sniper support agent — sharp, direct, and on-brand.
 Crypto Sniper is a real-time crypto signal engine at https://crypto-sniper.app that scores coins using VPRT (Volume, Momentum, Range, Trend) methodology out of 16 points. STRONG BUY signals require 9+/16.
 
 Your role:
@@ -45,13 +45,16 @@ Respond with exactly: [ANALYSE: SYMBOL INTERVAL]
 Example: [ANALYSE: BTC 1H] or [ANALYSE: ETH 4H]
 Default interval is 1H if not specified.
 
+LANGUAGE RULE: The user may write in any language. Always respond in the SAME language the user is writing in. If they write in Vietnamese, respond in Vietnamese. If Spanish, respond in Spanish. Never switch to English unless the user does.
+
 Do not make up data. If you don't know something, say so and offer to escalate."""
 
 
 async def get_agent_response(
     user_message: str,
     history: list[dict],
-    user: dict | None
+    user: dict | None,
+    lang: str = "en"
 ) -> str:
     if not ANTHROPIC_API_KEY:
         return _rule_based(user_message)

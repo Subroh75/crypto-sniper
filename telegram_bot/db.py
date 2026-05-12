@@ -31,6 +31,7 @@ async def init_db():
         for col, default in [
             ("gem_scans_today",    "INTEGER DEFAULT 0"),
             ("gem_scans_reset_at", "INTEGER DEFAULT 0"),
+            ("lang",               "TEXT DEFAULT 'en'"),
         ]:
             try:
                 await db.execute(f"ALTER TABLE users ADD COLUMN {col} {default}")
@@ -89,6 +90,15 @@ async def upsert_user(telegram_id: int, first_name: str, username: str | None):
                 first_name = excluded.first_name,
                 username   = excluded.username
         """, (telegram_id, first_name, username or ""))
+        await db.commit()
+
+
+async def set_user_lang(telegram_id: int, lang: str):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE users SET lang = ? WHERE telegram_id = ?",
+            (lang, telegram_id)
+        )
         await db.commit()
 
 
