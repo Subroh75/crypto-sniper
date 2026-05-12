@@ -15,6 +15,8 @@ import logging
 import aiohttp
 from datetime import datetime, timezone
 
+from signal_tracker import record_signal
+
 logger = logging.getLogger(__name__)
 
 API_BASE   = os.environ.get("RENDER_API_URL", "https://crypto-sniper.onrender.com")
@@ -383,3 +385,35 @@ async def hourly_scan_job(context) -> None:
             logger.info(f"[Scanner] Watch report sent — {len(watch_top)} coins")
     except Exception as e:
         logger.error(f"[Scanner] Telegram send failed: {e}")
+
+    # 7. Record STRONG BUY signals for quality tracking
+    if top:
+        for coin in top:
+            try:
+                sig   = coin.get("signal", {})
+                quote = coin.get("quote", {})
+                struct = coin.get("structure", {})
+                timing = coin.get("timing", {})
+                comp  = coin.get("components", {})
+                trade = coin.get("trade_setup") or {}
+                price = struct.get("close") or quote.get("price") or 0
+                if price <= 0:
+                    continue
+                gates = sig.get("gates", {})
+                record_signal(
+                    source       = "cex",
+                    symbol       = coin.get("symbol", "?"),
+                    entry_price  = price,
+                    signal_label = sig.get("label", "BUY"),
+                    score        = sig.get("total", 0),
+                    interval     = interval,
+                    chain        = "CEX",
+                    v_confirmed  = bool(gates.get("v", comp.get("V", {}).get("confirmed", False))),
+                    t_confirmed  = bool(gates.get("t", comp.get("T", {}).get("confirmed", False))),
+                    adx_confirmed= bool(gates.get("adx", False)),
+                    p_confirmed  = bool(comp.get("P", {}).get("confirmed", False)),
+                    r_confirmed  = bool(comp.get("R", {}).get("confirmed", False)),
+                    rel_vol      = float(timing.get("rel_volume") or 0),
+                )
+            except Exception as e:
+                logger.warning(f"[Scanner] Tracker record failed for {coin.get('symbol','?')}: {e}")

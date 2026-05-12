@@ -34,6 +34,10 @@ from scanner import hourly_scan_job
 from dex_scanner.scanner import dex_scan_job, gem_lookup, get_last_sweep, SUPPORTED_CHAINS
 from dex_scanner.blackboard import compose_rate_limited
 
+# Signal quality tracker
+from signal_tracker import init_tracker
+from signal_monitor import signal_monitor_job, format_record_message
+
 logging.basicConfig(
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
     level=logging.INFO
@@ -176,6 +180,10 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/status  — Your account & tier\n"
         "/link    — Link your email\n"
         "/help    — This list\n\n"
+        "SIGNAL TRACKER\n"
+        "/record       — Win rate & track record\n"
+        "/record cex   — CEX signals only\n"
+        "/record dex   — DEX signals only\n\n"
         "Or just type your question.\n"
         "https://crypto-sniper.app"
     )
@@ -491,6 +499,19 @@ async def chains_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("\n".join(lines))
 
 
+async def record_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    /record [cex|dex] — Signal quality track record.
+    Shows win rate, avg gain/loss, and last 5 resolved signals.
+    """
+    await _typing(update)
+    arg = (context.args[0].lower() if context.args else None)
+    if arg not in ("cex", "dex", None):
+        arg = None
+    msg = format_record_message(source=arg)
+    await update.message.reply_text(msg)
+
+
 # ─────────────────────────────────────────────
 #  Free-text handler — main AI agent
 # ─────────────────────────────────────────────
@@ -601,6 +622,10 @@ async def post_init(application: Application):
     await init_db()
     logger.info("DB initialised")
 
+    # Initialise signal quality tracker DB
+    init_tracker()
+    logger.info("Signal tracker DB initialised")
+
     job_queue = application.job_queue
     first_in  = _seconds_to_next_hour()
 
@@ -613,7 +638,7 @@ async def post_init(application: Application):
     )
     logger.info(f"Hourly CEX scanner scheduled — first run in {first_in}s")
 
-    # ── New: hourly DEX sweep ──────────────────────────────────────────────
+    # ── Hourly DEX sweep ──────────────────────────────────────────────────
     # Offset by 90s from CEX scan to avoid hammering APIs at the exact same time
     dex_first_in = first_in + 90
     job_queue.run_repeating(
@@ -624,6 +649,18 @@ async def post_init(application: Application):
         data={"chat_id": ADMIN_CHAT_ID},   # sends sweep to admin chat
     )
     logger.info(f"DEX scanner scheduled — first run in {dex_first_in}s")
+
+    # ── Signal quality monitor — checks outcomes every hour ───────────────
+    # Offset by 180s so it runs after both scanners have had a chance to fire
+    monitor_first_in = first_in + 180
+    job_queue.run_repeating(
+        signal_monitor_job,
+        interval=3600,
+        first=monitor_first_in,
+        name="signal_monitor",
+        data={"chat_id": ADMIN_CHAT_ID},
+    )
+    logger.info(f"Signal monitor scheduled — first run in {monitor_first_in}s")
 
 
 # ─────────────────────────────────────────────
@@ -668,6 +705,9 @@ def main():
     app.add_handler(CommandHandler("unwatch",   unwatch_cmd))
     app.add_handler(CommandHandler("mywatches", mywatches_cmd))
     app.add_handler(CommandHandler("chains",    chains_cmd))
+
+    # Signal quality track record
+    app.add_handler(CommandHandler("record",    record_cmd))
 
     # Free-text fallback
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))

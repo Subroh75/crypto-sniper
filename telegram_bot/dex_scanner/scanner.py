@@ -17,8 +17,11 @@ import asyncio
 import logging
 import aiohttp
 from datetime import datetime, timezone
+import sys, os
+sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from dex_scanner.blackboard import Blackboard, compose_no_pair
+from signal_tracker import record_signal
 from dex_scanner.chains.agent_bsc  import BSCAgent
 from dex_scanner.chains.agent_base import BASEAgent
 from dex_scanner.chains.agent_eth  import ETHAgent
@@ -120,6 +123,37 @@ async def dex_scan_job(context) -> None:
                 await bot.send_message(chat_id=chat_id, text=chunk)
     except Exception as e:
         logger.error(f"[DEX Scanner] Telegram send failed: {e}")
+
+    # Record BUY / STRONG BUY hits for signal quality tracking
+    hits = board.all_hits(top_n=top_n * len(AGENTS))
+    for hit in hits:
+        if hit.get("signal") not in ("BUY", "STRONG BUY"):
+            continue
+        try:
+            price = hit.get("price", 0)
+            if price <= 0:
+                continue
+            gates = hit.get("gates") or {}
+            record_signal(
+                source        = "dex",
+                symbol        = hit.get("symbol", "?"),
+                entry_price   = price,
+                signal_label  = hit.get("signal", "BUY"),
+                score         = hit.get("score", 0),
+                interval      = "1d" if is_daily else "1h",
+                chain         = hit.get("chain", "bsc").upper(),
+                address       = hit.get("address", ""),
+                pool          = hit.get("pool_address", ""),
+                dex_id        = hit.get("dex", ""),
+                v_confirmed   = bool(gates.get("v", False)),
+                t_confirmed   = bool(gates.get("t", False)),
+                adx_confirmed = bool(gates.get("adx", False)),
+                p_confirmed   = False,  # not tracked at sweep level
+                r_confirmed   = False,
+                rel_vol       = float(hit.get("rel_vol", 0)),
+            )
+        except Exception as e:
+            logger.warning(f"[DEX Scanner] Tracker record failed for {hit.get('symbol','?')}: {e}")
 
 
 async def _run_agent(
