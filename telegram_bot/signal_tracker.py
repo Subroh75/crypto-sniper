@@ -19,7 +19,7 @@ signals(
     signal_label  TEXT,      -- "BUY" | "STRONG BUY"
     score         INTEGER,   -- legacy 0-13 score
     entry_price   REAL,      -- price at time of signal
-    stop_price    REAL,      -- -5% from entry
+    stop_price    REAL,      -- ATR-based: entry - (1.5 x ATR14), fallback 3%
     target_price  REAL,      -- +10% from entry
     -- gate snapshots
     v_confirmed   INTEGER,
@@ -66,7 +66,10 @@ CHECK_HOURS = [4, 24, 48, 72]
 
 # Win/loss thresholds — must hit target or stop within 72h
 WIN_PCT  =  10.0   # +10% = WIN
-LOSS_PCT =  -5.0   # -5%  = LOSS
+LOSS_PCT =  -5.0   # -5% fallback guard for outcome resolution
+ATR_SL_MULT = 1.5    # stop = entry - (ATR_SL_MULT × ATR)
+ATR_TP_MULT = 2.5    # target = entry + (ATR_TP_MULT × ATR)
+FALLBACK_SL_PCT = 0.03  # 3% fallback if no ATR available
 
 
 # ── DB helpers ────────────────────────────────────────────────────────────────
@@ -153,10 +156,24 @@ def record_signal(
     p_confirmed: bool = False,
     r_confirmed: bool = False,
     rel_vol: float = 0.0,
+    atr: float = 0.0,        # ATR14 from signal — used to set dynamic stop
 ) -> int:
-    """Insert a new signal. Returns row id."""
-    stop_price   = round(entry_price * 0.95, 8)
-    target_price = round(entry_price * 1.10, 8)
+    """Insert a new signal. Returns row id.
+    
+    Stop loss: entry - (1.5 x ATR) when ATR available, else 3% fixed fallback.
+    Target:    entry + (2.5 x ATR) when ATR available, else 10% fixed fallback.
+    This matches the trade setup shown in the signal message.
+    """
+    if atr and atr > 0 and entry_price > 0:
+        raw_stop = entry_price - (ATR_SL_MULT * atr)
+        # Safety: don't set stop more than 15% below entry (outlier ATR protection)
+        min_stop  = entry_price * 0.85
+        stop_price   = round(max(raw_stop, min_stop), 8)
+        target_price = round(entry_price + (ATR_TP_MULT * atr), 8)
+    else:
+        # Fallback: 3% stop, 10% target
+        stop_price   = round(entry_price * (1 - FALLBACK_SL_PCT), 8)
+        target_price = round(entry_price * 1.10, 8)
 
     with _conn() as con:
         cur = con.execute("""

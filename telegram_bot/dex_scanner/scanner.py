@@ -134,6 +134,9 @@ async def dex_scan_job(context) -> None:
             if price <= 0:
                 continue
             gates = hit.get("gates") or {}
+            # ATR from trade_setup (DEX uses 24h range / 4 as proxy)
+            trade_s = hit.get("trade_setup") or {}
+            atr_dex = float(trade_s.get("atr") or 0)
             record_signal(
                 source        = "dex",
                 symbol        = hit.get("symbol", "?"),
@@ -151,6 +154,7 @@ async def dex_scan_job(context) -> None:
                 p_confirmed   = False,  # not tracked at sweep level
                 r_confirmed   = False,
                 rel_vol       = float(hit.get("rel_vol", 0)),
+                atr           = atr_dex,
             )
         except Exception as e:
             logger.warning(f"[DEX Scanner] Tracker record failed for {hit.get('symbol','?')}: {e}")

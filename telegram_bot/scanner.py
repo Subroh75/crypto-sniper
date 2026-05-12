@@ -400,6 +400,8 @@ async def hourly_scan_job(context) -> None:
                 if price <= 0:
                     continue
                 gates = sig.get("gates", {})
+                # ATR from timing dict — used for dynamic stop/target in tracker
+                atr_val = float(timing.get("atr") or trade.get("atr") or 0)
                 record_signal(
                     source       = "cex",
                     symbol       = coin.get("symbol", "?"),
@@ -414,6 +416,7 @@ async def hourly_scan_job(context) -> None:
                     p_confirmed  = bool(comp.get("P", {}).get("confirmed", False)),
                     r_confirmed  = bool(comp.get("R", {}).get("confirmed", False)),
                     rel_vol      = float(timing.get("rel_volume") or 0),
+                    atr          = atr_val,
                 )
             except Exception as e:
                 logger.warning(f"[Scanner] Tracker record failed for {coin.get('symbol','?')}: {e}")

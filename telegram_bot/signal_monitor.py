@@ -174,33 +174,36 @@ def format_outcome_message(sig: dict) -> str:
 
     result_icon = "WIN" if outcome == "WIN" else "LOSS" if outcome == "LOSS" else "INCONCLUSIVE"
 
+    stop_pct   = round((stop - entry) / entry * 100, 1) if entry else -5.0
+    target_pct = round((target - entry) / entry * 100, 1) if entry else 10.0
+    stop_label = f"ATR stop {stop_pct:+.1f}%"
+    tp_label   = f"ATR target {target_pct:+.1f}%"
     lines = [
-        f"SIGNAL RESULT — {result_icon}",
-        f"{'─' * 34}",
+        f"SIGNAL RESULT -- {result_icon}",
+        f"{'--' * 17}",
         f"Token:   {symbol}  ({source} · {chain})",
         f"Signal:  {label}  fired {fired_str}",
         f"Entry:   {_fmt_price(entry)}",
-        f"Stop:    {_fmt_price(stop)} (-5%)",
-        f"Target:  {_fmt_price(target)} (+10%)",
-        f"{'─' * 34}",
+        f"Stop:    {_fmt_price(stop)} ({stop_label})",
+        f"Target:  {_fmt_price(target)} ({tp_label})",
+        f"{'--' * 17}",
     ]
 
-    # Checkpoint prices
+    # Checkpoint prices -- compare against actual stored ATR stop/target
     for h in CHECK_HOURS:
-        p = sig.get(f"price_{h}h")
+        p     = sig.get(f"price_{h}h")
         pct_h = sig.get(f"pct_{h}h")
         if p is not None:
             indicator = ""
-            if pct_h is not None:
-                if pct_h >= WIN_PCT:
-                    indicator = " TARGET"
-                elif pct_h <= LOSS_PCT:
-                    indicator = " STOP"
+            if p >= target:
+                indicator = " [TARGET HIT]"
+            elif p <= stop:
+                indicator = " [STOP HIT]"
             lines.append(
-                f"{str(h)+'H':>4}:   {_fmt_price(p)}  ({_fmt_pct(pct_h)}){indicator}"
+                f"{str(h)+'H':>4}:   {_fmt_price(p)}  ({_fmt_pct(pct_h or 0)}){indicator}"
             )
         else:
-            lines.append(f"{str(h)+'H':>4}:   —")
+            lines.append(f"{str(h)+'H':>4}:   --")
 
     lines.append(f"{'─' * 34}")
 

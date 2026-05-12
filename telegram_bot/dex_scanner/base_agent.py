@@ -640,19 +640,46 @@ def _score_market(market: dict) -> dict:
 
 def _build_trade_setup(market: dict, signal: dict) -> dict:
     """
-    Simple trade setup from current price + ATR-estimated range.
-    Uses 24h high/low swing as ATR proxy.
+    ATR-based trade setup.
+
+    ATR proxy for DEX tokens = (high_24h - low_24h) / 4
+    (conservative fraction of 24h range, analogous to 14-period ATR)
 
     Entry:  current price
-    Stop:   entry × (1 - 0.05)  (5% stop)
-    Target: entry × (1 + 0.10)  (10% target, 2:1 R:R)
+    Stop:   entry - (1.5 x ATR)   capped at -15% max
+    Target: entry + (2.5 x ATR)
+    R:R:    target_dist / stop_dist
     """
-    price = market.get("price", 0)
+    price  = market.get("price", 0)
+    high   = market.get("high_24h", 0)
+    low    = market.get("low_24h", 0)
+
     if not price or signal.get("label", "NO SIGNAL") == "NO SIGNAL":
         return {}
 
-    stop   = round(price * 0.95, 8)
-    target = round(price * 1.10, 8)
-    rr     = round((target - price) / (price - stop), 1) if price > stop else 2.0
+    # ATR proxy: use 24h range / 4 if both high and low are valid
+    atr_proxy = 0.0
+    if high > 0 and low > 0 and high > low:
+        atr_proxy = (high - low) / 4.0
 
-    return {"entry": price, "stop": stop, "target": target, "rr": rr}
+    if atr_proxy > 0 and atr_proxy < price * 0.20:   # sanity: ATR < 20% of price
+        stop   = round(max(price - 1.5 * atr_proxy, price * 0.85), 8)
+        target = round(price + 2.5 * atr_proxy, 8)
+    else:
+        # Fallback: 3% stop, 10% target
+        stop   = round(price * 0.97, 8)
+        target = round(price * 1.10, 8)
+
+    risk   = price - stop
+    reward = target - price
+    rr     = round(reward / risk, 1) if risk > 0 else 2.0
+    atr_pct = round(atr_proxy / price * 100, 2) if price > 0 else 0
+
+    return {
+        "entry":   price,
+        "stop":    stop,
+        "target":  target,
+        "rr":      rr,
+        "atr":     round(atr_proxy, 8),
+        "atr_pct": atr_pct,
+    }
