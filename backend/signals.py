@@ -135,89 +135,88 @@ def calculate_signals(
     bb_lower  = indicators.get("bb_lower") or (ema20 * 0.98 if ema20 else close * 0.98)
     macd_hist = indicators.get("macd_hist") or 0
 
-    # ── VWAP (approximate: use close * 0.98 as rough estimate) ────────────
-    # Real VWAP requires tick data; this is a reasonable intraday approximation
-    vwap = _calc_vwap_approx(ohlcv[-24:])  # last 24 bars
+    # ── VWAP ───────────────────────────────────────────────────────────────
+    vwap = _calc_vwap_approx(ohlcv[-24:])
 
     # ── Relative Volume ────────────────────────────────────────────────────
-    # Since CoinGecko OHLC has no volume, use quote 24H volume vs median
-    # We'll store the quote volume for display but score on price action
-    vol_24h = quote.get("volume_24h", 0)
-    # Approximate relative volume from price change magnitude
-    price_chg_abs = abs(quote.get("change_24h", 0))
-    rel_vol = 1.0 + (price_chg_abs / 10)  # rough proxy
-    rel_vol = max(0.5, min(rel_vol, 8.0))
+    # Use actual candle volumes when available (ohlcv col 5); fall back to
+    # price-change proxy only when volume data is absent.
+    volumes = [bar[5] for bar in ohlcv if len(bar) > 5]
+    if volumes and len(volumes) >= 20:
+        avg_vol = sum(volumes[-21:-1]) / 20
+        cur_vol = volumes[-1]
+        rel_vol = round(cur_vol / avg_vol, 2) if avg_vol > 0 else 1.0
+        rel_vol = max(0.5, min(rel_vol, 15.0))
+    else:
+        price_chg_abs = abs(quote.get("change_24h", 0))
+        rel_vol = 1.0 + (price_chg_abs / 10)
+        rel_vol = max(0.5, min(rel_vol, 8.0))
 
-    # ── V: Volume Score (0–5) ──────────────────────────────────────────────
-    v_score = 0
-    if rel_vol >= 5:   v_score = 5
-    elif rel_vol >= 3: v_score = 4
-    elif rel_vol >= 2: v_score = 3
-    elif rel_vol >= 1.5: v_score = 2
-    elif rel_vol >= 1.2: v_score = 1
+    chg = quote.get("change_24h", 0)
 
-    # ── P: Momentum Score (0–3) ────────────────────────────────────────────
-    p_score = 0
+    # ── ATR move ───────────────────────────────────────────────────────────
     if atr > 0:
-        price_move = close - open_
+        price_move     = close - open_
         atr_move_sigma = price_move / atr
     else:
         atr_move_sigma = 0.0
 
-    chg = quote.get("change_24h", 0)
-    if chg >= 5:    p_score = 3
-    elif chg >= 3:  p_score = 2
-    elif chg >= 1:  p_score = 1
-
-    # ── R: Range Position Score (0–2) ──────────────────────────────────────
-    r_score = 0
+    # ── Range position ─────────────────────────────────────────────────────
     bar_range = high - low
-    if bar_range > 0:
-        range_pos = (close - low) / bar_range
-    else:
-        range_pos = 0.5
-    if range_pos >= 0.75: r_score = 2
-    elif range_pos >= 0.50: r_score = 1
+    range_pos = (close - low) / bar_range if bar_range > 0 else 0.5
 
-    # ── T: Trend Score (0–3) ───────────────────────────────────────────────
-    t_score = 0
-    ema_stack = False
-    if ema20 and ema50 and close:
-        if close > ema20 > ema50:
-            t_score += 2
-            ema_stack = True
-        elif close > ema20:
-            t_score += 1
-    if adx >= 25:
-        t_score = min(t_score + 1, 3)
+    # ══════════════════════════════════════════════════════════════════════
+    # GATE LOGIC  — identical to telegram_bot/signals.py
+    # ══════════════════════════════════════════════════════════════════════
 
-    # ── S: Social Score (0–3) ──────────────────────────────────────────────
-    s_score = 0
-    if social_delta >= 20:   s_score = 3
-    elif social_delta >= 10: s_score = 2
-    elif social_delta >= 5:  s_score = 1
+    # ── V gate: flat — any rel_vol >= 1.2x is confirmed ────────────────
+    v_confirmed = rel_vol >= 1.2
 
-    # ── Total ──────────────────────────────────────────────────────────────
-    total = v_score + p_score + r_score + t_score + s_score
+    # ── T gate: close > EMA20 > EMA50 > EMA200 (all three MAs) ─────────
+    ema_stack   = False
+    t_confirmed = False
+    if ema20 and ema50 and ema200 and close:
+        t_confirmed = close > ema20 > ema50 > ema200
+        ema_stack   = t_confirmed
 
-    # ── Direction ──────────────────────────────────────────────────────────
-    direction = "NEUTRAL"
-    if total >= 5 and chg > 0 and ema_stack:
-        direction = "LONG"
-    elif rsi >= 75 or (chg < -3 and close < ema20):
-        direction = "SHORT"
+    # ── ADX gate: >= 25 ────────────────────────────────────────────────
+    adx_confirmed = adx >= 25
 
-    # ── Signal ─────────────────────────────────────────────────────────────
-    if total >= 9:
+    # ── P confirmation: positive change AND positive ATR move ──────────
+    p_confirmed = chg > 0 and atr_move_sigma > 0
+
+    # ── R confirmation: close in upper 50% of bar range ───────────────
+    r_confirmed = range_pos >= 0.5
+
+    # ── Signal tier ────────────────────────────────────────────────────
+    buy_gates_met = v_confirmed and t_confirmed and adx_confirmed
+
+    if buy_gates_met and p_confirmed and r_confirmed:
         signal = "STRONG BUY"
-    elif total >= 5:
-        signal = "MODERATE"
+    elif buy_gates_met:
+        signal = "BUY"
     else:
         signal = "NO SIGNAL"
 
-    # ── Trade Setup ────────────────────────────────────────────────────────
+    # ── Scores (V max 3, P max 2, R max 1, T max 3 = 9 total for STRONG BUY)
+    # S score REMOVED — pure VPRT only
+    v_score = 3 if rel_vol >= 2.0 else (2 if rel_vol >= 1.5 else (1 if v_confirmed else 0))
+    p_score = 2 if p_confirmed and chg >= 3 else (1 if p_confirmed else 0)
+    r_score = 1 if r_confirmed else 0
+    t_score = 3 if t_confirmed and adx_confirmed else (2 if t_confirmed else (1 if adx_confirmed else 0))
+    s_score = 0  # removed
+    total   = v_score + p_score + r_score + t_score
+
+    # ── Direction ──────────────────────────────────────────────────────
+    direction = "NEUTRAL"
+    if signal in ("BUY", "STRONG BUY") and chg > 0:
+        direction = "LONG"
+    elif rsi >= 75 or (chg < -3 and ema20 and close < ema20):
+        direction = "SHORT"
+
+    # ── Trade Setup ────────────────────────────────────────────────────
     entry = stop = target = rr = None
-    if total >= 5 and direction == "LONG" and atr:
+    if signal in ("BUY", "STRONG BUY") and direction == "LONG" and atr:
         entry  = close
         stop   = round(close - (1.5 * atr), 2)
         target = round(close + (2.5 * atr), 2)
@@ -225,30 +224,34 @@ def calculate_signals(
         reward = target - entry
         rr     = round(reward / risk, 2) if risk > 0 else None
 
-    # ── Bull / Bear Signal Lists ────────────────────────────────────────────
+    # ── Bull / Bear Signal Lists ────────────────────────────────────────
     bull_signals = []
     bear_signals = []
 
-    if ema_stack:        bull_signals.append("EMA20 > EMA50 — bullish structure")
-    if ema200 and close > ema200: bull_signals.append("Price above EMA200 — macro trend intact")
-    if chg > 2:          bull_signals.append(f"24H change +{chg:.1f}% — momentum")
-    if macd_hist > 0:    bull_signals.append("MACD histogram positive")
-    if social_delta > 5: bull_signals.append(f"Social ↑{social_delta:.0f}% — retail accumulating")
-    if rel_vol > 2:      bull_signals.append(f"Volume {rel_vol:.1f}× above average")
+    if ema_stack:                  bull_signals.append("EMA20 > EMA50 > EMA200 — full bullish stack")
+    if ema50 and close > ema50:    bull_signals.append("Price above EMA50 — medium trend bullish")
+    if ema200 and close > ema200:  bull_signals.append("Price above EMA200 — macro trend intact")
+    if chg > 2:                    bull_signals.append(f"24H change +{chg:.1f}% — momentum")
+    if macd_hist > 0:              bull_signals.append("MACD histogram positive")
+    if adx_confirmed and chg > 0:  bull_signals.append(f"ADX {adx:.0f} — trend has strength")
+    if social_delta > 5:           bull_signals.append(f"Social +{social_delta:.0f}% — retail accumulating")
+    if rel_vol >= 2:               bull_signals.append(f"Volume {rel_vol:.1f}x above average")
+    if rsi <= 30:                  bull_signals.append(f"RSI {rsi:.0f} — oversold, bounce potential")
 
-    if rsi >= 70:        bear_signals.append(f"RSI {rsi:.0f} — overbought, fade risk")
-    if rsi <= 30:        bull_signals.append(f"RSI {rsi:.0f} — oversold, bounce potential")
-    if chg < -3:         bear_signals.append(f"24H change {chg:.1f}% — selling pressure")
-    if macd_hist < 0:    bear_signals.append("MACD histogram negative — momentum fading")
-    if close < ema20 if ema20 else False:
-                         bear_signals.append("Price below EMA20 — bearish near-term")
+    if rsi >= 70:                  bear_signals.append(f"RSI {rsi:.0f} — overbought, fade risk")
+    if ema200 and close < ema200:  bear_signals.append("Price below EMA200 — macro trend bearish")
+    if ema50 and close < ema50:    bear_signals.append("Price below EMA50 — medium trend bearish")
+    if adx_confirmed and chg < 0:  bear_signals.append(f"ADX {adx:.0f} — bearish trend has strength")
+    if chg < -3:                   bear_signals.append(f"24H change {chg:.1f}% — selling pressure")
+    if macd_hist < 0:              bear_signals.append("MACD histogram negative — momentum fading")
+    if rel_vol >= 2 and chg < 0:   bear_signals.append(f"Volume {rel_vol:.1f}x — heavy distribution")
 
-    # ── Populate result ─────────────────────────────────────────────────────
+    # ── Populate result ─────────────────────────────────────────────────
     result.v_score   = v_score
     result.p_score   = p_score
     result.r_score   = r_score
     result.t_score   = t_score
-    result.s_score   = s_score
+    result.s_score   = 0
     result.total     = total
     result.signal    = signal
     result.direction = direction

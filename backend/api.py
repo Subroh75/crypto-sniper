@@ -542,9 +542,9 @@ def build_pdf(symbol: str, interval: str, sc: dict, debate: dict, now: str, kron
 
     # Signal
     score = sc["score"]
-    label = "STRONG BUY" if score >= 9 else "MODERATE" if score >= 5 else "NO SIGNAL"
+    label = "STRONG BUY" if score >= 9 else "BUY" if score >= 5 else "NO SIGNAL"
     pdf.set_font("Helvetica", "B", 18)
-    color = (16, 185, 129) if score >= 9 else (245, 158, 11) if score >= 5 else (100, 116, 139)
+    color = (34, 197, 94) if score >= 9 else (245, 158, 11) if score >= 5 else (100, 116, 139)  # #22c55e / #f59e0b / neutral
     pdf.set_text_color(*color)
     pdf.cell(0, 10, _p(f"SIGNAL: {label}  ({score}/13)"), ln=True, align="C")
     pdf.ln(3)
@@ -778,11 +778,11 @@ now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 sec("01 — Signal Output", "#10b981" if score >= 9 else "#f59e0b" if score >= 5 else "#334155")
 
 if score >= 9:
-    bcls, lcls, scls = "sig-banner-strong", "sig-label-strong", "#10b981"
+    bcls, lcls, scls = "sig-banner-strong", "sig-label-strong", "#22c55e"
     label = "STRONG BUY"
 elif score >= 5:
     bcls, lcls, scls = "sig-banner-moderate", "sig-label-moderate", "#f59e0b"
-    label = "MODERATE"
+    label = "BUY"
 else:
     bcls, lcls, scls = "sig-banner-weak", "sig-label-weak", "#334155"
     label = "NO SIGNAL"

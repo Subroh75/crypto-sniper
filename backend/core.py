@@ -136,30 +136,42 @@ def compute_indicators(df: pd.DataFrame) -> pd.DataFrame:
 # SCORING  (V / P / R / T — max 13)
 # ──────────────────────────────────────────────────────────────────────────────
 
+# ── Scoring helpers — identical to telegram_bot/signals.py ─────────────────
+# V max 3, P max 2, R max 1, T max 3 = 9 total for STRONG BUY
+# S score removed — pure VPRT only
+
 def _score_v(rv: float) -> int:
-    if rv < 2:   return 0
-    elif rv < 4: return 2
-    elif rv < 8: return 3
-    return 5
+    """V: volume gate. Flat — any rel_vol >= 1.2x scores 1+."""
+    if rv >= 2.0:  return 3
+    elif rv >= 1.5: return 2
+    elif rv >= 1.2: return 1
+    return 0
 
 def _score_p(close_now: float, close_prev: float, atr_move: float) -> int:
-    if close_now <= close_prev: return 0
-    if atr_move < 1.5:          return 0
-    elif atr_move < 2.5:        return 1
-    elif atr_move < 4.0:        return 2
-    return 3
+    """P: momentum. Requires positive move AND positive ATR move."""
+    if close_now <= close_prev or atr_move <= 0:
+        return 0
+    pct = (close_now - close_prev) / close_prev * 100 if close_prev else 0
+    return 2 if pct >= 3 else 1
 
 def _score_r(range_pos: float) -> int:
-    if range_pos < 0.70:   return 0
-    elif range_pos < 0.85: return 1
-    return 2
+    """R: range position. Close in upper 50% of bar = 1."""
+    return 1 if range_pos >= 0.5 else 0
 
-def _score_t(close: float, ema20: float, ema50: float, adx14: float) -> int:
-    t = 0
-    if close > ema20:  t += 1
-    if ema20  > ema50: t += 1
-    if adx14  >= 20:   t += 1
-    return t
+def _score_t(close: float, ema20: float, ema50: float, adx14: float,
+             ema200: float = 0.0) -> int:
+    """T: trend alignment.
+    3 = full stack (close>EMA20>EMA50>EMA200) AND ADX>=25
+    2 = full stack only
+    1 = ADX>=25 only (partial trend)
+    0 = neither
+    """
+    full_stack = bool(ema200 and close > ema20 > ema50 > ema200)
+    adx_ok     = adx14 >= 25
+    if full_stack and adx_ok: return 3
+    if full_stack:             return 2
+    if adx_ok:                 return 1
+    return 0
 
 
 def compute_scores(df: pd.DataFrame) -> Optional[dict]:
@@ -176,7 +188,7 @@ def compute_scores(df: pd.DataFrame) -> Optional[dict]:
     v = _score_v(rv)
     p = _score_p(float(row["close"]), float(prev["close"]), atr_move)
     r = _score_r(range_pos)
-    t = _score_t(float(row["close"]), float(row["ema20"]), float(row["ema50"]), float(row["adx14"]))
+    t = _score_t(float(row["close"]), float(row["ema20"]), float(row["ema50"]), float(row["adx14"]), float(row["ema200"]))
     pct = (float(row["close"]) - float(prev["close"])) / float(prev["close"]) * 100
 
     return {
