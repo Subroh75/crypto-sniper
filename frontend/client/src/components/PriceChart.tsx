@@ -95,8 +95,10 @@ export function PriceChart({ ohlcv, structure, interval, symbol, onTfChange }: P
   // Price-aware padding: minimum 1.5% of price so low-price coins
   // (DOGE $0.10, XRP $0.50) produce visible candles
   const pad    = Math.max((pMax - pMin) * 0.08, pMin * 0.015);
+  // Expand domain to include EMA 200 if it falls outside the candle range
+  const ema200Ref = structure?.ema200 && structure.ema200 > 0 ? structure.ema200 : 0;
   const domMin  = pMin - pad;
-  const domMax  = pMax + pad;
+  const domMax  = Math.max(pMax + pad, ema200Ref > 0 ? ema200Ref * 1.02 : 0);
   const domRange = domMax - domMin || pMin * 0.1 || 1;
 
   const ema20  = calcEMA(closes, 20);
