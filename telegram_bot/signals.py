@@ -217,7 +217,16 @@ def calculate_signals(
         elif below_mas:
             t_detail = f"Trend: below {' · '.join(below_mas)}"
         else:
-            t_detail = "Trend: above all MAs"
+            # above all MAs individually but EMA stack not ordered (e.g. EMA20 < EMA50)
+            ma_order = []
+            if ema20 and ema50 and ema20 < ema50:
+                ma_order.append("EMA20 < EMA50")
+            if ema50 and ema200 and ema50 < ema200:
+                ma_order.append("EMA50 < EMA200")
+            if ma_order:
+                t_detail = f"Trend: above all MAs but {' · '.join(ma_order)} — stack not aligned"
+            else:
+                t_detail = "Trend: above all MAs"
     else:
         t_confirmed = False
         t_detail = "Trend: EMA data unavailable"
