@@ -99,8 +99,9 @@ export function PriceChart({ ohlcv, structure, interval, symbol, onTfChange }: P
   const domMax  = pMax + pad;
   const domRange = domMax - domMin || pMin * 0.1 || 1;
 
-  const ema20 = calcEMA(closes, 20);
-  const ema50 = calcEMA(closes, 50);
+  const ema20  = calcEMA(closes, 20);
+  const ema50  = calcEMA(closes, 50);
+  const ema200 = calcEMA(closes, 200);
   const bb    = calcBB(closes, 20, 2);
   const vwap  = calcVWAP(raw);
 
@@ -110,7 +111,7 @@ export function PriceChart({ ohlcv, structure, interval, symbol, onTfChange }: P
     ts, open: o, high: h, low: l, close: c,
     isGreen: c >= o,
     domMin, domRange,          // shared with Candle renderer
-    ema20: ema20[i], ema50: ema50[i],
+    ema20: ema20[i], ema50: ema50[i], ema200: ema200[i],
     bbU: bb.upper[i], bbL: bb.lower[i],
     vwap: vwap[i],
     vol: bodyVol[i],
@@ -119,12 +120,15 @@ export function PriceChart({ ohlcv, structure, interval, symbol, onTfChange }: P
   const last      = data[data.length - 1];
   const lastClose = last?.close ?? 0;
 
+  // EMA 200: prefer client-computed value; fall back to backend structure value
+  const ema200Display = last?.ema200 ?? (structure?.ema200 && structure.ema200 > 0 ? structure.ema200 : null);
   const inds = [
-    { key: "ema20", color: "#22c55e", label: "EMA 20", value: last?.ema20 },
-    { key: "ema50", color: "#f59e0b", label: "EMA 50", value: last?.ema50 },
-    { key: "vwap",  color: "#f97316", label: "VWAP",   value: last?.vwap  },
-    { key: "bbU",   color: "#818cf8", label: "BB+",    value: last?.bbU   },
-    { key: "bbL",   color: "#818cf8", label: "BB-",    value: last?.bbL   },
+    { key: "ema20",  color: "#22c55e", label: "EMA 20",  value: last?.ema20   },
+    { key: "ema50",  color: "#f59e0b", label: "EMA 50",  value: last?.ema50   },
+    { key: "ema200", color: "#ef4444", label: "EMA 200", value: ema200Display },
+    { key: "vwap",   color: "#f97316", label: "VWAP",    value: last?.vwap    },
+    { key: "bbU",    color: "#818cf8", label: "BB+",     value: last?.bbU     },
+    { key: "bbL",    color: "#818cf8", label: "BB-",     value: last?.bbL     },
   ].filter(i => i.value != null && i.value > 0);
 
   return (
@@ -194,12 +198,20 @@ export function PriceChart({ ohlcv, structure, interval, symbol, onTfChange }: P
             strokeWidth={1.5} dot={false} isAnimationActive={false} connectNulls={false} />
           <Line type="monotone" dataKey="ema50" stroke="#f59e0b" name="ema50"
             strokeWidth={1.5} dot={false} isAnimationActive={false} connectNulls={false} />
+          <Line type="monotone" dataKey="ema200" stroke="#ef4444" name="ema200"
+            strokeWidth={1.5} dot={false} isAnimationActive={false} connectNulls={false} />
           <Line type="monotone" dataKey="vwap" stroke="#f97316" name="vwap"
             strokeWidth={1.5} dot={false} isAnimationActive={false} connectNulls={false} />
           <Line type="monotone" dataKey="bbU" stroke="#818cf8" name="bbU"
             strokeWidth={1} dot={false} isAnimationActive={false} strokeDasharray="3 4" connectNulls={false} />
           <Line type="monotone" dataKey="bbL" stroke="#818cf8" name="bbL"
             strokeWidth={1} dot={false} isAnimationActive={false} strokeDasharray="3 4" connectNulls={false} />
+          {/* EMA 200 reference line from backend (accurate, 500-bar calculation) */}
+          {structure?.ema200 && structure.ema200 > 0 && last?.ema200 == null && (
+            <ReferenceLine y={structure.ema200} stroke="#ef4444" strokeDasharray="3 3" strokeWidth={1.5}
+              label={{ value: `EMA200 ${fmtPrice(structure.ema200)}`, position: "insideRight", fontSize: 9, fill: "#ef4444", offset: 4 }}
+            />
+          )}
           {/* Last price line */}
           {lastClose > 0 && (
             <ReferenceLine y={lastClose} stroke="#7c3aed" strokeDasharray="4 4" strokeWidth={1}
