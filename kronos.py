@@ -169,8 +169,11 @@ def _heuristic_forecast(symbol: str, ctx: dict) -> dict:
             "low": round(low_c, 2), "close": round(price, 2)
         })
 
-    bull_conv = "HIGH" if score >= 9 else "MEDIUM" if score >= 5 else "LOW"
-    bear_conv = "HIGH" if rsi >= 75 or score < 3 else "MEDIUM" if rsi >= 65 else "LOW"
+    # Conviction driven by forecast direction + score, not RSI
+    is_bearish = direction == "DOWN"
+    is_bullish = direction == "UP"
+    bull_conv = "HIGH" if (is_bullish and score >= 7) else "MEDIUM" if (is_bullish and score >= 4) else "LOW"
+    bear_conv = "HIGH" if (is_bearish and score < 4) else "MEDIUM" if (is_bearish and score < 7) else "LOW"
 
     return {
         "direction":        direction,
@@ -181,8 +184,8 @@ def _heuristic_forecast(symbol: str, ctx: dict) -> dict:
         "momentum":         "Mostly bullish" if green_pct > 55 else "Mostly bearish" if green_pct < 45 else "Mixed",
         "green_candle_pct": green_pct,
         "trade_quality":    "Strong setup" if score >= 9 else "Avoid — bad odds" if score < 5 else "Moderate setup",
-        "bull_case":        "TAKE" if score >= 7 else "PASS",
-        "bear_case":        "SHORT" if rsi >= 75 else "PASS",
+        "bull_case":        "TAKE" if (is_bullish and score >= 7) else "PASS",
+        "bear_case":        "SHORT" if (is_bearish and score < 5) else "PASS",
         "bull_conviction":  bull_conv,
         "bear_conviction":  bear_conv,
         "predicted_ohlcv":  candles,
