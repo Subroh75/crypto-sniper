@@ -12,6 +12,7 @@ interface Signal {
   v: number; p: number; r: number; t: number; s: number;
   price: number; change: number; change_24h?: number;
   rsi: number; adx: number; rel_vol?: number;
+  z_price?: number; z_vol?: number; z_return?: number; z_quality?: string;
 }
 
 interface BuySignal { symbol: string; score: number; change: number; }
@@ -91,6 +92,10 @@ export function TopSignals({ onSelect, interval = "1h", onBuySignalsChange }: Pr
         r:         Number(s.r ?? 0),
         t:         Number(s.t ?? 0),
         s:         Number(s.s ?? 0),
+        z_price:   s.z_price  != null ? Number(s.z_price)  : undefined,
+        z_vol:     s.z_vol    != null ? Number(s.z_vol)    : undefined,
+        z_return:  s.z_return != null ? Number(s.z_return) : undefined,
+        z_quality: s.z_quality ? String(s.z_quality) : undefined,
         price:     Number(s.price ?? 0),
         change:    Number(s.change ?? 0),
         rsi:       Number(s.rsi ?? 0),
@@ -262,11 +267,11 @@ export function TopSignals({ onSelect, interval = "1h", onBuySignalsChange }: Pr
       {pageRows.length > 0 && (
         <div style={{ borderRadius: 8, overflow: "hidden", border: "1px solid #1e293b", opacity: loading ? 0.6 : 1, transition: "opacity 0.3s" }}>
           {/* Column headers */}
-          <div style={{ display: "grid", gridTemplateColumns: isMobile ? "24px 1fr 52px 42px 64px" : "28px 1fr 60px 42px 80px", background: "#0a0f1e", borderBottom: "1px solid #1e293b" }}>
+          <div style={{ display: "grid", gridTemplateColumns: isMobile ? "24px 1fr 52px 52px 64px" : "28px 1fr 60px 56px 80px", background: "#0a0f1e", borderBottom: "1px solid #1e293b" }}>
             <span style={TH}>#</span>
             <span style={TH}>Symbol</span>
             <SortBtn col="change" label="Chg%" />
-            <SortBtn col="rsi" label="RSI" />
+            <span style={TH} title="Z-score of current return vs 20-bar history. Above +2σ = statistically exhausted.">Z-Ret σ</span>
             <span style={{ ...TH, textAlign: "center" as const }}>Action</span>
           </div>
 
@@ -274,6 +279,23 @@ export function TopSignals({ onSelect, interval = "1h", onBuySignalsChange }: Pr
           {pageRows.map((sig, i) => {
             const globalIndex = (pageClamped - 1) * PAGE_SIZE + i + 1;
             const chg   = sig.change ?? 0;
+            const zRet  = sig.z_return ?? null;
+            const zQual = sig.z_quality ?? "";
+
+            // Left-border accent by entry quality
+            const qualBorder = zQual === "IDEAL"   ? "3px solid #22c55e"
+                             : zQual === "GOOD"    ? "3px solid #22c55e"
+                             : zQual === "CAUTION" ? "3px solid #f59e0b"
+                             : zQual === "AVOID"   ? "3px solid #ef4444"
+                             : "3px solid #1e293b";
+
+            // Z-return colour: green = room remains, amber = extended, red = exhausted
+            const zRetColor = zRet === null ? "#475569"
+                            : zRet >  2.5  ? "#ef4444"
+                            : zRet >  1.5  ? "#f59e0b"
+                            : zRet >= -1.0 ? "#22c55e"
+                            :                "#94a3b8";
+
             const rowBg = i % 2 === 0 ? "#060b17" : "#080e1c";
 
             return (
@@ -282,9 +304,10 @@ export function TopSignals({ onSelect, interval = "1h", onBuySignalsChange }: Pr
                 onClick={() => onSelect(sig.symbol)}
                 style={{
                   display: "grid",
-                  gridTemplateColumns: isMobile ? "24px 1fr 52px 42px 64px" : "28px 1fr 60px 42px 80px",
+                  gridTemplateColumns: isMobile ? "24px 1fr 52px 52px 64px" : "28px 1fr 60px 56px 80px",
                   width: "100%", background: rowBg,
                   border: "none", borderBottom: "1px solid #0f172a",
+                  borderLeft: qualBorder,
                   cursor: "pointer", textAlign: "left" as const,
                   alignItems: "center", transition: "background 0.12s",
                 }}
@@ -296,13 +319,19 @@ export function TopSignals({ onSelect, interval = "1h", onBuySignalsChange }: Pr
                   {globalIndex}
                 </span>
 
-                {/* Symbol + price */}
+                {/* Symbol + price + quality label */}
                 <div style={{ display: "flex", flexDirection: "column" as const, gap: 1, padding: "9px 0 9px 4px" }}>
                   <span style={{ fontSize: 11, fontWeight: 800, color: "#f1f5f9", fontFamily: "monospace", letterSpacing: "0.04em" }}>
                     {sig.symbol}
                   </span>
                   <span style={{ fontSize: 8, color: "#334155" }}>
                     ${sig.price < 0.01 ? sig.price.toFixed(6) : sig.price < 1 ? sig.price.toFixed(4) : sig.price.toFixed(2)}
+                    {zQual && zQual !== "UNKNOWN" && (
+                      <span style={{
+                        marginLeft: 5, fontSize: 7, fontWeight: 700,
+                        color: zQual === "IDEAL" || zQual === "GOOD" ? "#22c55e" : zQual === "CAUTION" ? "#f59e0b" : "#ef4444",
+                      }}>{zQual}</span>
+                    )}
                     {sig.scanned_at && (() => {
                       const ageM = Math.round((Date.now() / 1000 - sig.scanned_at) / 60);
                       return ageM >= 2 ? <span style={{ color: "#f59e0b", marginLeft: 4 }}>{ageM}m ago</span> : null;
@@ -315,10 +344,17 @@ export function TopSignals({ onSelect, interval = "1h", onBuySignalsChange }: Pr
                   {chg >= 0 ? "+" : ""}{chg.toFixed(1)}%
                 </span>
 
-                {/* RSI */}
-                <span style={{ fontSize: 10, fontWeight: 600, color: sig.rsi > 70 ? "#ef4444" : sig.rsi < 30 ? "#22c55e" : "#94a3b8", fontFamily: "monospace", padding: "0 2px" }}>
-                  {sig.rsi.toFixed(0)}
-                </span>
+                {/* Z-return (replaces RSI) */}
+                <div style={{ display: "flex", flexDirection: "column" as const, gap: 1, padding: "0 2px" }}>
+                  <span style={{ fontSize: 10, fontWeight: 700, color: zRetColor, fontFamily: "monospace" }}>
+                    {zRet !== null ? (zRet >= 0 ? "+" : "") + zRet.toFixed(1) + "σ" : "-"}
+                  </span>
+                  {zRet !== null && (
+                    <span style={{ fontSize: 7, color: "#475569" }}>
+                      {zRet > 2.5 ? "exhausted" : zRet > 1.5 ? "extended" : zRet >= -1.0 ? "in range" : "depressed"}
+                    </span>
+                  )}
+                </div>
 
                 {/* Analyse CTA */}
                 <div style={{ textAlign: "center" as const, padding: "0 6px" }}>

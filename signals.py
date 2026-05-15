@@ -77,6 +77,11 @@ class SignalResult:
     # Conviction
     bull_signals: list = field(default_factory=list)
     bear_signals: list = field(default_factory=list)
+    # Z-score Phase 1 — entry quality (display only, not blocking signals)
+    z_price:   float = 0.0
+    z_vol:     float = 0.0
+    z_return:  float = 0.0
+    z_quality: str   = "UNKNOWN"
 
     @property
     def pct_score(self) -> float:
@@ -365,6 +370,49 @@ def calculate_signals(
 
     result.bull_signals = bull_signals
     result.bear_signals = bear_signals
+
+    # ── Z-score suite (Phase 1 — display + tracker storage) ────────────
+    def _zscore(series):
+        if len(series) < 5:
+            return 0.0, 0.0, 0.0
+        n    = len(series)
+        mean = sum(series) / n
+        var  = sum((x - mean) ** 2 for x in series) / n
+        std  = var ** 0.5
+        if std == 0:
+            return 0.0, mean, 0.0
+        return (series[-1] - mean) / std, mean, std
+
+    closes_list = [bar[4] for bar in ohlcv]
+    volumes_list = [bar[5] for bar in ohlcv if len(bar) > 5]
+
+    z_price, _, _ = _zscore(closes_list[-20:])
+
+    if volumes_list and len(volumes_list) >= 5:
+        z_vol, _, _ = _zscore(volumes_list[-20:])
+    else:
+        z_vol = 0.0
+
+    if len(closes_list) >= 21:
+        returns = [(closes_list[i] - closes_list[i-1]) / closes_list[i-1] * 100
+                   for i in range(len(closes_list)-20, len(closes_list))]
+        z_return, _, _ = _zscore(returns)
+    else:
+        z_return = 0.0
+
+    good_z_price  = z_price  <  2.0
+    good_z_vol    = z_vol    >= 0.5
+    good_z_return = z_return <  2.5
+    quality_pts   = sum([good_z_price, good_z_vol, good_z_return])
+    if quality_pts == 3:   z_quality = "IDEAL"
+    elif quality_pts == 2: z_quality = "GOOD"
+    elif quality_pts == 1: z_quality = "CAUTION"
+    else:                  z_quality = "AVOID"
+
+    result.z_price   = round(z_price,   2)
+    result.z_vol     = round(z_vol,     2)
+    result.z_return  = round(z_return,  2)
+    result.z_quality = z_quality
 
     return result
 

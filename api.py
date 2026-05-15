@@ -381,6 +381,10 @@ def scan_top_signals(
                 "r":         sig.r_score,
                 "t":         sig.t_score,
                 "s":         sig.s_score,
+                "z_price":   sig.z_price,
+                "z_vol":     sig.z_vol,
+                "z_return":  sig.z_return,
+                "z_quality": sig.z_quality,
                 "scanned_at": int(time.time()),
             }
         except Exception:

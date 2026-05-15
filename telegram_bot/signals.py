@@ -373,7 +373,50 @@ def calculate_signals(
     result.bull_signals = bull_signals
     result.bear_signals = bear_signals
 
-    # Z-score fields (Phase 1 — display + tracker storage)
+    # ── Z-score suite (Phase 1 — display + tracker storage) ────────────
+    # Uses last 20 bars of candle data for statistical distribution.
+    # Not blocking signals — purely informational for entry quality.
+    def _zscore(series):
+        """Return (z, mean, std) for a list of floats. Last element = current."""
+        if len(series) < 5:
+            return 0.0, 0.0, 0.0
+        n      = len(series)
+        mean   = sum(series) / n
+        var    = sum((x - mean) ** 2 for x in series) / n
+        std    = var ** 0.5
+        if std == 0:
+            return 0.0, mean, 0.0
+        return (series[-1] - mean) / std, mean, std
+
+    # z_price: how extended price is vs 20-bar SMA (>+2 = top of range)
+    price_series = closes[-20:]
+    z_price, sma20, std20 = _zscore(price_series)
+
+    # z_vol: volume spike genuineness vs 20-bar mean (>+1.5 = real buying)
+    if volumes and len(volumes) >= 5:
+        vol_series = volumes[-20:]
+        z_vol, _, _ = _zscore(vol_series)
+    else:
+        z_vol = z_price * 0  # no volume data — default 0
+
+    # z_return: bar-to-bar returns — is the current return exhausted vs history?
+    if len(closes) >= 21:
+        returns = [(closes[i] - closes[i-1]) / closes[i-1] * 100
+                   for i in range(len(closes)-20, len(closes))]
+        z_return, _, _ = _zscore(returns)
+    else:
+        z_return = 0.0
+
+    # Entry quality label from 3 checks
+    good_z_price  = z_price  <  2.0    # not extended above mean
+    good_z_vol    = z_vol    >= 0.5    # genuine volume spike
+    good_z_return = z_return <  2.5    # return not exhausted
+    quality_pts   = sum([good_z_price, good_z_vol, good_z_return])
+    if quality_pts == 3:   z_quality = "IDEAL"
+    elif quality_pts == 2: z_quality = "GOOD"
+    elif quality_pts == 1: z_quality = "CAUTION"
+    else:                  z_quality = "AVOID"
+
     result.z_price   = round(z_price,  2)
     result.z_vol     = round(z_vol,    2)
     result.z_return  = round(z_return, 2)
