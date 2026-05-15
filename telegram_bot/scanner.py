@@ -305,7 +305,6 @@ def _format_watch_message(watch: list[dict], interval: str, scan_time: str) -> s
 
         close = struct.get("close") or quote.get("price") or 0
         chg   = quote.get("change_24h") or 0
-        rsi   = timing.get("rsi") or 0
         rv    = timing.get("rel_volume") or 0
         adx   = timing.get("adx") or 0
 
@@ -318,9 +317,10 @@ def _format_watch_message(watch: list[dict], interval: str, scan_time: str) -> s
         bar    = "[" + "#" * filled + "-" * (10 - filled) + "]"
         gap    = 9 - score
 
+        adx_label = "trending" if adx >= 25 else "ranging"
         block  = f"\n#{i}  {symbol}  —  {score}/13  {bar}  (+{gap} to signal)\n"
         block += f"Price: ${close:.6g}  ({chg:+.2f}%)\n"
-        block += f"VPRT:  V{v_sc} P{p_sc} R{r_sc} T{t_sc}  |  RSI {rsi:.0f}  ADX {adx:.0f}  Vol {rv:.1f}x\n"
+        block += f"VPRT:  V{v_sc} P{p_sc} R{r_sc} T{t_sc}  |  ADX {adx:.0f} ({adx_label})  Vol {rv:.1f}x\n"
         blocks.append(block)
 
     footer = (
