@@ -129,10 +129,10 @@ def calculate_signals(
     """
     result = SignalResult()
 
-    if not ohlcv or len(ohlcv) < 21:
+    if not ohlcv or len(ohlcv) < 50:
         result.signal = "NO SIGNAL"
-        result.v_detail = "Vol: insufficient data"
-        result.t_detail = "Trend: insufficient data"
+        result.v_detail = "Vol: insufficient history (new listing?)"
+        result.t_detail = "Trend: insufficient history — need 50+ bars"
         result.p_detail = "Momentum: insufficient data"
         result.r_detail = "Range: insufficient data"
         return result
