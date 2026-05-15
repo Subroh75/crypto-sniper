@@ -2,7 +2,7 @@
 signals.py — V/P/R/T gate-based signal engine for Crypto Sniper
 
 Signal Logic:
-  V — Volume gate  : rel_vol >= 1.2x  → confirmed (flat gate)
+  V — Volume gate  : rel_vol >= 1.8x  → confirmed (unusual volume)
   T — Trend gate   : close > EMA20 > EMA50 > EMA200 (all 3 MAs below price)
   ADX gate         : ADX >= 25 → trending
 
@@ -190,12 +190,12 @@ def calculate_signals(
     # GATE LOGIC
     # ══════════════════════════════════════════════════════════════════════
 
-    # ── V gate: flat — any rel_vol >= 1.2x is confirmed ────────────────
-    v_confirmed = rel_vol >= 1.2
+    # ── V gate: unusual volume — rel_vol >= 1.8x required ────────────────
+    v_confirmed = rel_vol >= 1.8
     if v_confirmed:
-        v_detail = f"Vol: {rel_vol:.1f}x above average"
+        v_detail = f"Vol: {rel_vol:.1f}x — unusual volume confirmed"
     else:
-        v_detail = f"Vol: {rel_vol:.1f}x — below threshold"
+        v_detail = f"Vol: {rel_vol:.1f}x — below 1.8x threshold"
 
     # ── T gate: close > EMA20 > EMA50 > EMA200 ─────────────────────────
     ema_stack = False
@@ -264,7 +264,7 @@ def calculate_signals(
         signal = "NO SIGNAL"
 
     # ── Legacy score fields (kept for trade setup + API compat) ────────
-    v_score = 3 if rel_vol >= 2.0 else (2 if rel_vol >= 1.5 else (1 if v_confirmed else 0))
+    v_score = 3 if rel_vol >= 3.5 else (2 if rel_vol >= 2.5 else (1 if v_confirmed else 0))
     p_score = 2 if p_confirmed and chg >= 3 else (1 if p_confirmed else 0)
     r_score = 1 if r_confirmed else 0
     t_score = 3 if t_confirmed and adx_confirmed else (2 if t_confirmed else (1 if adx_confirmed else 0))
