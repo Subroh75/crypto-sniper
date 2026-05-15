@@ -28,18 +28,6 @@ function calcEMA(closes: number[], period: number): (number | null)[] {
   return result;
 }
 
-function calcBB(closes: number[], period = 20, mult = 2) {
-  const upper: (number | null)[] = [], lower: (number | null)[] = [];
-  for (let i = 0; i < closes.length; i++) {
-    if (i < period - 1) { upper.push(null); lower.push(null); continue; }
-    const slice = closes.slice(i - period + 1, i + 1);
-    const mean  = slice.reduce((a, b) => a + b, 0) / period;
-    const sd    = Math.sqrt(slice.reduce((a, b) => a + (b - mean) ** 2, 0) / period);
-    upper.push(mean + sd * mult);
-    lower.push(mean - sd * mult);
-  }
-  return { upper, lower };
-}
 
 function calcVWAP(raw: number[][]): (number | null)[] {
   let cumPV = 0, cumV = 0;
@@ -94,7 +82,7 @@ export function PriceChart({ ohlcv, structure, interval, symbol, onTfChange }: P
   const pMax   = Math.max(...allP);
   // Price-aware padding: minimum 1.5% of price so low-price coins
   // (DOGE $0.10, XRP $0.50) produce visible candles
-  const pad    = Math.max((pMax - pMin) * 0.08, pMin * 0.015);
+  const pad    = Math.max((pMax - pMin) * 0.12, pMin * 0.02);
   // Expand domain to include EMA 200 if it falls outside the candle range
   const ema200Ref = structure?.ema200 && structure.ema200 > 0 ? structure.ema200 : 0;
   const domMin  = pMin - pad;
@@ -104,7 +92,6 @@ export function PriceChart({ ohlcv, structure, interval, symbol, onTfChange }: P
   const ema20  = calcEMA(closes, 20);
   const ema50  = calcEMA(closes, 50);
   const ema200 = calcEMA(closes, 200);
-  const bb    = calcBB(closes, 20, 2);
   const vwap  = calcVWAP(raw);
 
   const bodyVol = calcBodyVolume(raw);
@@ -114,7 +101,6 @@ export function PriceChart({ ohlcv, structure, interval, symbol, onTfChange }: P
     isGreen: c >= o,
     domMin, domRange,          // shared with Candle renderer
     ema20: ema20[i], ema50: ema50[i], ema200: ema200[i],
-    bbU: bb.upper[i], bbL: bb.lower[i],
     vwap: vwap[i],
     vol: bodyVol[i],
   }));
@@ -129,8 +115,6 @@ export function PriceChart({ ohlcv, structure, interval, symbol, onTfChange }: P
     { key: "ema50",  color: "#f59e0b", label: "EMA 50",  value: last?.ema50   },
     { key: "ema200", color: "#ef4444", label: "EMA 200", value: ema200Display },
     { key: "vwap",   color: "#f97316", label: "VWAP",    value: last?.vwap    },
-    { key: "bbU",    color: "#818cf8", label: "BB+",     value: last?.bbU     },
-    { key: "bbL",    color: "#818cf8", label: "BB-",     value: last?.bbL     },
   ].filter(i => i.value != null && i.value > 0);
 
   return (
@@ -162,7 +146,7 @@ export function PriceChart({ ohlcv, structure, interval, symbol, onTfChange }: P
         </div>
       )}
       {/* Main candle chart */}
-      <ResponsiveContainer width="100%" height={isMobile ? 200 : 230}>
+      <ResponsiveContainer width="100%" height={isMobile ? 240 : 280}>
         <ComposedChart data={data} margin={{ top: 4, right: isMobile ? 4 : 64, left: 0, bottom: 2 }}>
           <CartesianGrid strokeDasharray="2 4" stroke="#1e293b" vertical={false} />
           <XAxis dataKey="ts"
@@ -195,7 +179,7 @@ export function PriceChart({ ohlcv, structure, interval, symbol, onTfChange }: P
             background={{ fill: "transparent" }}
             shape={(props: any) => <Candle {...props} />}
           />
-          {/* EMA + VWAP + BB lines */}
+          {/* EMA 20 / 50 / 200 + VWAP lines */}
           <Line type="monotone" dataKey="ema20" stroke="#22c55e" name="ema20"
             strokeWidth={1.5} dot={false} isAnimationActive={false} connectNulls={false} />
           <Line type="monotone" dataKey="ema50" stroke="#f59e0b" name="ema50"
@@ -204,10 +188,6 @@ export function PriceChart({ ohlcv, structure, interval, symbol, onTfChange }: P
             strokeWidth={1.5} dot={false} isAnimationActive={false} connectNulls={false} />
           <Line type="monotone" dataKey="vwap" stroke="#f97316" name="vwap"
             strokeWidth={1.5} dot={false} isAnimationActive={false} connectNulls={false} />
-          <Line type="monotone" dataKey="bbU" stroke="#818cf8" name="bbU"
-            strokeWidth={1} dot={false} isAnimationActive={false} strokeDasharray="3 4" connectNulls={false} />
-          <Line type="monotone" dataKey="bbL" stroke="#818cf8" name="bbL"
-            strokeWidth={1} dot={false} isAnimationActive={false} strokeDasharray="3 4" connectNulls={false} />
           {/* EMA 200 reference line from backend (accurate, 500-bar calculation) */}
           {structure?.ema200 && structure.ema200 > 0 && last?.ema200 == null && (
             <ReferenceLine y={structure.ema200} stroke="#ef4444" strokeDasharray="3 3" strokeWidth={1.5}
