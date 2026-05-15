@@ -228,12 +228,27 @@ def _coin_block(data: dict, rank: int, interval: str) -> str:
             block += f"  R:R {rr:.2f}"
         block += "\n"
 
-    # Z-Score entry quality (Phase 1 — display only)
-    z_quality = timing.get("z_quality", "")
-    z_detail  = timing.get("z_detail", "")
-    if z_quality and z_detail:
-        q_icon = {"IDEAL": "✅", "GOOD": "🟡", "CAUTION": "🟠", "AVOID": "🔴"}.get(z_quality, "⚪")
-        block += f"Entry Q: {q_icon} {z_quality}  {z_detail}\n"
+    # Z-Score entry quality
+    z_quality = timing.get("z_quality") or ""
+    z_return  = timing.get("z_return")
+    z_price   = timing.get("z_price")
+    z_vol     = timing.get("z_vol")
+    if z_quality:
+        q_icon = {"IDEAL": "✅", "GOOD": "✅", "CAUTION": "⚠️", "AVOID": "🔴"}.get(z_quality, "⚪")
+        # Build a concise one-liner with the most important Z values
+        z_parts = []
+        if z_return is not None:
+            ret_lbl = "exhausted" if z_return > 2.5 else ("extended" if z_return > 2.0 else "in range")
+            z_parts.append(f"Z-Ret {z_return:+.1f}σ ({ret_lbl})")
+        if z_price is not None:
+            z_parts.append(f"Z-Price {z_price:+.1f}σ")
+        z_str = "  ·  ".join(z_parts) if z_parts else ""
+        block += f"─────────────────────────────────\n"
+        block += f"Entry:   {q_icon} {z_quality}  {z_str}\n"
+        if z_return is not None and z_return > 2.5:
+            block += f"⚠️  Price return is {z_return:.1f}σ above mean — chasing risk, consider smaller size\n"
+        elif z_return is not None and z_return < -2.0:
+            block += f"📉  Price return is {z_return:.1f}σ below mean — oversold zone, watch for reversal\n"
 
     if kronos:
         kdir  = kronos.get("direction", "")

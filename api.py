@@ -194,7 +194,7 @@ async def analyse(req: AnalyseRequest):
             "T":{"confirmed":sig.t_confirmed,"label":"Trend","detail":sig.t_detail,"score":sig.t_score,"max":3},
         },
         "structure":{"close":sig.close,"ema20":sig.ema20,"ema50":sig.ema50,"ema200":sig.ema200,"vwap":sig.vwap,"bb_upper":sig.bb_upper,"bb_lower":sig.bb_lower},
-        "timing":{"rsi":sig.rsi,"adx":sig.adx,"atr":sig.atr,"rel_volume":sig.rel_volume},
+        "timing":{"rsi":sig.rsi,"adx":sig.adx,"atr":sig.atr,"rel_volume":sig.rel_volume,"z_price":sig.z_price,"z_vol":sig.z_vol,"z_return":sig.z_return,"z_quality":sig.z_quality},
         "quote":{"price":quote.get("price",sig.close),"change_24h":quote.get("change_24h",0),"volume_24h":quote.get("volume_24h",0),"high_24h":quote.get("high_24h",0),"low_24h":quote.get("low_24h",0)},
         "low_liquidity": quote.get("volume_24h", 0) < 1_000_000,  # <$1M 24h vol — scores may be unreliable
         "trade_setup":{"direction":sig.direction,"entry":sig.entry,"stop":sig.stop,"target":sig.target,"rr_ratio":sig.rr_ratio,"atr":sig.atr,"stop_dist_pct":round(((sig.close-sig.stop)/sig.close)*100,3) if sig.stop else None},
