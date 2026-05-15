@@ -218,7 +218,8 @@ def _coin_block(data: dict, rank: int, interval: str) -> str:
     block  = f"\n#{rank}  {symbol}/USDT  —  {score}/13  {bar}\n"
     block += f"Signal:  {label} ({tf_label})\n"
     block += f"Price:   ${close:.6g}  ({chg:+.2f}% 24h)\n"
-    block += f"VPRT:    V{v_sc} P{p_sc} R{r_sc} T{t_sc}  |  ADX {adx:.0f} ({\"trending\" if adx >= 25 else \"ranging\"})  Vol {rv:.1f}x\n"
+    adx_lbl = "trending" if adx >= 25 else "ranging"
+    block += f"VPRT:    V{v_sc} P{p_sc} R{r_sc} T{t_sc}  |  ADX {adx:.0f} ({adx_lbl})  Vol {rv:.1f}x\n"
 
     if trade and trade.get("entry") and trade.get("stop") and trade.get("target"):
         rr = trade.get("rr_ratio")
