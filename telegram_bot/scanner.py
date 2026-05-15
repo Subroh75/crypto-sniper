@@ -202,7 +202,6 @@ def _coin_block(data: dict, rank: int, interval: str) -> str:
 
     close = struct.get("close") or quote.get("price") or 0
     chg   = quote.get("change_24h") or 0
-    rsi   = timing.get("rsi") or 0
     rv    = timing.get("rel_volume") or 0
     adx   = timing.get("adx") or 0
 
@@ -219,7 +218,7 @@ def _coin_block(data: dict, rank: int, interval: str) -> str:
     block  = f"\n#{rank}  {symbol}/USDT  —  {score}/13  {bar}\n"
     block += f"Signal:  {label} ({tf_label})\n"
     block += f"Price:   ${close:.6g}  ({chg:+.2f}% 24h)\n"
-    block += f"VPRT:    V{v_sc} P{p_sc} R{r_sc} T{t_sc}  |  RSI {rsi:.0f}  ADX {adx:.0f}  Vol {rv:.1f}x\n"
+    block += f"VPRT:    V{v_sc} P{p_sc} R{r_sc} T{t_sc}  |  ADX {adx:.0f} ({\"trending\" if adx >= 25 else \"ranging\"})  Vol {rv:.1f}x\n"
 
     if trade and trade.get("entry") and trade.get("stop") and trade.get("target"):
         rr = trade.get("rr_ratio")
