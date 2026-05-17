@@ -262,6 +262,153 @@ def _coin_block(data: dict, rank: int, interval: str) -> str:
     return block
 
 
+# ─────────────────────────────────────────────
+#  Vol-first scan helper + formatter
+# ─────────────────────────────────────────────
+
+VOL_GATE = 1.8  # minimum rel_volume to appear in vol scan
+
+async def _vol_scan(
+    symbols: list[str],
+    interval: str = "1d",
+    concurrency: int = 5,
+) -> tuple[list[dict], int]:
+    """
+    Score all symbols, return every coin with rel_vol >= VOL_GATE.
+    Unlike _run_scan, no min_score filter — we want even low-scoring
+    high-volume coins so traders can see what's building.
+    """
+    hits   = []
+    errors = 0
+    sem    = asyncio.Semaphore(concurrency)
+
+    async def bounded(session, sym):
+        async with sem:
+            try:
+                async with session.post(
+                    f"{API_BASE}/analyse",
+                    json={"symbol": sym, "interval": interval},
+                    timeout=aiohttp.ClientTimeout(total=25)
+                ) as r:
+                    if r.status != 200:
+                        return None
+                    return await r.json()
+            except Exception as e:
+                logger.debug(f"[VolScan] {sym}: {e}")
+                return None
+            finally:
+                await asyncio.sleep(0.15)
+
+    async with aiohttp.ClientSession() as session:
+        results = await asyncio.gather(
+            *[bounded(session, sym) for sym in symbols],
+            return_exceptions=True
+        )
+
+    for res in results:
+        if isinstance(res, Exception):
+            errors += 1
+        elif res is not None:
+            timing = res.get("timing", {})
+            rv = timing.get("rel_volume") or 0
+            if rv >= VOL_GATE:
+                hits.append(res)
+
+    # Sort by rel_volume descending — highest spike first
+    hits.sort(key=lambda x: x.get("timing", {}).get("rel_volume") or 0, reverse=True)
+    return hits, errors
+
+
+def _format_vol_report(hits: list[dict], interval: str, scan_time: str, source: str = "CEX") -> str:
+    """
+    Vol-first report — shows every coin clearing the 1.8x gate
+    with traffic-light gate status and what's missing before a signal fires.
+    Used for: daily watch report (when no STRONG BUY) + /volscan command.
+    """
+    tf     = interval.upper()
+    strong = [h for h in hits if h.get("signal", {}).get("total", 0) >= MIN_SCORE]
+
+    header = (
+        f"CRYPTO SNIPER  —  VOL SCAN ({source})\n"
+        f"{scan_time}  |  {tf}  |  Vol >= 1.8x\n"
+        "──────────────────────────────────\n"
+        f"Unusual volume: {len(hits)} coins\n"
+        f"STRONG BUY signals: {len(strong)}\n"
+    )
+
+    if not hits:
+        return (
+            header +
+            "\nNo coins with vol >= 1.8x right now.\n"
+            "Market is quiet — volume not confirming any move.\n" +
+            "─" * 34 + "\n"
+            "https://crypto-sniper.app"
+        )
+
+    blocks = []
+    for i, data in enumerate(hits, 1):
+        sig    = data.get("signal", {})
+        timing = data.get("timing", {})
+        quote  = data.get("quote", {})
+        struct = data.get("structure", {})
+        comp   = data.get("components", {})
+        trade  = data.get("trade_setup") or {}
+
+        label  = sig.get("label", "")
+        score  = sig.get("total", 0)
+        rv     = timing.get("rel_volume") or 0
+        adx    = timing.get("adx") or 0
+        close  = quote.get("price") or struct.get("close") or 0
+        chg    = quote.get("change_24h") or 0
+        symbol = data.get("symbol", "?")
+
+        v_conf   = comp.get("V", {}).get("confirmed", False)
+        t_conf   = comp.get("T", {}).get("confirmed", False)
+        adx_conf = adx >= 25
+
+        vol_lbl = _vol_label(rv)
+        adx_lbl = "Trending" if adx_conf else "Ranging"
+
+        def dot(ok): return "[OK]" if ok else "[ ]"
+
+        block  = f"\n#{i}  {symbol}/USDT"
+        if label in ("STRONG BUY", "BUY"):
+            block += f"  —  {label}"
+        block += f"\nPrice:  ${close:.6g}  ({chg:+.1f}% 24h)"
+        block += f"\nVOL {dot(v_conf)} {vol_lbl} {rv:.1f}x   TREND {dot(t_conf)}   ADX {dot(adx_conf)} {adx:.0f} {adx_lbl}"
+
+        missing = []
+        if not t_conf:    missing.append("EMA stack not aligned")
+        if not adx_conf:  missing.append(f"ADX {adx:.0f} — needs 25+")
+        if missing:
+            block += "\nNeeds: " + " / ".join(missing)
+        elif v_conf and t_conf and adx_conf:
+            block += f"\nAll gates met"
+            if trade and trade.get("entry") and trade.get("stop") and trade.get("target"):
+                rr = trade.get("rr_ratio")
+                entry  = trade.get("entry")
+                stop   = trade.get("stop")
+                target = trade.get("target")
+                block += f"\nSetup:  E {entry:.6g}  SL {stop:.6g}  TP {target:.6g}" 
+                if rr:
+                    block += f"  R:R {rr:.2f}"
+
+        block += "\n"
+        blocks.append(block)
+
+    footer = (
+        "\n──────────────────────────────────\n"
+        "Volume is present — waiting for Trend + ADX.\n"
+        "https://crypto-sniper.app"
+    ) if not strong else (
+        "\n──────────────────────────────────\n"
+        f"{len(strong)} signal(s) fired — full report above.\n"
+        "https://crypto-sniper.app"
+    )
+
+    return header + "".join(blocks) + footer
+
+
 def _format_signal_message(hits: list[dict], interval: str, scan_time: str) -> str:
     """Standard STRONG BUY alert — used for both 1D and 1H scans."""
     tf     = interval.upper()
@@ -269,12 +416,12 @@ def _format_signal_message(hits: list[dict], interval: str, scan_time: str) -> s
     header = (
         f"CRYPTO SNIPER  —  {prefix} SCAN\n"
         f"{scan_time}  |  {tf}\n"
-        f"{'─' * 34}\n"
+        "──────────────────────────────────\n"
         f"STRONG BUY signals: {len(hits)}\n"
     )
     blocks = [_coin_block(d, i, interval) for i, d in enumerate(hits, 1)]
     footer = (
-        f"\n{'─' * 34}\n"
+        "\n──────────────────────────────────\n"
         "https://crypto-sniper.app\n"
         "Not financial advice."
     )
@@ -287,7 +434,7 @@ def _format_watch_message(watch: list[dict], interval: str, scan_time: str) -> s
     header = (
         f"CRYPTO SNIPER  —  NO TRADES ({tf})\n"
         f"{scan_time}  |  {tf}\n"
-        f"{'─' * 34}\n"
+        "──────────────────────────────────\n"
         f"No signal yet — market conditions not confirmed\n"
         f"Coins building momentum:\n"
     )
@@ -308,7 +455,7 @@ def _format_watch_message(watch: list[dict], interval: str, scan_time: str) -> s
         blocks.append(block)
 
     footer = (
-        f"\n{'─' * 34}\n"
+        "\n──────────────────────────────────\n"
         "Watching for volume + trend confirmation.\n"
         "https://crypto-sniper.app"
     )
@@ -361,16 +508,17 @@ async def hourly_scan_job(context) -> None:
     hits, errors = await _run_scan(symbols, interval=interval, min_score=WATCH_MIN_SCORE)
 
     strong = [h for h in hits if h.get("signal", {}).get("total", 0) >= MIN_SCORE]
-    watch  = [h for h in hits if WATCH_MIN_SCORE <= h.get("signal", {}).get("total", 0) < MIN_SCORE]
+    top    = strong[:TOP_N]
 
-    top       = strong[:TOP_N]
-    watch_top = watch[:10]
+    logger.info(f"[Scanner] {mode}: {len(top)} STRONG BUY, {errors} errors")
 
-    logger.info(f"[Scanner] {mode}: {len(top)} STRONG BUY, {len(watch_top)} watch, {errors} errors")
+    # 4. Vol scan — runs regardless so watch report always has content
+    vol_hits, vol_errors = await _vol_scan(symbols, interval=interval)
+    logger.info(f"[Scanner] Vol screen: {len(vol_hits)} coins >= 1.8x")
 
-    # 4. Nothing at all — stay silent
-    if not top and not watch_top:
-        logger.info(f"[Scanner] Nothing above {WATCH_MIN_SCORE}/13 — staying silent")
+    # Stay silent only if no STRONG BUY and no vol hits at all
+    if not top and not vol_hits:
+        logger.info("[Scanner] No STRONG BUY and no vol hits — staying silent")
         return
 
     # 5. Enrich STRONG BUY hits with Kronos (best-effort, 1D only — saves API calls on 1H)
@@ -387,14 +535,14 @@ async def hourly_scan_job(context) -> None:
     if top:
         msg = _format_signal_message(top, interval, scan_time)
     else:
-        msg = _format_watch_message(watch_top, interval, scan_time)
+        msg = _format_vol_report(vol_hits, interval, scan_time, source="CEX")
 
     try:
         await _send(bot, ADMIN_CHAT, msg)
         if top:
             logger.info(f"[Scanner] {mode} alert sent — {len(top)} signals")
         else:
-            logger.info(f"[Scanner] Watch report sent — {len(watch_top)} coins")
+            logger.info(f"[Scanner] Vol report sent — {len(vol_hits)} coins with vol >= 1.8x")
     except Exception as e:
         logger.error(f"[Scanner] Telegram send failed: {e}")
 

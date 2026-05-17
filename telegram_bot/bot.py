@@ -34,7 +34,7 @@ from db import (
 from agent import get_agent_response, extract_analyse_command, extract_escalation
 from analyse import fetch_analysis
 from escalation import escalate
-from scanner import hourly_scan_job
+from scanner import hourly_scan_job, _vol_scan, _format_vol_report, _get_top_symbols
 from dex_scanner.scanner import dex_scan_job, gem_lookup, get_last_sweep, SUPPORTED_CHAINS
 from dex_scanner.blackboard import compose_rate_limited
 from signal_tracker import init_tracker
@@ -502,6 +502,45 @@ async def chains_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # ─────────────────────────────────────────────
+#  /volscan — on-demand vol scan
+# ─────────────────────────────────────────────
+
+async def volscan_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    /volscan — live scan for all coins with rel_vol >= 1.8x.
+    Returns the same vol-first gate traffic-light format as the daily watch report.
+    """
+    from datetime import datetime, timezone
+
+    await update.message.reply_text(
+        "Scanning for high-volume coins...  this takes ~30s.",
+        reply_markup=main_menu_keyboard()
+    )
+
+    scan_time = datetime.now(timezone.utc).strftime("%d %b %Y %H:%M UTC")
+
+    try:
+        symbols = await _get_top_symbols(200)
+        if not symbols:
+            await update.message.reply_text(
+                "Could not fetch coin list — please try again in a moment.",
+                reply_markup=main_menu_keyboard()
+            )
+            return
+
+        hits, errors = await _vol_scan(symbols, interval="1d")
+        msg = _format_vol_report(hits, "1d", scan_time, source="CEX")
+        await update.message.reply_text(msg, reply_markup=main_menu_keyboard())
+
+    except Exception as e:
+        logger.error(f"[volscan_cmd] {e}")
+        await update.message.reply_text(
+            "Vol scan failed — please try again shortly.",
+            reply_markup=main_menu_keyboard()
+        )
+
+
+# ─────────────────────────────────────────────
 #  Menu button tap handler
 # ─────────────────────────────────────────────
 
@@ -893,6 +932,7 @@ def main():
     app.add_handler(CommandHandler("mywatches", mywatches_cmd))
     app.add_handler(CommandHandler("chains",    chains_cmd))
     app.add_handler(CommandHandler("record",    record_cmd))
+    app.add_handler(CommandHandler("volscan",   volscan_cmd))
 
     # Menu taps + free-text (menu_tap routes known labels, falls through to AI)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, menu_tap))
