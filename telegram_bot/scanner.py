@@ -321,19 +321,25 @@ def _format_watch_message(watch: list[dict], interval: str, scan_time: str) -> s
 
 async def hourly_scan_job(context) -> None:
     """
-    JobQueue callback — fires every hour.
+    JobQueue callback — fires every hour but only acts at 22:00 UTC (8 AM AEST).
 
-    At 22:00 UTC (8 AM AEST): scores on 1D candles — daily overview.
-    All other hours:           scores on 1H candles — intraday signals.
+    All other hours: silent no-op.
+    1H intraday scans removed — too many false positives and noisy loss outcomes.
     """
+    now_utc = datetime.now(timezone.utc)
+
+    # Only run at 22:00 UTC — all other hours are silent
+    if now_utc.hour != DAILY_HOUR_UTC:
+        logger.debug(f"[Scanner] Skipping non-daily hour {now_utc.hour}:00 UTC — daily-only mode")
+        return
+
     bot       = context.bot
-    now_utc   = datetime.now(timezone.utc)
     scan_time = now_utc.strftime("%d %b %Y %H:%M UTC")
 
-    # Determine scan mode
-    is_daily = (now_utc.hour == DAILY_HOUR_UTC)
-    interval = "1d" if is_daily else "1h"
-    mode     = "DAILY (1D)" if is_daily else "HOURLY (1H)"
+    # Always daily mode
+    is_daily = True
+    interval = "1d"
+    mode     = "DAILY (1D)"
 
     logger.info(f"[Scanner] Starting {mode} scan — {scan_time}")
 

@@ -289,7 +289,7 @@ async def gems_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if board is None:
         await update.message.reply_text(
             "No sweep has run yet.\n"
-            "The DEX scanner runs every hour.\n"
+            "The DEX scanner runs once daily at 8 AM AEST (22:00 UTC).\n"
             "Check back shortly.",
             reply_markup=main_menu_keyboard()
         )
@@ -492,7 +492,7 @@ async def chains_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lines.append(
         "\n─" + "─" * 29 + "\n"
         "Data: DexScreener · GoPlus · GeckoTerminal\n"
-        "Sweep: every hour  ·  Score 9+/13 (VPRT)\n"
+        "Sweep: daily at 8 AM AEST  ·  1D candles only\n"
         "/gems — latest sweep results"
     )
     await update.message.reply_text(
@@ -585,7 +585,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         board, _ = get_last_sweep()
         if board is None:
             await query.message.reply_text(
-                "No sweep has run yet. The DEX scanner runs every hour.",
+                "No sweep has run yet. The DEX scanner runs once daily at 8 AM AEST (22:00 UTC).",
                 reply_markup=main_menu_keyboard()
             )
         else:
