@@ -187,10 +187,29 @@ async def _send(bot, chat_id: int, msg: str) -> None:
 #  Message formatters
 # ─────────────────────────────────────────────
 
+def _vol_label(rv: float) -> str:
+    """Convert rel_volume float to qualitative label — never expose the multiplier."""
+    if rv >= 3.5:  return "Extreme"
+    if rv >= 2.5:  return "High"
+    if rv >= 1.8:  return "Elevated"
+    return "Normal"
+
+
+def _gate_line(comp: dict, timing: dict) -> str:
+    """Traffic-light gate status — VOL / TREND / ADX. No numbers exposed."""
+    v_ok   = comp.get("V", {}).get("confirmed", False)
+    t_ok   = comp.get("T", {}).get("confirmed", False)
+    adx    = timing.get("adx") or 0
+    adx_ok = adx >= 25
+    vol_lbl = _vol_label(timing.get("rel_volume") or 0)
+    adx_lbl = "Trending" if adx_ok else "Ranging"
+    def dot(ok): return "[OK]" if ok else "[ ]"
+    return f"VOL {dot(v_ok)} {vol_lbl}   TREND {dot(t_ok)}   ADX {dot(adx_ok)} {adx_lbl}"
+
+
 def _coin_block(data: dict, rank: int, interval: str) -> str:
-    """Shared single-coin block used by all formatters."""
+    """Single-coin block — signal tier + gates only. No raw scores exposed."""
     sig    = data.get("signal", {})
-    score  = sig.get("total", 0)
     label  = sig.get("label", "")
     symbol = data.get("symbol", "?")
     struct = data.get("structure", {})
@@ -202,24 +221,13 @@ def _coin_block(data: dict, rank: int, interval: str) -> str:
 
     close = struct.get("close") or quote.get("price") or 0
     chg   = quote.get("change_24h") or 0
-    rv    = timing.get("rel_volume") or 0
-    adx   = timing.get("adx") or 0
-
-    v_sc = comp.get("V", {}).get("score", 0)
-    p_sc = comp.get("P", {}).get("score", 0)
-    r_sc = comp.get("R", {}).get("score", 0)
-    t_sc = comp.get("T", {}).get("score", 0)
-
-    filled = round(score / 13 * 10)
-    bar    = "[" + "#" * filled + "-" * (10 - filled) + "]"
 
     tf_label = interval.upper()
 
-    block  = f"\n#{rank}  {symbol}/USDT  —  {score}/13  {bar}\n"
-    block += f"Signal:  {label} ({tf_label})\n"
-    block += f"Price:   ${close:.6g}  ({chg:+.2f}% 24h)\n"
-    adx_lbl = "trending" if adx >= 25 else "ranging"
-    block += f"VPRT:    V{v_sc} P{p_sc} R{r_sc} T{t_sc}  |  ADX {adx:.0f} ({adx_lbl})  Vol {rv:.1f}x\n"
+    block  = f"\n#{rank}  {symbol}/USDT"
+    block += f"\nSignal:  {label} ({tf_label})"
+    block += f"\nPrice:   ${close:.6g}  ({chg:+.2f}% 24h)"
+    block += f"\n{_gate_line(comp, timing)}\n"
 
     if trade and trade.get("entry") and trade.get("stop") and trade.get("target"):
         rr = trade.get("rr_ratio")
@@ -228,27 +236,17 @@ def _coin_block(data: dict, rank: int, interval: str) -> str:
             block += f"  R:R {rr:.2f}"
         block += "\n"
 
-    # Z-Score entry quality
+    # Entry quality — label only, no sigma numbers
     z_quality = timing.get("z_quality") or ""
     z_return  = timing.get("z_return")
-    z_price   = timing.get("z_price")
-    z_vol     = timing.get("z_vol")
-    if z_quality:
-        q_icon = {"IDEAL": "✅", "GOOD": "✅", "CAUTION": "⚠️", "AVOID": "🔴"}.get(z_quality, "⚪")
-        # Build a concise one-liner with the most important Z values
-        z_parts = []
-        if z_return is not None:
-            ret_lbl = "exhausted" if z_return > 2.5 else ("extended" if z_return > 2.0 else "in range")
-            z_parts.append(f"Z-Ret {z_return:+.1f}σ ({ret_lbl})")
-        if z_price is not None:
-            z_parts.append(f"Z-Price {z_price:+.1f}σ")
-        z_str = "  ·  ".join(z_parts) if z_parts else ""
-        block += f"─────────────────────────────────\n"
-        block += f"Entry:   {q_icon} {z_quality}  {z_str}\n"
+    if z_quality and z_quality not in ("UNKNOWN", ""):
+        q_icon = {"IDEAL": "[OK]", "GOOD": "[OK]", "CAUTION": "[!!]", "AVOID": "[X]"}.get(z_quality, "[ ]")
+        block += f"Entry:   {q_icon} {z_quality}"
         if z_return is not None and z_return > 2.5:
-            block += f"⚠️  Price return is {z_return:.1f}σ above mean — chasing risk, consider smaller size\n"
+            block += "  — price extended, consider sizing down"
         elif z_return is not None and z_return < -2.0:
-            block += f"📉  Price return is {z_return:.1f}σ below mean — oversold zone, watch for reversal\n"
+            block += "  — oversold zone, watch for reversal"
+        block += "\n"
 
     if kronos:
         kdir  = kronos.get("direction", "")
@@ -270,7 +268,7 @@ def _format_signal_message(hits: list[dict], interval: str, scan_time: str) -> s
     prefix = "DAILY" if interval == "1d" else "HOURLY"
     header = (
         f"CRYPTO SNIPER  —  {prefix} SCAN\n"
-        f"{scan_time}  |  {tf}  |  Score 9+/13\n"
+        f"{scan_time}  |  {tf}\n"
         f"{'─' * 34}\n"
         f"STRONG BUY signals: {len(hits)}\n"
     )
@@ -284,19 +282,17 @@ def _format_signal_message(hits: list[dict], interval: str, scan_time: str) -> s
 
 
 def _format_watch_message(watch: list[dict], interval: str, scan_time: str) -> str:
-    """Near-miss watch report when nothing hit 9/13."""
+    """Near-miss watch report — no scores exposed, gate status only."""
     tf     = interval.upper()
     header = (
         f"CRYPTO SNIPER  —  NO TRADES ({tf})\n"
-        f"{scan_time}  |  {tf}  |  Score 9+/13\n"
+        f"{scan_time}  |  {tf}\n"
         f"{'─' * 34}\n"
-        f"No coin reached 9/13 — market ranging\n"
-        f"Top {len(watch)} coins on watch:\n"
+        f"No signal yet — market conditions not confirmed\n"
+        f"Coins building momentum:\n"
     )
     blocks = []
     for i, data in enumerate(watch, 1):
-        sig    = data.get("signal", {})
-        score  = sig.get("total", 0)
         symbol = data.get("symbol", "?")
         struct = data.get("structure", {})
         timing = data.get("timing", {})
@@ -305,27 +301,15 @@ def _format_watch_message(watch: list[dict], interval: str, scan_time: str) -> s
 
         close = struct.get("close") or quote.get("price") or 0
         chg   = quote.get("change_24h") or 0
-        rv    = timing.get("rel_volume") or 0
-        adx   = timing.get("adx") or 0
 
-        v_sc = comp.get("V", {}).get("score", 0)
-        p_sc = comp.get("P", {}).get("score", 0)
-        r_sc = comp.get("R", {}).get("score", 0)
-        t_sc = comp.get("T", {}).get("score", 0)
-
-        filled = round(score / 13 * 10)
-        bar    = "[" + "#" * filled + "-" * (10 - filled) + "]"
-        gap    = 9 - score
-
-        adx_label = "trending" if adx >= 25 else "ranging"
-        block  = f"\n#{i}  {symbol}  —  {score}/13  {bar}  (+{gap} to signal)\n"
+        block  = f"\n#{i}  {symbol}/USDT\n"
         block += f"Price: ${close:.6g}  ({chg:+.2f}%)\n"
-        block += f"VPRT:  V{v_sc} P{p_sc} R{r_sc} T{t_sc}  |  ADX {adx:.0f} ({adx_label})  Vol {rv:.1f}x\n"
+        block += f"{_gate_line(comp, timing)}\n"
         blocks.append(block)
 
     footer = (
         f"\n{'─' * 34}\n"
-        "Volume or momentum shift could push these over.\n"
+        "Watching for volume + trend confirmation.\n"
         "https://crypto-sniper.app"
     )
     return header + "".join(blocks) + footer

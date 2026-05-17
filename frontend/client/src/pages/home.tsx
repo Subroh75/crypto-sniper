@@ -790,7 +790,7 @@ export default function Home() {
                       {sig.signal.label}
                     </div>
                     <div className="text-[12px] font-mono text-text-muted mb-3">
-                      {sig.signal.total} / {sig.signal.max}  {sig.signal.label === "STRONG BUY" ? "all gates green!" : sig.signal.label === "BUY" ? "V + T + ADX confirmed" : "gates not met"}
+                      {sig.signal.label === "STRONG BUY" ? "All gates confirmed" : sig.signal.label === "BUY" ? "VOL + TREND + ADX confirmed" : "Gates not met"}
                     </div>
 
                     {/* Low liquidity / thin book warning */}
@@ -821,9 +821,8 @@ export default function Home() {
                     <div className="flex justify-center gap-4 text-[11px] font-mono text-text-muted flex-wrap">
                       <span>CLOSE <span className={sig.quote.price > sig.structure.ema20 ? "text-teal font-bold" : "text-red font-bold"}>{fmtPrice((sig.quote?.price ?? 1))}</span></span>
                       <span>24H <span className={sig.quote.change_24h >= 0 ? "text-teal font-bold" : "text-red font-bold"}>{fmtPct(sig.quote.change_24h)}</span></span>
-                      <span>VOL <span className={(sig.timing?.rel_volume ?? 0) >= 2 ? "text-teal font-bold" : "text-amber font-bold"}>{(sig.timing?.rel_volume ?? 0).toFixed(1)}x</span></span>
-                      <span>ADX <span className={(sig.timing?.adx ?? 0) >= 25 ? "text-teal font-bold" : "text-amber font-bold"}>{(sig.timing?.adx ?? 0).toFixed(0)}</span></span>
-                      <span>RSI <span className={(sig.timing?.rsi ?? 50) >= 70 ? "text-red font-bold" : (sig.timing?.rsi ?? 50) <= 30 ? "text-teal font-bold" : "text-amber font-bold"}>{(sig.timing?.rsi ?? 50).toFixed(0)}</span></span>
+                      <span>VOL <span className={(sig.timing?.rel_volume ?? 0) >= 1.8 ? "text-teal font-bold" : "text-amber font-bold"}>{(sig.timing?.rel_volume ?? 0) >= 3.5 ? "Extreme" : (sig.timing?.rel_volume ?? 0) >= 2.5 ? "High" : (sig.timing?.rel_volume ?? 0) >= 1.8 ? "Elevated" : "Normal"}</span></span>
+                      <span>ADX <span className={(sig.timing?.adx ?? 0) >= 25 ? "text-teal font-bold" : "text-amber font-bold"}>{(sig.timing?.adx ?? 0) >= 25 ? "Trending" : "Ranging"}</span></span>
                     </div>
                   </div>
                   {/* Plain-English summary — one line any trader can act on */}
@@ -835,9 +834,9 @@ export default function Home() {
                     const rsi   = sig.timing?.rsi ?? 50;
                     let summary = "";
                     if (label === "STRONG BUY") {
-                      summary = `${symbol} is showing strong conditions — volume is ${vol}x above average, trend is fully aligned, and momentum is confirmed. All gates are green.`;
+                      summary = `${symbol} is showing strong conditions — volume is unusually elevated, trend is fully aligned across all MAs, and ADX confirms a trending market. All gates are green.`;
                     } else if (label === "BUY") {
-                      summary = `${symbol} has volume up ${vol}x and trend is aligned${adx >= 25 ? " with a trending market (ADX " + adx.toFixed(0) + ")" : ""} — conditions are building but not fully confirmed yet.`;
+                      summary = `${symbol} has elevated volume and trend is aligned${adx >= 25 ? " with ADX confirming a trending market" : ""} — core conditions are met.`;
                     } else {
                       const issues = [];
                       if (!sig.signal.gates?.v) issues.push("volume is below threshold");
@@ -964,10 +963,10 @@ export default function Home() {
                   <div className="p-4">
                     <div className="grid grid-cols-2 gap-2">
                       {[
-                        { label: "RSI 14",  value: (sig.timing?.rsi ?? 50).toFixed(1),    sub: (sig.timing?.rsi ?? 50) >= 70 ? "OVERBOUGHT" : (sig.timing?.rsi ?? 50) <= 30 ? "OVERSOLD" : "NEUTRAL",  color: (sig.timing?.rsi ?? 50) >= 70 ? "text-red" : (sig.timing?.rsi ?? 50) <= 30 ? "text-teal" : "text-amber" },
                         { label: "ADX 14",  value: (sig.timing?.adx ?? 0).toFixed(1),    sub: (sig.timing?.adx ?? 0) >= 25 ? "TRENDING" : "RANGING",   color: (sig.timing?.adx ?? 0) >= 25 ? "text-teal" : "text-amber" },
                         { label: "ATR 14",  value: (sig.timing?.atr ?? 0).toFixed(0),    sub: `${((sig.timing.atr / ((sig.quote?.price ?? 0) || 1)) * 100).toFixed(2)}% of price`, color: "text-amber" },
-                        { label: "Rel Vol", value: `${(sig.timing?.rel_volume ?? 0).toFixed(2)}x`, sub: (sig.timing?.rel_volume ?? 0) >= 2 ? "HIGH" : "NORMAL", color: (sig.timing?.rel_volume ?? 0) >= 2 ? "text-teal" : "text-amber" },
+                        { label: "Volume",  value: (sig.timing?.rel_volume ?? 0) >= 3.5 ? "Extreme" : (sig.timing?.rel_volume ?? 0) >= 2.5 ? "High" : (sig.timing?.rel_volume ?? 0) >= 1.8 ? "Elevated" : "Normal", sub: (sig.timing?.rel_volume ?? 0) >= 1.8 ? "ABOVE THRESHOLD" : "BELOW THRESHOLD", color: (sig.timing?.rel_volume ?? 0) >= 1.8 ? "text-teal" : "text-amber" },
+                        { label: "MAs",     value: sig.quote.price > sig.structure.ema20 && sig.structure.ema20 > sig.structure.ema50 && sig.structure.ema50 > sig.structure.ema200 ? "Aligned" : "Not aligned", sub: sig.quote.price > sig.structure.ema20 && sig.structure.ema20 > sig.structure.ema50 && sig.structure.ema50 > sig.structure.ema200 ? "20 > 50 > 200" : "Stack broken", color: sig.quote.price > sig.structure.ema20 && sig.structure.ema20 > sig.structure.ema50 && sig.structure.ema50 > sig.structure.ema200 ? "text-teal" : "text-red" },
                       ].map(({ label, value, sub, color }) => (
                         <div key={label} className="bg-surface-2 rounded-lg border border-border/40 p-3">
                           <div className="text-[9px] font-mono text-text-muted/70 uppercase tracking-wide mb-1">

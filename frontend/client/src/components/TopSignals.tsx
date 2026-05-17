@@ -267,11 +267,11 @@ export function TopSignals({ onSelect, interval = "1h", onBuySignalsChange }: Pr
       {pageRows.length > 0 && (
         <div style={{ borderRadius: 8, overflow: "hidden", border: "1px solid #1e293b", opacity: loading ? 0.6 : 1, transition: "opacity 0.3s" }}>
           {/* Column headers */}
-          <div style={{ display: "grid", gridTemplateColumns: isMobile ? "24px 1fr 52px 52px 64px" : "28px 1fr 60px 56px 80px", background: "#0a0f1e", borderBottom: "1px solid #1e293b" }}>
+          <div style={{ display: "grid", gridTemplateColumns: isMobile ? "24px 1fr 52px 60px 64px" : "28px 1fr 60px 70px 80px", background: "#0a0f1e", borderBottom: "1px solid #1e293b" }}>
             <span style={TH}>#</span>
             <span style={TH}>Symbol</span>
             <SortBtn col="change" label="Chg%" />
-            <span style={TH} title="Z-score of current return vs 20-bar history. Above +2σ = statistically exhausted.">Z-Ret σ</span>
+            <span style={TH}>Signal</span>
             <span style={{ ...TH, textAlign: "center" as const }}>Action</span>
           </div>
 
@@ -279,24 +279,11 @@ export function TopSignals({ onSelect, interval = "1h", onBuySignalsChange }: Pr
           {pageRows.map((sig, i) => {
             const globalIndex = (pageClamped - 1) * PAGE_SIZE + i + 1;
             const chg   = sig.change ?? 0;
-            const zRet  = sig.z_return ?? null;
-            const zQual = sig.z_quality ?? "";
-
-            // Left-border accent by entry quality
-            const qualBorder = zQual === "IDEAL"   ? "3px solid #22c55e"
-                             : zQual === "GOOD"    ? "3px solid #22c55e"
-                             : zQual === "CAUTION" ? "3px solid #f59e0b"
-                             : zQual === "AVOID"   ? "3px solid #ef4444"
-                             : "3px solid #1e293b";
-
-            // Z-return colour: green = room remains, amber = extended, red = exhausted
-            const zRetColor = zRet === null ? "#475569"
-                            : zRet >  2.5  ? "#ef4444"
-                            : zRet >  1.5  ? "#f59e0b"
-                            : zRet >= -1.0 ? "#22c55e"
-                            :                "#94a3b8";
-
             const rowBg = i % 2 === 0 ? "#060b17" : "#080e1c";
+            // Signal tier drives left-border colour
+            const qualBorder = sig.signal === "STRONG BUY" ? "3px solid #22c55e"
+                             : sig.signal === "BUY"        ? "3px solid #22c55e"
+                             : "3px solid #1e293b";
 
             return (
               <button
@@ -304,7 +291,7 @@ export function TopSignals({ onSelect, interval = "1h", onBuySignalsChange }: Pr
                 onClick={() => onSelect(sig.symbol)}
                 style={{
                   display: "grid",
-                  gridTemplateColumns: isMobile ? "24px 1fr 52px 52px 64px" : "28px 1fr 60px 56px 80px",
+                  gridTemplateColumns: isMobile ? "24px 1fr 52px 60px 64px" : "28px 1fr 60px 70px 80px",
                   width: "100%", background: rowBg,
                   border: "none", borderBottom: "1px solid #0f172a",
                   borderLeft: qualBorder,
@@ -326,12 +313,6 @@ export function TopSignals({ onSelect, interval = "1h", onBuySignalsChange }: Pr
                   </span>
                   <span style={{ fontSize: 8, color: "#334155" }}>
                     ${sig.price < 0.01 ? sig.price.toFixed(6) : sig.price < 1 ? sig.price.toFixed(4) : sig.price.toFixed(2)}
-                    {zQual && zQual !== "UNKNOWN" && (
-                      <span style={{
-                        marginLeft: 5, fontSize: 7, fontWeight: 700,
-                        color: zQual === "IDEAL" || zQual === "GOOD" ? "#22c55e" : zQual === "CAUTION" ? "#f59e0b" : "#ef4444",
-                      }}>{zQual}</span>
-                    )}
                     {sig.scanned_at && (() => {
                       const ageM = Math.round((Date.now() / 1000 - sig.scanned_at) / 60);
                       return ageM >= 2 ? <span style={{ color: "#f59e0b", marginLeft: 4 }}>{ageM}m ago</span> : null;
@@ -344,15 +325,21 @@ export function TopSignals({ onSelect, interval = "1h", onBuySignalsChange }: Pr
                   {chg >= 0 ? "+" : ""}{chg.toFixed(1)}%
                 </span>
 
-                {/* Z-return (replaces RSI) */}
-                <div style={{ display: "flex", flexDirection: "column" as const, gap: 1, padding: "0 2px" }}>
-                  <span style={{ fontSize: 10, fontWeight: 700, color: zRetColor, fontFamily: "monospace" }}>
-                    {zRet !== null ? (zRet >= 0 ? "+" : "") + zRet.toFixed(1) + "σ" : "-"}
-                  </span>
-                  {zRet !== null && (
-                    <span style={{ fontSize: 7, color: "#475569" }}>
-                      {zRet > 2.5 ? "exhausted" : zRet > 1.5 ? "extended" : zRet >= -1.0 ? "in range" : "depressed"}
+                {/* Signal tier badge */}
+                <div style={{ padding: "0 2px" }}>
+                  {(sig.signal === "STRONG BUY" || sig.signal === "BUY") ? (
+                    <span style={{
+                      fontSize: 8, fontWeight: 800, letterSpacing: "0.04em",
+                      color: sig.signal === "STRONG BUY" ? "#22c55e" : "#22c55e",
+                      background: "rgba(34,197,94,0.10)",
+                      padding: "3px 5px", borderRadius: 3,
+                      border: "1px solid rgba(34,197,94,0.25)",
+                      whiteSpace: "nowrap" as const,
+                    }}>
+                      {sig.signal === "STRONG BUY" ? "STR BUY" : "BUY"}
                     </span>
+                  ) : (
+                    <span style={{ fontSize: 8, color: "#334155", fontFamily: "monospace" }}>—</span>
                   )}
                 </div>
 

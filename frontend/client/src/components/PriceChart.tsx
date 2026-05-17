@@ -1,7 +1,7 @@
 // PriceChart.tsx
 import {
   ComposedChart, XAxis, YAxis, CartesianGrid, Tooltip,
-  Line, Bar, ResponsiveContainer, ReferenceLine, Cell,
+  Line, Bar, ResponsiveContainer, ReferenceLine,
 } from "recharts";
 import type { OHLCVBar, MarketStructure } from "@/types/api";
 import { fmtPrice } from "@/lib/api";
@@ -28,24 +28,6 @@ function calcEMA(closes: number[], period: number): (number | null)[] {
   return result;
 }
 
-
-function calcVWAP(raw: number[][]): (number | null)[] {
-  let cumPV = 0, cumV = 0;
-  return raw.map(([, o, h, l, c]) => {
-    const typical = (h + l + c) / 3;
-    const vol     = Math.abs(c - o) + 0.001;
-    cumPV += typical * vol;
-    cumV  += vol;
-    return cumPV / cumV;
-  });
-}
-
-// Normalise body size as a proxy volume for visual volume bars
-function calcBodyVolume(raw: number[][]): number[] {
-  const sizes = raw.map(([, o, , , c]) => Math.abs(c - o));
-  const maxSize = Math.max(...sizes, 0.0001);
-  return sizes.map(s => (s / maxSize) * 100); // 0–100 percentage
-}
 
 function Candle(props: any) {
   const { x, width, background, payload } = props;
@@ -92,17 +74,12 @@ export function PriceChart({ ohlcv, structure, interval, symbol, onTfChange }: P
   const ema20  = calcEMA(closes, 20);
   const ema50  = calcEMA(closes, 50);
   const ema200 = calcEMA(closes, 200);
-  const vwap  = calcVWAP(raw);
-
-  const bodyVol = calcBodyVolume(raw);
 
   const data = raw.map(([ts, o, h, l, c], i) => ({
     ts, open: o, high: h, low: l, close: c,
     isGreen: c >= o,
-    domMin, domRange,          // shared with Candle renderer
+    domMin, domRange,
     ema20: ema20[i], ema50: ema50[i], ema200: ema200[i],
-    vwap: vwap[i],
-    vol: bodyVol[i],
   }));
 
   const last      = data[data.length - 1];
@@ -114,7 +91,6 @@ export function PriceChart({ ohlcv, structure, interval, symbol, onTfChange }: P
     { key: "ema20",  color: "#22c55e", label: "EMA 20",  value: last?.ema20   },
     { key: "ema50",  color: "#f59e0b", label: "EMA 50",  value: last?.ema50   },
     { key: "ema200", color: "#ef4444", label: "EMA 200", value: ema200Display },
-    { key: "vwap",   color: "#f97316", label: "VWAP",    value: last?.vwap    },
   ].filter(i => i.value != null && i.value > 0);
 
   return (
@@ -179,14 +155,12 @@ export function PriceChart({ ohlcv, structure, interval, symbol, onTfChange }: P
             background={{ fill: "transparent" }}
             shape={(props: any) => <Candle {...props} />}
           />
-          {/* EMA 20 / 50 / 200 + VWAP lines */}
+          {/* EMA 20 / 50 / 200 */}
           <Line type="monotone" dataKey="ema20" stroke="#22c55e" name="ema20"
             strokeWidth={1.5} dot={false} isAnimationActive={false} connectNulls={false} />
           <Line type="monotone" dataKey="ema50" stroke="#f59e0b" name="ema50"
             strokeWidth={1.5} dot={false} isAnimationActive={false} connectNulls={false} />
           <Line type="monotone" dataKey="ema200" stroke="#ef4444" name="ema200"
-            strokeWidth={1.5} dot={false} isAnimationActive={false} connectNulls={false} />
-          <Line type="monotone" dataKey="vwap" stroke="#f97316" name="vwap"
             strokeWidth={1.5} dot={false} isAnimationActive={false} connectNulls={false} />
           {/* EMA 200 reference line from backend (accurate, 500-bar calculation) */}
           {structure?.ema200 && structure.ema200 > 0 && last?.ema200 == null && (
@@ -200,17 +174,6 @@ export function PriceChart({ ohlcv, structure, interval, symbol, onTfChange }: P
               label={{ value: fmtPrice(lastClose), position: "insideRight", fontSize: 9, fill: "#7c3aed", offset: 4 }}
             />
           )}
-        </ComposedChart>
-      </ResponsiveContainer>
-      {/* Volume bars */}
-      <ResponsiveContainer width="100%" height={40}>
-        <ComposedChart data={data} margin={{ top: 0, right: isMobile ? 4 : 64, left: 0, bottom: 0 }}>
-          <YAxis hide domain={[0, 100]} />
-          <Bar dataKey="vol" isAnimationActive={false} maxBarSize={12}>
-            {data.map((d, i) => (
-              <Cell key={i} fill={d.isGreen ? "#22c55e" : "#ef4444"} fillOpacity={0.35} />
-            ))}
-          </Bar>
         </ComposedChart>
       </ResponsiveContainer>
     </div>
