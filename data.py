@@ -1562,6 +1562,72 @@ def _vs_db_init():
 
 _vs_db_init()
 
+def get_vol_prefilter(
+    universe: list[dict],
+    interval: str = "1d",
+    min_rvol: float = 1.8,
+) -> list[dict]:
+    """
+    Fast vol pre-filter — runs BEFORE the expensive per-coin OHLCV scoring loop.
+
+    Strategy:
+      1. Read 20-bar avg volume baselines from SQLite (zero HTTP calls)
+      2. Use the current 24h quoteVolume from each coin dict as a proxy for
+         the current bar volume (already fetched — no extra API calls)
+      3. Compute rel_vol = current_vol / baseline_avg
+      4. Return only coins where rel_vol >= min_rvol, sorted by rel_vol desc
+
+    Falls back to the full universe if no baselines exist yet (first cold start).
+    Attach rel_vol_pre to each coin dict so score_coin can reuse it.
+    """
+    baselines: dict[str, float] = {}
+    now_ts = int(time.time())
+    max_age = 26 * 3600  # accept baselines up to 26h old
+
+    try:
+        with _vs_sqlite.connect(_VS_DB_PATH) as c:
+            rows = c.execute(
+                "SELECT symbol, avg_vol_20, updated_ts FROM volume_baseline"
+            ).fetchall()
+        for sym, avg, ts in rows:
+            if now_ts - ts < max_age and avg > 0:
+                baselines[sym] = avg
+    except Exception as e:
+        logger.warning(f"get_vol_prefilter: baseline read error: {e}")
+
+    if not baselines:
+        # No baseline yet — let all coins through, mark rel_vol_pre = 0 (unknown)
+        logger.info("get_vol_prefilter: no baselines available — passing full universe")
+        for c in universe:
+            c["rel_vol_pre"] = 0.0
+        return universe
+
+    # Interval-specific volume proxy:
+    # For daily interval, quoteVolume from 24hr ticker is a perfect 1D baseline proxy.
+    # For hourly, divide 24h vol by 24 as an approximation of the current hour's vol.
+    divisor = 24 if interval in ("1h", "1H") else 1
+
+    filtered = []
+    for coin in universe:
+        sym = coin["symbol"]
+        baseline = baselines.get(sym)
+        if not baseline:
+            continue  # no baseline for this coin — skip (new listing or not yet computed)
+        cur_vol = coin.get("volume_24h", 0) / divisor
+        rel_vol = round(cur_vol / baseline, 2) if baseline > 0 else 0.0
+        coin["rel_vol_pre"] = rel_vol
+        if rel_vol >= min_rvol:
+            filtered.append(coin)
+
+    # Sort by rel_vol desc so highest spikes score first
+    filtered.sort(key=lambda c: c["rel_vol_pre"], reverse=True)
+    logger.info(
+        f"get_vol_prefilter: {len(filtered)}/{len(universe)} coins cleared {min_rvol}x vol gate "
+        f"(interval={interval}, baselines={len(baselines)})"
+    )
+    return filtered
+
+
 def build_volume_baseline(max_coins: int = 500, interval: str = "1h") -> dict:
     """
     Pull 21 bars of klines for every Binance USDT pair and store the

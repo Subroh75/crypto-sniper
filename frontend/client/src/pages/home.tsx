@@ -17,7 +17,7 @@ import {
 import { TopSignals } from "@/components/TopSignals";
 import { CSOVerdict, buildVerdict } from "@/components/CSOVerdict";
 import {
-  TrendingSection, NewsSection, MacroSection, OptionsIntelligenceSection,
+  TrendingSection, VolRadarSection, NewsSection, MacroSection, OptionsIntelligenceSection,
 } from "@/components/BottomSections";
 import { DeepResearchSection } from "@/components/DeepResearch";
 import { MultiTimeframeCard } from "@/components/MultiTimeframe";
@@ -231,6 +231,7 @@ function VerdictBadge({ verdict }: { verdict: string }) {
 export default function Home() {
   const reportId = "cs-report-root";
 
+  const [volCoins,  setVolCoins]  = useState<Array<{symbol:string;price:number;change:number;rel_vol?:number;signal?:string}>>([]);
   const [symbol,   setSymbol]   = useState("BTC");
   const [input,    setInput]    = useState("");
   const [interval, setInterval] = useState("1D");
@@ -1409,7 +1410,7 @@ export default function Home() {
               </Card>
 
               {/* 08: Trending + News + Macro */}
-              <TrendingSection onSelect={(sym) => runAnalysis(sym)} />
+              <VolRadarSection onSelect={(sym) => runAnalysis(sym)} coins={volCoins} />
               <NewsSection symbol={symbol} />
               <MacroSection />
 
@@ -1435,6 +1436,9 @@ export default function Home() {
                   onSelect={(sym) => { runAnalysis(sym); }}
                   interval={interval}
                   listMode={false}
+                  onAllSignalsChange={(sigs) => {
+                    setVolCoins(sigs.map(s => ({ symbol: s.symbol, price: s.price, change: s.change, rel_vol: s.rel_vol, signal: s.signal })));
+                  }}
                 />}
                 {isMobile && <SignalStreakHeatmap />}
                 <TradeSetupCard setup={sig?.trade_setup ?? null} close={sig?.quote?.price ?? 0} csoGo={buildVerdict(sig, kronosHk.data, sig?.fear_greed).go} />
@@ -1449,6 +1453,9 @@ export default function Home() {
                       onSelect={(sym) => { runAnalysis(sym); if(isMobile) setMobileTab("analyse"); }}
                       interval={interval}
                       listMode={true}
+                      onAllSignalsChange={(sigs) => {
+                        setVolCoins(sigs.map(s => ({ symbol: s.symbol, price: s.price, change: s.change, rel_vol: s.rel_vol, signal: s.signal })));
+                      }}
                     />
                     <DipScannerCard
                       interval={interval}

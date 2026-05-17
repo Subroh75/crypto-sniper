@@ -1,6 +1,6 @@
 // ─── BottomSections.tsx — Trending · News · Macro ───────────────────────────
 import { useState, useEffect, useRef } from "react";
-import { useTrending, useGainers, useNews, useMacro } from "@/hooks/useApi";
+import { useGainers, useNews, useMacro } from "@/hooks/useApi";
 import { fmtPrice, fmtPct, timeAgo } from "@/lib/api";
 
 // ── Section header ────────────────────────────────────────────────────────────
@@ -29,49 +29,106 @@ function SectionHeader({ num, icon, title, badge, src }: {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// TRENDING
+// VOL RADAR  (replaces CoinGecko Trending)
+// Shows the top coins by relative volume from the last scan — zero extra API calls.
 // ════════════════════════════════════════════════════════════════════════════
-export function TrendingSection({ onSelect }: { onSelect: (sym: string) => void }) {
-  const { coins, loading } = useTrending();
+
+interface VolCoin {
+  symbol: string;
+  price: number;
+  change: number;
+  rel_vol?: number;
+  signal?: string;
+}
+
+function volLabel(rv: number): string {
+  if (rv >= 3.5) return "Extreme";
+  if (rv >= 2.5) return "High";
+  if (rv >= 1.8) return "Elevated";
+  return "Normal";
+}
+
+function volColor(rv: number): string {
+  if (rv >= 3.5) return "#ef4444";   // red  — extreme
+  if (rv >= 2.5) return "#f59e0b";   // amber — high
+  return "#22c55e";                   // teal  — elevated
+}
+
+export function VolRadarSection({
+  onSelect,
+  coins,
+}: {
+  onSelect: (sym: string) => void;
+  coins: VolCoin[];
+}) {
+  // Pick top 6 by rel_vol, all must be >= 1.8x
+  const top = [...coins]
+    .filter(c => (c.rel_vol ?? 0) >= 1.8)
+    .sort((a, b) => (b.rel_vol ?? 0) - (a.rel_vol ?? 0))
+    .slice(0, 6);
+
+  const isEmpty = top.length === 0;
 
   return (
     <div className="card mb-3">
-      <SectionHeader icon="🔥" title="TRENDING NOW" />
+      <SectionHeader icon="⚡" title="VOL RADAR" badge="LIVE" src="Binance" />
       <div className="p-4">
-        {loading ? (
-          <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
-            {Array.from({ length: 6 }).map((_, i) => (
-              <div key={i} className={`h-20 bg-surface-2 rounded-lg animate-pulse border border-border/30${i === 5 ? " sm:hidden" : ""}`} />
-            ))}
+        {isEmpty ? (
+          <div className="flex flex-col items-center justify-center py-6 gap-2">
+            <span className="text-[11px] font-mono text-text-muted/60">No unusual vol right now</span>
+            <span className="text-[9px] font-mono text-text-muted/40">Waiting for coins ≥ 1.8× avg volume</span>
           </div>
         ) : (
-          <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
-            {coins.slice(0, 6).map((coin, idx) => (
-              <button
-                key={coin.symbol}
-                onClick={() => onSelect(coin.symbol)}
-                className={`flex flex-col items-center gap-1.5 p-3 rounded-lg border border-border/50 bg-surface-2 hover:border-purple/40 transition-all text-center${idx === 5 ? " sm:hidden" : ""}`}
-              >
-                <span className="text-[9px] font-mono text-text-muted/60">#{coin.rank}</span>
-                <span className={`text-[14px] font-mono font-black ${
-                  coin.change_24h >= 0 ? "text-teal" : "text-red"
-                }`}>{coin.symbol}</span>
-                <span className="text-[8px] font-mono text-text-muted/60 truncate w-full">{coin.name}</span>
-                {coin.price > 0 && (
-                  <span className="text-[10px] font-mono font-bold text-text mt-0.5">{fmtPrice(coin.price)}</span>
-                )}
-                <span className={`text-[10px] font-mono font-bold ${
-                  coin.change_24h >= 0 ? "text-teal" : "text-red"
-                }`}>
-                  {(coin.change_24h ?? 0) >= 0 ? "▲" : "▼"} {Math.abs(coin.change_24h ?? 0).toFixed(1)}%
-                </span>
-              </button>
-            ))}
+          <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
+            {top.map((coin, idx) => {
+              const rv     = coin.rel_vol ?? 0;
+              const lbl    = volLabel(rv);
+              const clr    = volColor(rv);
+              const chg    = coin.change ?? 0;
+              const isBuy  = coin.signal === "STRONG BUY" || coin.signal === "BUY";
+              return (
+                <button
+                  key={coin.symbol}
+                  onClick={() => onSelect(coin.symbol)}
+                  className={`flex flex-col items-center gap-1 p-3 rounded-lg border bg-surface-2 hover:border-purple/40 transition-all text-center${idx >= 3 ? " sm:flex hidden" : ""}`}
+                  style={{ borderColor: isBuy ? "rgba(34,197,94,0.35)" : "rgba(30,41,59,0.8)" }}
+                >
+                  {/* Rank dot replaced by signal badge */}
+                  {isBuy ? (
+                    <span className="text-[7px] font-black tracking-widest uppercase px-1.5 py-0.5 rounded"
+                      style={{ background: "rgba(34,197,94,0.12)", color: "#22c55e", border: "1px solid rgba(34,197,94,0.25)" }}>
+                      {coin.signal === "STRONG BUY" ? "STR BUY" : "BUY"}
+                    </span>
+                  ) : (
+                    <span className="text-[9px] font-mono text-text-muted/40">vol</span>
+                  )}
+                  {/* Symbol */}
+                  <span className="text-[13px] font-mono font-black text-text">{coin.symbol}</span>
+                  {/* Price */}
+                  <span className="text-[9px] font-mono text-text-muted/60">
+                    ${coin.price < 0.01 ? coin.price.toFixed(5) : coin.price < 1 ? coin.price.toFixed(3) : coin.price.toFixed(2)}
+                  </span>
+                  {/* Vol label */}
+                  <span className="text-[9px] font-mono font-bold" style={{ color: clr }}>
+                    {lbl} {rv.toFixed(1)}×
+                  </span>
+                  {/* 24h change */}
+                  <span className="text-[9px] font-mono font-bold" style={{ color: chg >= 0 ? "#22c55e" : "#ef4444" }}>
+                    {chg >= 0 ? "▲" : "▼"} {Math.abs(chg).toFixed(1)}%
+                  </span>
+                </button>
+              );
+            })}
           </div>
         )}
       </div>
     </div>
   );
+}
+
+// Keep TrendingSection exported for backward compatibility (unused — safe to remove later)
+export function TrendingSection({ onSelect }: { onSelect: (sym: string) => void }) {
+  return <VolRadarSection onSelect={onSelect} coins={[]} />;
 }
 
 // ════════════════════════════════════════════════════════════════════════════

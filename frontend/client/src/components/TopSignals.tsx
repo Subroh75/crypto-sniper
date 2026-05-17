@@ -6,7 +6,7 @@ const API = (import.meta as Record<string, unknown> & { env?: Record<string, str
 const BUY_THRESHOLD = 5; // gate-based scoring: BUY/STRONG BUY uses signal label check
 const PAGE_SIZE     = 20;
 
-interface Signal {
+export interface Signal {
   scanned_at?: number;
   symbol: string; score: number; max_score: number; signal: string;
   v: number; p: number; r: number; t: number; s: number;
@@ -16,7 +16,7 @@ interface Signal {
 }
 
 interface BuySignal { symbol: string; score: number; change: number; }
-interface Props { onSelect: (symbol: string) => void; interval?: string; listMode?: boolean; onBuySignalsChange?: (signals: BuySignal[]) => void; }
+interface Props { onSelect: (symbol: string) => void; interval?: string; listMode?: boolean; onBuySignalsChange?: (signals: BuySignal[]) => void; onAllSignalsChange?: (signals: Signal[]) => void; }
 
 
 const TH: React.CSSProperties = {
@@ -38,7 +38,7 @@ function useIsMobile() {
   return isMobile;
 }
 
-export function TopSignals({ onSelect, interval = "1h", onBuySignalsChange }: Props) {
+export function TopSignals({ onSelect, interval = "1h", onBuySignalsChange, onAllSignalsChange }: Props) {
   const [signals,  setSignals]  = useState<Signal[]>([]);
   const [loading,  setLoading]  = useState(false);
   const [lastScan, setLastScan] = useState<string>("");
@@ -116,6 +116,9 @@ export function TopSignals({ onSelect, interval = "1h", onBuySignalsChange }: Pr
             .sort((a, b) => b.score - a.score)
             .map(s => ({ symbol: s.symbol, score: s.score, change: s.change }));
           onBuySignalsChange(buyList);
+        }
+        if (onAllSignalsChange) {
+          onAllSignalsChange(all);
         }
       }
     } catch (e: unknown) {

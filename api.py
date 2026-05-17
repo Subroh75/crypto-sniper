@@ -15,6 +15,7 @@ from data import (
     get_social_delta, get_coinpaprika_meta,
     get_coindar_events, get_santiment_signals,
     get_binance_universe,
+    get_vol_prefilter,
 )
 from signals import calculate_signals, get_key_levels
 from agents import run_agent_council
@@ -299,16 +300,17 @@ def scan_top_signals(
     min_volume: float = Query(1_000_000, description="Min 24h volume USD to include"),
 ):
     """
-    Scan the full Binance USDT universe (~400 coins), score each, return those >= min_score.
+    Vol-first scan: only coins with unusual volume (>= 1.8x 20-bar avg) are scored.
 
-    Universe strategy (no CoinGecko dependency):
-      1. All active Binance USDT pairs with 24h volume >= min_volume
-      2. Sorted by 24h volume (most liquid first)
-      3. Trending coins boosted to front (narrative momentum)
-      4. Stablecoins / wrapped tokens excluded automatically
+    Pipeline:
+      1. Fetch full Binance USDT universe (~400 coins, sorted by 24h vol)
+      2. Vol pre-filter — drop any coin with rel_vol < 1.8x (zero extra API calls)
+      3. Score remaining coins in parallel (OHLCV + VPRT gates)
+      4. Return coins >= min_score, sorted by score then volume
 
-    This covers ~2x more coins than the old CoinGecko top-200 and is
-    faster (1 Binance call vs 2 paginated CoinGecko calls).
+    This ensures every signal that surfaces has UNUSUAL VOLUME as its foundation.
+    Scan is also faster: typically 20-60 coins reach scoring vs 300+ previously.
+    Falls back to full universe on cold start (no vol baseline in DB yet).
     """
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -345,6 +347,17 @@ def scan_top_signals(
 
     universe_size = len(universe)
     logger.info(f"/scan: universe={universe_size} coins, interval={interval}, min_score={min_score}")
+
+    # ── Step 1b: Vol pre-filter — only score coins with unusual volume ─────────
+    # Drops low-vol noise before the expensive per-coin OHLCV calls.
+    # Falls back to full universe on cold start (no baselines yet).
+    vol_universe = get_vol_prefilter(universe, interval=interval, min_rvol=1.8)
+    if vol_universe:
+        logger.info(f"/scan: vol gate reduced universe {universe_size} -> {len(vol_universe)} coins (>= 1.8x rel_vol)")
+        scan_universe = vol_universe
+    else:
+        logger.info(f"/scan: vol gate returned 0 — scanning full universe (cold start or flat market)")
+        scan_universe = universe
 
     # ── Step 2: Score every coin in parallel ───────────────────────────────────
     def score_coin(coin: dict):
@@ -386,6 +399,7 @@ def scan_top_signals(
                 "z_return":  sig.z_return,
                 "z_quality": sig.z_quality,
                 "scanned_at": int(time.time()),
+                "rel_vol_pre": round(coin.get("rel_vol_pre") or sig.rel_volume, 2),
             }
         except Exception:
             return None
@@ -394,7 +408,7 @@ def scan_top_signals(
     # 16 workers: Binance klines is the bottleneck, each call ~120ms
     # 500 coins / 16 workers ≈ 32 batches ≈ ~4s total
     with ThreadPoolExecutor(max_workers=16) as ex:
-        futures = {ex.submit(score_coin, coin): coin for coin in universe}
+        futures = {ex.submit(score_coin, coin): coin for coin in scan_universe}
         for fut in as_completed(futures):
             result = fut.result()
             if result:
