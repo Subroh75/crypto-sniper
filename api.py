@@ -1446,7 +1446,46 @@ async def pdf_report(payload: dict):
     else:
         agents_list = list(agents_raw) if isinstance(agents_raw, list) else []
 
-    close      = mkt.get("close", quote.get("price", 0))
+    # ── Stale-data guard: if close/price is 0, do a live re-fetch ─────────────
+    # This happens when the frontend sends a cached sig object from before a
+    # data-source fix was deployed (e.g. Gate-exclusive coins like SPCX).
+    _close_check = mkt.get("close", 0) or quote.get("price", 0)
+    if not _close_check and symbol and symbol != "?":
+        try:
+            logger.info(f"pdf-report: close=0 for {symbol}, doing live re-fetch")
+            _ohlcv   = get_ohlcv(symbol, interval)
+            _qt      = get_quote(symbol)
+            _ind     = get_indicators(symbol, interval)
+            _sig     = calculate_signals(_ohlcv, _qt, _ind)
+            # Overwrite stale payload fields with fresh data
+            mkt   = {"close":_sig.close,"ema20":_sig.ema20,"ema50":_sig.ema50,
+                     "ema200":_sig.ema200,"vwap":_sig.vwap,
+                     "bb_upper":_sig.bb_upper,"bb_lower":_sig.bb_lower}
+            timing = {"rsi":_sig.rsi,"adx":_sig.adx,"atr":_sig.atr,
+                      "rel_volume":_sig.rel_volume}
+            quote  = {"price":_qt.get("price",0) or _sig.close,
+                      "change_24h":_qt.get("change_24h",0),
+                      "high_24h":_qt.get("high_24h",0) or _sig.close,
+                      "low_24h":_qt.get("low_24h",0) or _sig.close}
+            sig_obj  = {"total":_sig.total,"max":_sig.max_score,
+                        "label":_sig.signal_label,"direction":_sig.direction}
+            score    = _sig.total
+            score_max= _sig.max_score
+            signal   = _sig.signal_label
+            comp     = {
+                "V":{"score":_sig.v_score,"max":5,"detail":_sig.v_detail},
+                "P":{"score":_sig.p_score,"max":3,"detail":_sig.p_detail},
+                "R":{"score":_sig.r_score,"max":2,"detail":_sig.r_detail},
+                "T":{"score":_sig.t_score,"max":3,"detail":_sig.t_detail},
+            }
+            if not ts.get("entry"):
+                ts = {"entry":_sig.entry,"stop":_sig.stop,"target":_sig.target,
+                      "rr_ratio":_sig.rr_ratio,"atr":_sig.atr,
+                      "stop_dist_pct":round(((  _sig.close-_sig.stop)/_sig.close)*100,3) if _sig.stop else None}
+        except Exception as _e:
+            logger.warning(f"pdf-report live re-fetch failed for {symbol}: {_e}")
+
+    close      = mkt.get("close", 0) or quote.get("price", 0)
     ema20      = mkt.get("ema20", 0); ema50 = mkt.get("ema50", 0)
     ema200     = mkt.get("ema200", 0); vwap  = mkt.get("vwap", 0)
     bb_u       = mkt.get("bb_upper", 0); bb_l = mkt.get("bb_lower", 0)
