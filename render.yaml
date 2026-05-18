@@ -24,4 +24,8 @@ services:
         sync: false
       - key: MARKETAUX_API_KEY
         sync: false
+      - key: BOT_TOKEN
+        sync: false
+      - key: ADMIN_CHAT_ID
+        value: "5861457546"
     autoDeploy: true
