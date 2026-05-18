@@ -27,48 +27,148 @@ TOP_N           = int(os.environ.get("SCANNER_TOP_N", "10"))
 DAILY_HOUR_UTC  = 22       # 8 AM AEST — fires 1D scan at this UTC hour
 
 BINANCE_TICKER = "https://data-api.binance.vision/api/v3/ticker/24hr"
+MEXC_TICKER    = "https://api.mexc.com/api/v3/ticker/24hr"
+GATE_TICKER    = "https://api.gateio.ws/api/v4/spot/tickers"
 STABLECOINS = {
     "USDT","USDC","BUSD","DAI","TUSD","USDP","USDD","GUSD","FRAX","LUSD",
     "FDUSD","PYUSD","STETH","WBTC","WETH","WBETH","EZETH","WEETH","SUSDE","USDE"
 }
-MIN_VOLUME_USD = 500_000
+LEVERAGED_SUFFIXES = {"3L","3S","5L","5S","2L","2S","UP","DOWN","BULL","BEAR"}
+MIN_VOLUME_USD     = 500_000
+MIN_VOLUME_USD_ALT = 500_000   # MEXC + Gate threshold
+# Exchange -> label color prefix for Telegram (text only, no HTML)
+_EXCH_PREFIX = {"mexc": "[MEXC] ", "gate": "[GATE] ", "multi": "[MULTI] "}
 
 
 # ─────────────────────────────────────────────
-#  Universe fetch — Binance USDT pairs
+#  Universe fetch — Binance + MEXC + Gate.io
 # ─────────────────────────────────────────────
+
+# Per-symbol exchange lookup cache (populated by _get_multi_universe)
+_symbol_exchange_map: dict[str, str] = {}
+
+
+async def _fetch_binance_coins(session: aiohttp.ClientSession) -> list[tuple[str, float]]:
+    """Returns [(symbol, vol_usd), ...] from Binance 24hr ticker."""
+    try:
+        async with session.get(BINANCE_TICKER, timeout=aiohttp.ClientTimeout(total=15)) as r:
+            if r.status != 200:
+                return []
+            tickers = await r.json()
+        coins = []
+        for t in tickers:
+            pair = t.get("symbol", "")
+            if not pair.endswith("USDT"):
+                continue
+            sym = pair[:-4]
+            if sym in STABLECOINS:
+                continue
+            vol = float(t.get("quoteVolume", 0))
+            if vol < MIN_VOLUME_USD:
+                continue
+            coins.append((sym, vol))
+        return coins
+    except Exception as e:
+        logger.warning(f"[Scanner] Binance ticker failed: {e}")
+        return []
+
+
+async def _fetch_mexc_coins(session: aiohttp.ClientSession) -> list[tuple[str, float]]:
+    """Returns [(symbol, vol_usd), ...] from MEXC 24hr ticker."""
+    try:
+        async with session.get(MEXC_TICKER, timeout=aiohttp.ClientTimeout(total=15)) as r:
+            if r.status != 200:
+                return []
+            tickers = await r.json()
+        coins = []
+        for t in tickers:
+            pair = t.get("symbol", "")
+            if not pair.endswith("USDT"):
+                continue
+            sym = pair[:-4]
+            if sym in STABLECOINS:
+                continue
+            # Skip leveraged tokens
+            if any(sym.endswith(s) for s in LEVERAGED_SUFFIXES):
+                continue
+            vol = float(t.get("quoteVolume", 0) or 0)
+            if vol < MIN_VOLUME_USD_ALT:
+                continue
+            coins.append((sym, vol))
+        return coins
+    except Exception as e:
+        logger.warning(f"[Scanner] MEXC ticker failed: {e}")
+        return []
+
+
+async def _fetch_gate_coins(session: aiohttp.ClientSession) -> list[tuple[str, float]]:
+    """Returns [(symbol, vol_usd), ...] from Gate.io spot tickers."""
+    try:
+        async with session.get(GATE_TICKER, timeout=aiohttp.ClientTimeout(total=15)) as r:
+            if r.status != 200:
+                return []
+            tickers = await r.json()
+        coins = []
+        for t in tickers:
+            pair = t.get("currency_pair", "")
+            if not pair.endswith("_USDT"):
+                continue
+            sym = pair[:-5]  # strip _USDT
+            if sym in STABLECOINS:
+                continue
+            if any(sym.endswith(s) for s in LEVERAGED_SUFFIXES):
+                continue
+            vol = float(t.get("quote_volume", 0) or 0)
+            if vol < MIN_VOLUME_USD_ALT:
+                continue
+            coins.append((sym, vol))
+        return coins
+    except Exception as e:
+        logger.warning(f"[Scanner] Gate ticker failed: {e}")
+        return []
+
 
 async def _get_top_symbols(n: int = 200) -> list[str]:
+    """Fetch multi-exchange universe. Returns symbol list (Binance fallback on failure)."""
     async with aiohttp.ClientSession() as session:
-        try:
-            async with session.get(
-                BINANCE_TICKER,
-                timeout=aiohttp.ClientTimeout(total=15)
-            ) as r:
-                if r.status != 200:
-                    logger.error(f"Binance ticker returned {r.status}")
-                    return []
-                tickers = await r.json()
-        except Exception as e:
-            logger.error(f"Binance universe fetch failed: {e}")
-            return []
+        bnc, mexc, gate = await asyncio.gather(
+            _fetch_binance_coins(session),
+            _fetch_mexc_coins(session),
+            _fetch_gate_coins(session),
+            return_exceptions=True,
+        )
 
-    coins = []
-    for t in tickers:
-        pair = t.get("symbol", "")
-        if not pair.endswith("USDT"):
-            continue
-        sym = pair[:-4]
-        if sym in STABLECOINS:
-            continue
-        vol = float(t.get("quoteVolume", 0))
-        if vol < MIN_VOLUME_USD:
-            continue
-        coins.append((sym, vol))
+    bnc  = bnc  if isinstance(bnc,  list) else []
+    mexc = mexc if isinstance(mexc, list) else []
+    gate = gate if isinstance(gate, list) else []
 
-    coins.sort(key=lambda x: x[1], reverse=True)
-    symbols = [sym for sym, _ in coins[:n]]
-    logger.info(f"[Scanner] Binance universe: {len(symbols)} symbols")
+    # Build dedup map: highest vol wins; track exchange source
+    seen: dict[str, tuple[float, str]] = {}
+    for sym, vol in bnc:
+        seen[sym] = (vol, "binance")
+    for sym, vol in mexc:
+        if sym not in seen:
+            seen[sym] = (vol, "mexc")
+        elif vol > seen[sym][0]:
+            seen[sym] = (vol, "mexc")
+    for sym, vol in gate:
+        if sym not in seen:
+            seen[sym] = (vol, "gate")
+        elif vol > seen[sym][0]:
+            seen[sym] = (vol, "gate")
+
+    # Persist exchange map for use in _coin_block
+    global _symbol_exchange_map
+    _symbol_exchange_map = {sym: exch for sym, (_, exch) in seen.items()}
+
+    merged = sorted(seen.items(), key=lambda x: x[1][0], reverse=True)
+    symbols = [sym for sym, _ in merged[:n]]
+
+    bnc_n    = sum(1 for sym in symbols if _symbol_exchange_map.get(sym) == "binance")
+    mexc_n   = sum(1 for sym in symbols if _symbol_exchange_map.get(sym) == "mexc")
+    gate_n   = sum(1 for sym in symbols if _symbol_exchange_map.get(sym) == "gate")
+    logger.info(f"[Scanner] Multi-exchange universe: {len(symbols)} symbols "
+                f"(Binance={bnc_n}, MEXC={mexc_n}, Gate={gate_n})")
     return symbols
 
 
@@ -224,7 +324,11 @@ def _coin_block(data: dict, rank: int, interval: str) -> str:
 
     tf_label = interval.upper()
 
-    block  = f"\n#{rank}  {symbol}/USDT"
+    # Exchange source prefix (only for non-Binance coins)
+    exch       = _symbol_exchange_map.get(symbol, "binance")
+    exch_tag   = "" if exch == "binance" else f" [{exch.upper()}]"
+
+    block  = f"\n#{rank}  {symbol}/USDT{exch_tag}"
     block += f"\nSignal:  {label} ({tf_label})"
     block += f"\nPrice:   ${close:.6g}  ({chg:+.2f}% 24h)"
     block += f"\n{_gate_line(comp, timing)}\n"
@@ -561,10 +665,12 @@ async def hourly_scan_job(context) -> None:
                     continue
                 gates = sig.get("gates", {})
                 # ATR from timing dict — used for dynamic stop/target in tracker
-                atr_val = float(timing.get("atr") or trade.get("atr") or 0)
+                atr_val  = float(timing.get("atr") or trade.get("atr") or 0)
+                sym_name = coin.get("symbol", "?")
+                exch_src = _symbol_exchange_map.get(sym_name, "binance")
                 record_signal(
                     source       = "cex",
-                    symbol       = coin.get("symbol", "?"),
+                    symbol       = sym_name,
                     entry_price  = price,
                     signal_label = sig.get("label", "BUY"),
                     score        = sig.get("total", 0),
@@ -578,6 +684,7 @@ async def hourly_scan_job(context) -> None:
                     rel_vol      = float(timing.get("rel_volume") or 0),
                     atr          = atr_val,
                     z_price      = float(timing.get("z_price") or 0),
+                    exchange     = exch_src,
                 )
             except Exception as e:
                 logger.warning(f"[Scanner] Tracker record failed for {coin.get('symbol','?')}: {e}")

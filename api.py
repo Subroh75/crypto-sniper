@@ -15,6 +15,9 @@ from data import (
     get_social_delta, get_coinpaprika_meta,
     get_coindar_events, get_santiment_signals,
     get_binance_universe,
+    get_mexc_universe,
+    get_gate_universe,
+    get_multi_exchange_universe,
     get_vol_prefilter,
 )
 from signals import calculate_signals, get_key_levels
@@ -340,13 +343,20 @@ def scan_top_signals(
             "timestamp":     db_cached["ts"],
         }
 
-    # ── Step 1: Get full Binance universe ──────────────────────────────────────────
-    universe = get_binance_universe(min_volume_usd=min_volume, max_coins=max_coins)
+    # ── Step 1: Get multi-exchange universe (Binance + MEXC + Gate.io) ─────────
+    universe = get_multi_exchange_universe(
+        min_volume_usd_binance=min_volume,
+        min_volume_usd_alt=500_000,
+        max_coins_each=max_coins,
+    )
     if not universe:
-        return {"signals": [], "error": "Binance unavailable", "timestamp": now}
+        # Fallback to Binance-only if multi fetch fails
+        universe = get_binance_universe(min_volume_usd=min_volume, max_coins=max_coins)
+    if not universe:
+        return {"signals": [], "error": "All exchanges unavailable", "timestamp": now}
 
     universe_size = len(universe)
-    logger.info(f"/scan: universe={universe_size} coins, interval={interval}, min_score={min_score}")
+    logger.info(f"/scan: universe={universe_size} coins (multi-exchange), interval={interval}, min_score={min_score}")
 
     # ── Step 1b: Vol pre-filter — only score coins with unusual volume ─────────
     # Drops low-vol noise before the expensive per-coin OHLCV calls.
@@ -363,8 +373,14 @@ def scan_top_signals(
     def score_coin(coin: dict):
         sym = coin["symbol"]
         try:
-            ohlcv = get_ohlcv(sym, interval)
+            exch_for_hint = coin.get("exchange", "binance")
+            # Pass exchange hint so get_ohlcv() tries the right source first
+            ohlcv = get_ohlcv(sym, interval, exchange_hint=exch_for_hint)
             if not ohlcv or len(ohlcv) < 10:
+                return None
+            # Enforce 50-bar minimum for non-Binance coins (listing age filter)
+            if not coin.get("binance_listed", True) and len(ohlcv) < 50:
+                logger.debug(f"score_coin: {sym} skipped (<50 bars, new listing on {exch_for_hint})")
                 return None
             quote = {
                 "price":      coin["price"],
@@ -377,6 +393,15 @@ def scan_top_signals(
             sig = calculate_signals(ohlcv, quote, indicators)
             if sig.total < min_score:
                 return None
+            exch      = coin.get("exchange", "binance")
+            exchanges = coin.get("exchanges", [exch])
+            on_bnc    = coin.get("binance_listed", exch == "binance")
+            exch_label = (
+                "MULTI"        if len(exchanges) > 1
+                else "MEXC"    if exch == "mexc"
+                else "GATE"    if exch == "gate"
+                else "BINANCE"
+            )
             return {
                 "symbol":    sym,
                 "price":     quote["price"],
@@ -398,8 +423,12 @@ def scan_top_signals(
                 "z_vol":     sig.z_vol,
                 "z_return":  sig.z_return,
                 "z_quality": sig.z_quality,
-                "scanned_at": int(time.time()),
-                "rel_vol_pre": round(coin.get("rel_vol_pre") or sig.rel_volume, 2),
+                "scanned_at":     int(time.time()),
+                "rel_vol_pre":    round(coin.get("rel_vol_pre") or sig.rel_volume, 2),
+                "exchange":       exch,
+                "exchange_label": exch_label,
+                "exchanges":      exchanges,
+                "binance_listed": on_bnc,
             }
         except Exception:
             return None

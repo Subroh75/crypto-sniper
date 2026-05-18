@@ -126,7 +126,8 @@ def init_tracker():
                 resolved_at   INTEGER,
                 resolved_pct  REAL,
                 resolved_hrs  REAL,
-                notes         TEXT    DEFAULT ''
+                notes         TEXT    DEFAULT '',
+                exchange      TEXT    DEFAULT 'binance'   -- which exchange sourced this coin
             )
         """)
         # Index for fast pending lookups
@@ -159,6 +160,7 @@ def record_signal(
     rel_vol: float = 0.0,
     atr: float = 0.0,        # ATR14 from signal — used to set dynamic stop
     z_price: float = 0.0,   # Phase 1: price Z-score for future calibration
+    exchange: str = "binance",  # exchange source: "binance" | "mexc" | "gate"
 ) -> int:
     """Insert a new signal. Returns row id.
     
@@ -178,25 +180,29 @@ def record_signal(
         target_price = round(entry_price * 1.10, 8)
 
     with _conn() as con:
-        # Migrate: add z_price column if it doesn't exist yet (safe to run multiple times)
-        try:
-            con.execute("ALTER TABLE signals ADD COLUMN z_price REAL DEFAULT 0")
-        except Exception:
-            pass  # column already exists
+        # Migrate: add columns that may not exist in older DBs (safe to run multiple times)
+        for _col_sql in [
+            "ALTER TABLE signals ADD COLUMN z_price REAL DEFAULT 0",
+            "ALTER TABLE signals ADD COLUMN exchange TEXT DEFAULT 'binance'",
+        ]:
+            try:
+                con.execute(_col_sql)
+            except Exception:
+                pass  # column already exists
 
         cur = con.execute("""
             INSERT INTO signals (
                 fired_at, source, chain, symbol, address, pool, dex_id,
                 interval, signal_label, score, entry_price, stop_price, target_price,
                 v_confirmed, t_confirmed, adx_confirmed, p_confirmed, r_confirmed, rel_vol,
-                z_price
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                z_price, exchange
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (
             int(time.time()), source, chain, symbol, address, pool, dex_id,
             interval, signal_label, score, entry_price, stop_price, target_price,
             int(v_confirmed), int(t_confirmed), int(adx_confirmed),
             int(p_confirmed), int(r_confirmed), rel_vol,
-            round(z_price, 4),
+            round(z_price, 4), exchange,
         ))
         sig_id = cur.lastrowid
 

@@ -14,6 +14,7 @@ export interface Signal {
   price: number; change: number; change_24h?: number;
   rsi: number; adx: number; rel_vol?: number;
   z_price?: number; z_vol?: number; z_return?: number; z_quality?: string;
+  exchange?: string; exchange_label?: string; binance_listed?: boolean;
 }
 
 interface BuySignal { symbol: string; score: number; change: number; }
@@ -102,6 +103,9 @@ export function TopSignals({ onSelect, interval = "1h", onBuySignalsChange, onAl
         rsi:       Number(s.rsi ?? 0),
         adx:       Number(s.adx ?? 0),
         rel_vol:   Number(s.rel_vol ?? 0),
+        exchange:       String(s.exchange ?? "binance"),
+        exchange_label: String(s.exchange_label ?? "BINANCE"),
+        binance_listed: Boolean(s.binance_listed ?? true),
         scanned_at: s.scanned_at ? Number(s.scanned_at) : undefined,
       }));
 
@@ -310,11 +314,31 @@ export function TopSignals({ onSelect, interval = "1h", onBuySignalsChange, onAl
                   {globalIndex}
                 </span>
 
-                {/* Symbol + price + quality label */}
+                {/* Symbol + price + exchange badge */}
                 <div style={{ display: "flex", flexDirection: "column" as const, gap: 1, padding: "9px 0 9px 4px" }}>
-                  <span style={{ fontSize: 11, fontWeight: 800, color: "#f1f5f9", fontFamily: "monospace", letterSpacing: "0.04em" }}>
-                    {sig.symbol}
-                  </span>
+                  <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                    <span style={{ fontSize: 11, fontWeight: 800, color: "#f1f5f9", fontFamily: "monospace", letterSpacing: "0.04em" }}>
+                      {sig.symbol}
+                    </span>
+                    {sig.exchange_label && sig.exchange_label !== "BINANCE" && (() => {
+                      const exchColor = sig.exchange_label === "MEXC"  ? { bg: "rgba(14,165,233,0.12)", border: "rgba(14,165,233,0.3)", text: "#38bdf8" }
+                                      : sig.exchange_label === "GATE"  ? { bg: "rgba(168,85,247,0.12)", border: "rgba(168,85,247,0.3)", text: "#c084fc" }
+                                      : sig.exchange_label === "MULTI" ? { bg: "rgba(251,146,60,0.12)", border: "rgba(251,146,60,0.3)",  text: "#fb923c" }
+                                      : null;
+                      if (!exchColor) return null;
+                      return (
+                        <span style={{
+                          fontSize: 7, fontWeight: 800, letterSpacing: "0.05em",
+                          color: exchColor.text, background: exchColor.bg,
+                          padding: "1px 4px", borderRadius: 3,
+                          border: `1px solid ${exchColor.border}`,
+                          whiteSpace: "nowrap" as const,
+                        }}>
+                          {sig.exchange_label}
+                        </span>
+                      );
+                    })()}
+                  </div>
                   <span style={{ fontSize: 8, color: "#334155" }}>
                     ${sig.price < 0.01 ? sig.price.toFixed(6) : sig.price < 1 ? sig.price.toFixed(4) : sig.price.toFixed(2)}
                     {sig.scanned_at && (() => {

@@ -189,16 +189,64 @@ def get_binance_universe(
     logger.info(f"Binance universe: {len(result)} coins (from {len(coins)} USDT pairs)")
     return result
 
-def get_ohlcv(symbol: str, interval: str = "1H") -> list[list]:
+def get_ohlcv(symbol: str, interval: str = "1H", exchange_hint: str = "") -> list[list]:
     """
-    Returns [[timestamp, open, high, low, close], ...] newest last.
-    Primary: Twelve Data (real OHLCV, 300 candles).
-    Fallback: CoinGecko market_chart -> CoinCap -> synthetic.
+    Returns [[timestamp, open, high, low, close, volume], ...] newest last.
+    Fallback chain:
+      1. Binance  (fastest, most liquid, most reliable)
+      2. MEXC     (MEXC-listed coins not on Binance)
+      3. Gate.io  (Gate-listed coins not on Binance/MEXC)
+      4. Finnhub  (keyed fallback)
+      5. CoinGecko market_chart -> CoinCap -> synthetic
+
+    exchange_hint: "mexc" or "gate" -> try that exchange first before Binance
     """
-    # Try Binance first — no key, 1000 candles, most reliable
+    hint = exchange_hint.lower() if exchange_hint else ""
+
+    # Fast-path: if we know the coin is MEXC-only, try MEXC before Binance
+    if hint == "mexc":
+        bars = _mexc_ohlcv(symbol, interval, limit=300)
+        if len(bars) >= 50:  # need 50+ bars for EMA200 reliability
+            return bars
+
+    # Fast-path: if we know the coin is Gate-only, try Gate before Binance
+    if hint == "gate":
+        bars = _gate_ohlcv(symbol, interval, limit=300)
+        if len(bars) >= 50:
+            return bars
+
+    # Try Binance first -- no key, 1000 candles, most reliable
+    bars = _binance_ohlcv(symbol, interval, limit=300)
+    if len(bars) >= 50:
+        return bars
+
+    # Binance miss -> try MEXC (identical API structure)
+    if hint != "mexc":  # already tried above
+        bars = _mexc_ohlcv(symbol, interval, limit=300)
+        if len(bars) >= 50:
+            logger.debug(f"get_ohlcv: {symbol} sourced from MEXC")
+            return bars
+
+    # MEXC miss -> try Gate.io
+    if hint != "gate":  # already tried above
+        bars = _gate_ohlcv(symbol, interval, limit=300)
+        if len(bars) >= 50:
+            logger.debug(f"get_ohlcv: {symbol} sourced from Gate")
+            return bars
+
+    # Accept shorter bars from any source (minimum 20 for basic scoring)
     bars = _binance_ohlcv(symbol, interval, limit=300)
     if len(bars) >= 20:
         return bars
+    if hint != "mexc":
+        bars = _mexc_ohlcv(symbol, interval, limit=300)
+        if len(bars) >= 20:
+            return bars
+    if hint != "gate":
+        bars = _gate_ohlcv(symbol, interval, limit=300)
+        if len(bars) >= 20:
+            return bars
+
     # Fallback: Finnhub (keyed, real OHLCV candles)
     if FH_KEY:
         bars = _finnhub_ohlcv(symbol, interval, bars=300)
@@ -217,16 +265,14 @@ def get_ohlcv(symbol: str, interval: str = "1H") -> list[list]:
     volumes = data.get("total_volumes", [])
     if len(prices) < 2:
         return _coincap_ohlcv(symbol, days)
-    # Convert price series to synthetic OHLCV (open=prev_close, high/low ÃÂÃÂ±0.5%, close=price)
+    # Convert price series to synthetic OHLCV (open=prev_close, high/low +-0.5%, close=price)
     bars = []
     for i, (ts, price) in enumerate(prices):
         prev  = prices[i-1][1] if i > 0 else price
         high  = round(max(price, prev) * 1.003, 8)
         low   = round(min(price, prev) * 0.997, 8)
-        bars.append([int(ts), round(prev, 8), high, low, round(price, 8)])
+        bars.append([int(ts), round(prev, 8), high, low, round(price, 8), 0.0])
     return bars[-96:]  # last 96 bars max
-
-
 
 
 def _finnhub_ohlcv(symbol: str, interval: str = "1H", bars: int = 300) -> list[list]:
@@ -291,6 +337,322 @@ def _binance_quote(symbol: str) -> dict:
         "high_24h":   float(data["highPrice"]),
         "low_24h":    float(data["lowPrice"]),
     }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MEXC — public OHLCV + universe (same /api/v3 structure as Binance, no key)
+# ─────────────────────────────────────────────────────────────────────────────
+MEXC_BASE = "https://api.mexc.com/api/v3"
+
+# Cache
+_MEXC_UNIVERSE_CACHE: list = []
+_MEXC_UNIVERSE_TS:    float = 0.0
+_MEXC_UNIVERSE_TTL:   float = 300.0   # 5 minutes
+
+def _mexc_ohlcv(symbol: str, interval: str = "1h", limit: int = 300) -> list:
+    """
+    MEXC klines — identical structure to Binance, no API key needed.
+    Interval map mirrors Binance. Returns [[ts, o, h, l, c, vol], ...]
+    """
+    iv_map = {"1m":"1m","5m":"5m","15m":"15m","30m":"30m",
+              "1H":"60m","4H":"4h","1D":"1d"}
+    iv  = iv_map.get(interval, "60m")
+    sym = symbol.upper() + "USDT"
+    try:
+        r = requests.get(
+            f"{MEXC_BASE}/klines",
+            params={"symbol": sym, "interval": iv, "limit": limit},
+            timeout=12,
+        )
+        if r.status_code != 200:
+            return []
+        data = r.json()
+        if not data or not isinstance(data, list) or len(data) < 5:
+            return []
+        return [[int(c[0]), float(c[1]), float(c[2]), float(c[3]),
+                 float(c[4]), float(c[5])] for c in data]
+    except Exception as e:
+        logger.debug(f"MEXC OHLCV {symbol}: {e}")
+        return []
+
+
+def get_mexc_universe(
+    min_volume_usd: float = 500_000,
+    max_coins: int = 500,
+) -> list[dict]:
+    """
+    MEXC USDT-pair universe sorted by 24h volume.
+    Filters: min vol $500k, skip stablecoins/wrapped tokens.
+    Adds exchange="mexc" tag to each entry.
+    """
+    global _MEXC_UNIVERSE_CACHE, _MEXC_UNIVERSE_TS
+    now = time.time()
+    if _MEXC_UNIVERSE_CACHE and (now - _MEXC_UNIVERSE_TS) < _MEXC_UNIVERSE_TTL:
+        return _MEXC_UNIVERSE_CACHE
+
+    try:
+        r = requests.get(f"{MEXC_BASE}/ticker/24hr", timeout=15)
+        r.raise_for_status()
+        tickers = r.json()
+    except Exception as e:
+        logger.warning(f"MEXC universe fetch failed: {e}")
+        return _MEXC_UNIVERSE_CACHE
+
+    coins = []
+    for t in tickers:
+        sym_pair = t.get("symbol", "")
+        if not sym_pair.endswith("USDT"):
+            continue
+        sym = sym_pair[:-4]
+        if sym in _EXCLUDE_SYMBOLS:
+            continue
+        # MEXC-specific extras to skip
+        if any(sym.startswith(p) for p in ("3L", "3S", "5L", "5S", "2L", "2S")):
+            continue   # leveraged tokens
+        vol = float(t.get("quoteVolume") or 0)
+        if vol < min_volume_usd:
+            continue
+        price = float(t.get("lastPrice") or 0)
+        if price <= 0:
+            continue
+        coins.append({
+            "symbol":     sym,
+            "price":      price,
+            "change_24h": float(t.get("priceChangePercent") or 0),
+            "volume_24h": vol,
+            "high_24h":   float(t.get("highPrice") or price),
+            "low_24h":    float(t.get("lowPrice")  or price),
+            "exchange":   "mexc",
+        })
+
+    coins.sort(key=lambda c: c["volume_24h"], reverse=True)
+    result = coins[:max_coins]
+    _MEXC_UNIVERSE_CACHE = result
+    _MEXC_UNIVERSE_TS    = now
+    logger.info(f"MEXC universe: {len(result)} coins (min_vol=${min_volume_usd:,.0f})")
+    return result
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Gate.io — public OHLCV + universe (no key needed)
+# ─────────────────────────────────────────────────────────────────────────────
+GATE_BASE = "https://api.gateio.ws/api/v4"
+
+_GATE_UNIVERSE_CACHE: list = []
+_GATE_UNIVERSE_TS:    float = 0.0
+_GATE_UNIVERSE_TTL:   float = 300.0
+
+def _gate_ohlcv(symbol: str, interval: str = "1h", limit: int = 300) -> list:
+    """
+    Gate.io candlesticks — no API key needed.
+    Returns [[ts_ms, o, h, l, c, vol], ...] normalised to match Binance format.
+    """
+    iv_map = {"1m":"1m","5m":"5m","15m":"15m","30m":"30m",
+              "1H":"1h","4H":"4h","1D":"1d"}
+    iv       = iv_map.get(interval, "1h")
+    currency = f"{symbol.upper()}_USDT"
+    try:
+        r = requests.get(
+            f"{GATE_BASE}/spot/candlesticks",
+            params={"currency_pair": currency, "interval": iv, "limit": limit},
+            headers={"Accept": "application/json"},
+            timeout=12,
+        )
+        if r.status_code != 200:
+            return []
+        data = r.json()
+        if not data or not isinstance(data, list) or len(data) < 5:
+            return []
+        # Gate format: [ts_sec, vol_quote, close, high, low, open, ...]
+        # Normalise to [ts_ms, open, high, low, close, vol]
+        bars = []
+        for c in data:
+            try:
+                bars.append([
+                    int(float(c[0])) * 1000,  # ts_sec -> ts_ms
+                    float(c[5]),               # open
+                    float(c[3]),               # high
+                    float(c[4]),               # low
+                    float(c[2]),               # close
+                    float(c[1]),               # vol (quote)
+                ])
+            except (IndexError, ValueError):
+                continue
+        return bars
+    except Exception as e:
+        logger.debug(f"Gate OHLCV {symbol}: {e}")
+        return []
+
+
+def get_gate_universe(
+    min_volume_usd: float = 500_000,
+    max_coins: int = 500,
+) -> list[dict]:
+    """
+    Gate.io USDT-pair universe sorted by 24h volume.
+    Filters: min vol $500k, skip stablecoins/leveraged tokens.
+    Adds exchange="gate" tag to each entry.
+    """
+    global _GATE_UNIVERSE_CACHE, _GATE_UNIVERSE_TS
+    now = time.time()
+    if _GATE_UNIVERSE_CACHE and (now - _GATE_UNIVERSE_TS) < _GATE_UNIVERSE_TTL:
+        return _GATE_UNIVERSE_CACHE
+
+    try:
+        r = requests.get(
+            f"{GATE_BASE}/spot/tickers",
+            headers={"Accept": "application/json"},
+            timeout=15,
+        )
+        r.raise_for_status()
+        tickers = r.json()
+    except Exception as e:
+        logger.warning(f"Gate universe fetch failed: {e}")
+        return _GATE_UNIVERSE_CACHE
+
+    coins = []
+    for t in tickers:
+        pair = t.get("currency_pair", "")
+        if not pair.endswith("_USDT"):
+            continue
+        sym = pair[:-5]   # strip _USDT
+        if sym in _EXCLUDE_SYMBOLS:
+            continue
+        if "_" in sym:
+            continue      # skip cross-stablecoin pairs like USDC_USDT
+        if any(sym.endswith(s) for s in ("3L","3S","5L","5S","UP","DOWN")):
+            continue      # leveraged tokens
+        vol = float(t.get("quote_volume") or t.get("base_volume") or 0)
+        if vol < min_volume_usd:
+            continue
+        price = float(t.get("last") or 0)
+        if price <= 0:
+            continue
+        chg = float(t.get("change_percentage") or 0)
+        high = float(t.get("high_24h") or price)
+        low  = float(t.get("low_24h")  or price)
+        coins.append({
+            "symbol":     sym,
+            "price":      price,
+            "change_24h": chg,
+            "volume_24h": vol,
+            "high_24h":   high,
+            "low_24h":    low,
+            "exchange":   "gate",
+        })
+
+    coins.sort(key=lambda c: c["volume_24h"], reverse=True)
+    result = coins[:max_coins]
+    _GATE_UNIVERSE_CACHE = result
+    _GATE_UNIVERSE_TS    = now
+    logger.info(f"Gate universe: {len(result)} coins (min_vol=${min_volume_usd:,.0f})")
+    return result
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MULTI-EXCHANGE UNIVERSE — Binance + MEXC + Gate.io unified + deduped
+# ─────────────────────────────────────────────────────────────────────────────
+_MULTI_UNIVERSE_CACHE: list = []
+_MULTI_UNIVERSE_TS:    float = 0.0
+_MULTI_UNIVERSE_TTL:   float = 300.0
+
+# Exchange priority for dedup: highest vol source wins
+_EXCHANGE_PRIORITY = {"binance": 3, "mexc": 2, "gate": 1}
+
+def get_multi_exchange_universe(
+    min_volume_usd_binance: float = 1_000_000,
+    min_volume_usd_alt:     float = 500_000,
+    max_coins_each:         int   = 500,
+) -> list[dict]:
+    """
+    Unified USDT universe across Binance + MEXC + Gate.io.
+
+    Strategy:
+      1. Fetch each exchange universe in parallel
+      2. Deduplicate: if a coin appears on multiple exchanges,
+         keep the entry with highest 24h volume (best price discovery)
+         but tag it with all exchanges it appears on
+      3. Sort by 24h volume descending
+      4. Coins ONLY on MEXC/Gate tagged exchange="mexc"/"gate" —
+         these are early-stage / pre-Binance assets
+
+    Returns list[dict] with same schema as get_binance_universe() plus:
+      - "exchange": primary exchange ("binance"|"mexc"|"gate")
+      - "exchanges": list of all exchanges this coin trades on
+      - "binance_listed": bool — True if on Binance
+    """
+    global _MULTI_UNIVERSE_CACHE, _MULTI_UNIVERSE_TS
+    now = time.time()
+    if _MULTI_UNIVERSE_CACHE and (now - _MULTI_UNIVERSE_TS) < _MULTI_UNIVERSE_TTL:
+        return _MULTI_UNIVERSE_CACHE
+
+    from concurrent.futures import ThreadPoolExecutor, as_completed as _asc
+
+    def _fetch_bnc():
+        coins = get_binance_universe(min_volume_usd=min_volume_usd_binance,
+                                     max_coins=max_coins_each)
+        for c in coins:
+            c.setdefault("exchange", "binance")
+        return coins
+
+    def _fetch_mexc():
+        return get_mexc_universe(min_volume_usd=min_volume_usd_alt,
+                                 max_coins=max_coins_each)
+
+    def _fetch_gate():
+        return get_gate_universe(min_volume_usd=min_volume_usd_alt,
+                                 max_coins=max_coins_each)
+
+    results = {}
+    with ThreadPoolExecutor(max_workers=3) as ex:
+        fs = {
+            ex.submit(_fetch_bnc):  "binance",
+            ex.submit(_fetch_mexc): "mexc",
+            ex.submit(_fetch_gate): "gate",
+        }
+        for fut in _asc(fs):
+            src = fs[fut]
+            try:
+                results[src] = fut.result()
+            except Exception as e:
+                logger.warning(f"Multi-universe {src} failed: {e}")
+                results[src] = []
+
+    # Dedup: best entry per symbol (highest volume wins)
+    seen: dict[str, dict] = {}
+    for src in ("binance", "mexc", "gate"):
+        for coin in results.get(src, []):
+            sym = coin["symbol"]
+            if sym not in seen:
+                coin["exchanges"] = [src]
+                coin["binance_listed"] = (src == "binance")
+                seen[sym] = coin
+            else:
+                existing = seen[sym]
+                existing["exchanges"] = list(set(existing.get("exchanges", []) + [src]))
+                existing["binance_listed"] = existing["binance_listed"] or (src == "binance")
+                # Keep higher volume entry as primary
+                if coin["volume_24h"] > existing["volume_24h"]:
+                    src_keep = coin["exchange"]
+                    coin["exchanges"]      = existing["exchanges"]
+                    coin["binance_listed"] = existing["binance_listed"]
+                    seen[sym] = coin
+
+    merged = list(seen.values())
+    merged.sort(key=lambda c: c["volume_24h"], reverse=True)
+
+    bnc_count  = sum(1 for c in merged if c["exchange"] == "binance")
+    mexc_only  = sum(1 for c in merged if not c["binance_listed"] and c["exchange"] == "mexc")
+    gate_only  = sum(1 for c in merged if not c["binance_listed"] and c["exchange"] == "gate")
+    multi_ex   = sum(1 for c in merged if len(c.get("exchanges", [])) > 1)
+    logger.info(
+        f"Multi-exchange universe: {len(merged)} coins total — "
+        f"Binance={bnc_count}, MEXC-only={mexc_only}, Gate-only={gate_only}, Multi={multi_ex}"
+    )
+
+    _MULTI_UNIVERSE_CACHE = merged
+    _MULTI_UNIVERSE_TS    = now
+    return merged
 
 
 # Extended Coinpaprika ID map (used by both _coinpaprika_quote and get_coinpaprika_meta)
@@ -1630,33 +1992,53 @@ def get_vol_prefilter(
 
 def build_volume_baseline(max_coins: int = 500, interval: str = "1h") -> dict:
     """
-    Pull 21 bars of klines for every Binance USDT pair and store the
+    Pull 21 bars of klines for Binance + MEXC + Gate.io USDT pairs and store the
     20-bar average volume in SQLite. Called on startup + every 24h.
     Returns {"updated": N, "errors": M, "timestamp": ts}
     """
-    import time as _time
     from concurrent.futures import ThreadPoolExecutor, as_completed as _asc
 
     iv = interval.lower()
-    coins = get_binance_universe(min_volume_usd=50_000, max_coins=max_coins)
-    logger.info(f"build_volume_baseline: {len(coins)} coins, interval={iv}")
+
+    # Fetch unified multi-exchange universe (cached 5 min)
+    all_coins = get_multi_exchange_universe(
+        min_volume_usd_binance=50_000,
+        min_volume_usd_alt=50_000,
+        max_coins_each=max_coins,
+    )
+    logger.info(f"build_volume_baseline: {len(all_coins)} coins (multi-exchange), interval={iv}")
 
     def _baseline_one(coin):
-        sym = coin["symbol"]
+        sym  = coin["symbol"]
+        exch = coin.get("exchange", "binance")
         try:
-            bnc_sym = BNC_SYM.get(sym.upper(), sym.upper() + "USDT")
-            r = requests.get(
-                f"{BNC_BASE}/klines",
-                params={"symbol": bnc_sym, "interval": iv, "limit": 21},
-                timeout=10,
-            )
-            if r.status_code != 200:
+            # Use the right exchange's kline API
+            if exch == "gate" and not coin.get("binance_listed"):
+                bars_raw = _gate_ohlcv(sym, iv, limit=22)
+            elif exch == "mexc" and not coin.get("binance_listed"):
+                bars_raw = _mexc_ohlcv(sym, iv, limit=22)
+            else:
+                bnc_sym = BNC_SYM.get(sym.upper(), sym.upper() + "USDT")
+                r = requests.get(
+                    f"{BNC_BASE}/klines",
+                    params={"symbol": bnc_sym, "interval": iv, "limit": 22},
+                    timeout=10,
+                )
+                if r.status_code != 200:
+                    return None
+                bars_raw = r.json()
+                if not bars_raw or len(bars_raw) < 5:
+                    return None
+                # Binance: already raw list, volume at index 5
+                vols = [float(b[5]) for b in bars_raw[:-1]]  # exclude forming bar
+                avg = sum(vols) / len(vols) if vols else 0
+                if avg <= 0:
+                    return None
+                return (sym, avg)
+            # MEXC/Gate: _mexc_ohlcv/_gate_ohlcv return [[ts,o,h,l,c,vol], ...]
+            if not bars_raw or len(bars_raw) < 5:
                 return None
-            bars = r.json()
-            if not bars or len(bars) < 5:
-                return None
-            # Use bars[:-1] (exclude the still-forming current bar)
-            vols = [float(b[5]) for b in bars[:-1]]
+            vols = [float(b[5]) for b in bars_raw[:-1]]
             avg = sum(vols) / len(vols) if vols else 0
             if avg <= 0:
                 return None
@@ -1665,10 +2047,10 @@ def build_volume_baseline(max_coins: int = 500, interval: str = "1h") -> dict:
             return None
 
     updated, errors = 0, 0
-    now_ts = int(__import__("time").time())
+    now_ts = int(time.time())
 
     with ThreadPoolExecutor(max_workers=20) as ex:
-        futures = {ex.submit(_baseline_one, c): c for c in coins}
+        futures = {ex.submit(_baseline_one, c): c for c in all_coins}
         rows = []
         for fut in _asc(futures):
             res = fut.result()
