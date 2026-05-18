@@ -14,6 +14,7 @@ Also exposes:
 """
 
 import asyncio
+import json
 import logging
 import aiohttp
 from datetime import datetime, timezone
@@ -102,6 +103,23 @@ async def dex_scan_job(context) -> None:
     # Cache for /gems command
     _last_sweep_board = board
     _last_sweep_time  = scan_time
+
+    # Persist results to shared JSON for the API /dex-results endpoint
+    try:
+        hits_all  = board.all_hits(top_n=25)
+        vol_hits  = board.all_vol_hits(top_n=20)
+        dex_cache = {
+            "scan_time":  scan_time,
+            "scan_ts":    int(datetime.now(timezone.utc).timestamp()),
+            "gems":       hits_all,
+            "vol_hits":   vol_hits,
+        }
+        dex_cache_path = os.environ.get("DEX_CACHE_PATH", "/tmp/dex_last_scan.json")
+        with open(dex_cache_path, "w") as _f:
+            json.dump(dex_cache, _f)
+        logger.info(f"[DEX Scanner] Persisted {len(hits_all)} gems + {len(vol_hits)} vol_hits to {dex_cache_path}")
+    except Exception as _e:
+        logger.warning(f"[DEX Scanner] Failed to persist DEX cache: {_e}")
 
     s    = board.summary()
     hits = board.all_hits(top_n=top_n * len(AGENTS))

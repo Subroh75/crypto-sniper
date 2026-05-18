@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import { DexTopCoins } from "@/components/DexTopCoins";
 
 const API = (import.meta as Record<string, unknown> & { env?: Record<string, string> })
   .env?.VITE_API_BASE ?? "https://crypto-sniper.onrender.com";
@@ -418,6 +419,9 @@ export function TopSignals({ onSelect, interval = "1h", onBuySignalsChange, onAl
           </button>
         </div>
       )}
+
+      {/* DEX Top Coins — below CEX scanner */}
+      <DexTopCoins />
     </div>
   );
 }

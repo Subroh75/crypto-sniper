@@ -1737,6 +1737,32 @@ class DexAnalyseRequest(BaseModel):
     query: str          # contract address (0x...), Solana pubkey, or DexScreener pair URL
     chain: str = "auto" # "auto"|"eth"|"bsc"|"sol"|"base"|"arb"
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# DEX SCAN RESULTS — latest bot sweep, persisted to /tmp/dex_last_scan.json
+# ─────────────────────────────────────────────────────────────────────────────
+@app.get("/dex-results", tags=["DEX"])
+def dex_results():
+    """
+    Returns the last DEX scan results (gems + vol_hits) from the Telegram bot sweep.
+    Written by dex_scan_job on every daily scan.
+    """
+    import json as _json, os as _os
+    cache_path = _os.environ.get("DEX_CACHE_PATH", "/tmp/dex_last_scan.json")
+    if not _os.path.exists(cache_path):
+        return {"gems": [], "vol_hits": [], "scan_time": None, "scan_ts": None, "fresh": False}
+    try:
+        with open(cache_path) as _f:
+            data = _json.load(_f)
+        # Mark stale if older than 26h (daily scan, allow buffer)
+        age_h = (time.time() - (data.get("scan_ts") or 0)) / 3600
+        data["fresh"] = age_h < 26
+        data["age_h"] = round(age_h, 1)
+        return data
+    except Exception as e:
+        logger.warning(f"/dex-results read error: {e}")
+        return {"gems": [], "vol_hits": [], "scan_time": None, "scan_ts": None, "fresh": False}
+
 @app.post("/dex-analyse")
 async def dex_analyse(req: DexAnalyseRequest):
     """
