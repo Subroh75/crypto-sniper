@@ -167,7 +167,7 @@ function scoreSentiment(title: string, desc: string): "bullish" | "bearish" | "n
 }
 
 function useClientNews(symbol: string) {
-  const [articles, setArticles] = useState<Array<{title:string;source:string;url:string;published:string;sentiment:"bullish"|"bearish"|"neutral"}>>([]);
+  const [articles, setArticles] = useState<Array<{title:string;source:string;url:string;published:string;sentiment:"bullish"|"bearish"|"neutral";matched:boolean}>>([]);
   const [loading, setLoading]   = useState(false);
   const [error, setError]       = useState<string|null>(null);
   const prevSymbol = useRef("");
@@ -204,12 +204,15 @@ function useClientNews(symbol: string) {
         if (seen.has(item.title)) return false;
         seen.add(item.title); return true;
       });
+      // Tag each article: show symbol if it's a keyword match, else "Market"
+      const matchedTitles = new Set(matched.map((m: Record<string,string>) => m.title));
       setArticles(deduped.slice(0, 4).map((item: Record<string,string>) => ({
         title:     item.title ?? "",
         source:    item._source ?? "Crypto News",
         url:       item.link ?? "",
         published: item.pubDate ?? "",
         sentiment: scoreSentiment(item.title ?? "", item.description ?? ""),
+        matched:   matchedTitles.has(item.title),
       })));
       setLoading(false);
     }).catch(e => { setError(String(e)); setLoading(false); });
@@ -233,17 +236,21 @@ export function NewsSection({ symbol }: { symbol: string }) {
           ) : articles.length > 0 ? (
             articles.slice(0, 4).map((article, i) => {
               const style = SENTIMENT_STYLE[article.sentiment] ?? SENTIMENT_STYLE.neutral;
+              // Only stamp the coin ticker if the article actually mentions it
+              const tagLabel = article.matched ? `${style.label} · ${symbol}` : style.label;
+              // Last card in a 3-item grid spans both columns to avoid empty slot
+              const spanFull = articles.length === 3 && i === 2;
               return (
                 <a
                   key={i}
                   href={article.url}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className={`block p-3 rounded-lg border border-border/50 bg-surface-2 border-l-[3px] ${style.bar} hover:bg-surface-offset transition-all`}
+                  className={`block p-3 rounded-lg border border-border/50 bg-surface-2 border-l-[3px] ${style.bar} hover:bg-surface-offset transition-all${spanFull ? " col-span-2" : ""}`}
                 >
                   <div className="flex items-center gap-1.5 mb-2">
                     <span className={`text-[8px] font-mono font-bold px-1.5 py-0.5 rounded ${style.tag}`}>
-                      {style.label} · {symbol}
+                      {tagLabel}
                     </span>
                   </div>
                   <div className="text-[11px] text-text leading-snug mb-2 line-clamp-2">
