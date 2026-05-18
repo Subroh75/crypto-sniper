@@ -581,3 +581,147 @@ async def hourly_scan_job(context) -> None:
                 )
             except Exception as e:
                 logger.warning(f"[Scanner] Tracker record failed for {coin.get('symbol','?')}: {e}")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  VOL SPIKE POLLER — fires every hour, instant alert on new CEX or DEX spikes
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Dedup registry: symbol -> last alert timestamp
+# Prevents re-alerting the same spike for 4 hours
+_spike_alerted: dict[str, float] = {}
+_SPIKE_COOLDOWN = 4 * 3600   # 4-hour cooldown per symbol
+
+
+def _vol_spike_label(rv: float) -> str:
+    if rv >= 3.5: return "Extreme"
+    if rv >= 2.5: return "High"
+    return "Elevated"
+
+
+async def vol_spike_job(context) -> None:
+    """
+    JobQueue callback — runs every hour.
+    Checks CEX (top 200) and DEX (all chain agents) for vol spikes >= 1.8x.
+    Fires a Telegram alert immediately for any NEW spike not alerted in last 4h.
+
+    At 22:00 UTC (daily scan hour) — skip CEX check to avoid double-alerting
+    since hourly_scan_job also runs at that hour.
+    """
+    global _spike_alerted
+    bot      = context.bot
+    now      = time.time()
+    now_utc  = datetime.now(timezone.utc)
+    scan_time = now_utc.strftime("%d %b %Y %H:%M UTC")
+
+    # Prune old cooldown entries
+    _spike_alerted = {k: v for k, v in _spike_alerted.items() if now - v < _SPIKE_COOLDOWN}
+
+    new_cex: list[dict] = []
+    new_dex: list[dict] = []
+
+    # ── CEX check ──────────────────────────────────────────────────────────
+    # Skip at 22 UTC — hourly_scan_job handles that hour with full scoring
+    if now_utc.hour != DAILY_HOUR_UTC:
+        try:
+            symbols = await _get_top_symbols(200)
+            if symbols:
+                cex_hits, _ = await _vol_scan(symbols, interval="1d")
+                for h in cex_hits:
+                    sym = h.get("symbol", "")
+                    rv  = h.get("timing", {}).get("rel_volume") or 0
+                    key = f"CEX:{sym}"
+                    if key not in _spike_alerted:
+                        _spike_alerted[key] = now
+                        new_cex.append({"symbol": sym, "rv": rv, "source": "CEX",
+                                        "change": h.get("market", {}).get("pct") or 0,
+                                        "signal": h.get("signal", {}).get("label", "")})
+        except Exception as e:
+            logger.warning(f"[VolSpike] CEX check failed: {e}")
+
+    # ── DEX check ─────────────────────────────────────────────────────────
+    try:
+        import aiohttp as _aiohttp
+        from dex_scanner.chains.agent_bsc  import BSCAgent
+        from dex_scanner.chains.agent_base import BASEAgent
+        from dex_scanner.chains.agent_eth  import ETHAgent
+        from dex_scanner.chains.agent_sol  import SOLAgent
+        from dex_scanner.chains.agent_arb  import ARBAgent
+
+        dex_agents = [BSCAgent(), BASEAgent(), ETHAgent(), SOLAgent(), ARBAgent()]
+
+        async with _aiohttp.ClientSession() as session:
+            tasks = [agent.scan_vol_hits(session) for agent in dex_agents]
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        for agent, res in zip(dex_agents, results):
+            if isinstance(res, Exception) or not res:
+                continue
+            for h in res:
+                sym   = h.get("symbol", "?")
+                rv    = h.get("rel_vol", 0)
+                chain = h.get("chain", agent.chain_id).upper()
+                key   = f"DEX:{chain}:{sym}"
+                if key not in _spike_alerted:
+                    _spike_alerted[key] = now
+                    new_dex.append({
+                        "symbol": sym, "rv": rv, "source": f"DEX/{chain}",
+                        "change_1h":  h.get("change_1h", 0),
+                        "change_24h": h.get("change_24h", 0),
+                        "signal": h.get("signal", ""),
+                        "liq": h.get("liquidity", 0),
+                        "chain": chain,
+                    })
+    except Exception as e:
+        logger.warning(f"[VolSpike] DEX check failed: {e}")
+
+    if not new_cex and not new_dex:
+        logger.debug(f"[VolSpike] No new spikes this hour — {len(_spike_alerted)} in cooldown")
+        return
+
+    # ── Build and send alert ───────────────────────────────────────────────
+    total = len(new_cex) + len(new_dex)
+    lines = [
+        f"CRYPTO SNIPER  --  VOL SPIKE ALERT",
+        f"{scan_time}",
+        f"New spikes: {total}  (CEX: {len(new_cex)}  DEX: {len(new_dex)})",
+        "─" * 32,
+    ]
+
+    if new_cex:
+        lines.append("\nCEX SPIKES")
+        for h in sorted(new_cex, key=lambda x: x["rv"], reverse=True)[:8]:
+            lbl = _vol_spike_label(h["rv"])
+            sig = h["signal"]
+            sig_txt = f"  [{sig}]" if sig in ("STRONG BUY", "BUY") else ""
+            lines.append(
+                f"  {h['symbol']}  {lbl} {h['rv']:.1f}x  "
+                f"({h['change']:+.1f}%){sig_txt}"
+            )
+
+    if new_dex:
+        lines.append("\nDEX SPIKES")
+        for h in sorted(new_dex, key=lambda x: x["rv"], reverse=True)[:8]:
+            lbl = _vol_spike_label(h["rv"])
+            sig = h["signal"]
+            sig_txt = f"  [{sig}]" if sig in ("STRONG BUY", "BUY") else ""
+            liq_txt = f"  Liq ${h['liq']/1000:.0f}K" if h.get("liq", 0) > 0 else ""
+            lines.append(
+                f"  {h['symbol']}  {h['chain']}  {lbl} {h['rv']:.1f}x  "
+                f"({h['change_1h']:+.1f}% 1h / {h['change_24h']:+.1f}% 24h)"
+                f"{liq_txt}{sig_txt}"
+            )
+
+    lines += [
+        "\n" + "─" * 32,
+        "Vol spike alert -- not a signal until gates confirm.",
+        "https://crypto-sniper.app",
+    ]
+
+    msg = "\n".join(lines)
+    logger.info(f"[VolSpike] Alerting {total} new spikes (CEX:{len(new_cex)} DEX:{len(new_dex)})")
+
+    try:
+        await _send(bot, ADMIN_CHAT, msg)
+    except Exception as e:
+        logger.error(f"[VolSpike] Send failed: {e}")

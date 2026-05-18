@@ -117,6 +117,42 @@ class ChainAgent:
         return hits[:top_n]
 
     # ────────────────────────────────────────────────────────────────────────
+    # PUBLIC: vol-first scan — returns ALL pairs with rel_vol >= 1.8x
+    # Used for the vol radar watch report when no BUY/STRONG BUY fires
+    # ────────────────────────────────────────────────────────────────────────
+    async def scan_vol_hits(self, session: aiohttp.ClientSession) -> list[dict]:
+        """
+        Returns all scored pairs with rel_vol >= 1.8x regardless of signal tier.
+        Used to populate the DEX vol radar when no gems fire.
+        Reuses the same _get_candidates() pipeline — no extra DexScreener calls.
+        """
+        pairs = await self._get_candidates(session)
+        if not pairs:
+            return []
+
+        sem = asyncio.Semaphore(3)
+
+        async def bounded(pair):
+            async with sem:
+                return await self.analyse(session, pair)
+
+        results = await asyncio.gather(
+            *[bounded(p) for p in pairs[:30]],
+            return_exceptions=True
+        )
+
+        vol_hits = []
+        for r in results:
+            if isinstance(r, Exception) or r is None:
+                continue
+            # Include anything with unusual vol, skip CRITICAL risk
+            if r.get("rel_vol", 0) >= 1.8 and                r.get("risk", {}).get("level") not in ("CRITICAL",):
+                vol_hits.append(r)
+
+        vol_hits.sort(key=lambda x: x.get("rel_vol", 0), reverse=True)
+        return vol_hits[:15]
+
+    # ────────────────────────────────────────────────────────────────────────
     # PUBLIC: analyse a single token by address (for /gem command)
     # ────────────────────────────────────────────────────────────────────────
     async def analyse_address(self, session: aiohttp.ClientSession, address: str) -> dict | None:
@@ -196,123 +232,175 @@ class ChainAgent:
     # ────────────────────────────────────────────────────────────────────────
     async def _get_candidates(self, session: aiohttp.ClientSession) -> list[dict]:
         """
-        Volume-first discovery — screens for unusual volume BEFORE scoring.
+        Volume-first discovery using GeckoTerminal + DexScreener enrichment.
 
         Strategy:
-          1. Pull up to 100 pairs for this chain from DexScreener (search + top pairs)
-          2. Compute vol_spike = vol_h6 / (vol_24h / 4) for each pair
-             → Compares last 6h vs what a 'normal' 6h looks like from the daily baseline
-          3. Keep only pairs where vol_spike >= 1.8x (unusual volume confirmed)
-             + liquidity >= $50k  (enough depth to trade)
-             + vol_h6 >= $10k    (real activity, not noise)
-             + age >= min_age_h  (not a fresh listing pump)
-          4. Sort survivors by vol_spike descending — highest conviction first
+          1. Fetch trending + top pools from GeckoTerminal for this chain
+             (GeckoTerminal returns actual on-chain pool data with volume breakdown)
+          2. Normalise each pool to our standard pair dict format
+          3. Apply vol_spike screen: vol_h1 / (vol_h6/6) >= 1.8x
+             + liquidity >= min_liq  + vol_24h >= min_vol  + age >= min_age_h
+          4. Sort survivors by vol_spike descending
           5. Cap at 25 candidates for scoring
-
-        Falls back to DexScreener token boosts if vol screen returns < 3 results.
         """
-        # ── Step 1: Fetch raw pairs from DexScreener ───────────────────────
-        # Use two endpoints in parallel: chain token search + top pairs by volume
+        # Return cached candidates if fresh (avoids double GeckoTerminal hit when
+        # scan() and scan_vol_hits() are both called in the same _run_agent cycle)
+        now = time.monotonic()
+        if self._candidates_cache and (now - self._candidates_ts) < self._CANDIDATES_TTL:
+            logger.debug(f"[{self.chain_id.upper()}] Using cached candidates ({len(self._candidates_cache)})")
+            return self._candidates_cache
+
+        GECKO_BASE = "https://api.geckoterminal.com/api/v2"
         raw_pairs: list[dict] = []
 
-        async def _fetch_dex_search(term: str) -> list[dict]:
+        async def _fetch_gecko(endpoint: str) -> list[dict]:
             try:
-                url = f"{DEXSCREENER}/latest/dex/search?q={term}"
-                async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as r:
+                url = f"{GECKO_BASE}{endpoint}"
+                async with session.get(
+                    url,
+                    headers={"Accept": "application/json"},
+                    timeout=aiohttp.ClientTimeout(total=12)
+                ) as r:
                     if r.status == 200:
                         data = await r.json()
-                        return [
-                            p for p in (data.get("pairs") or [])
-                            if p.get("chainId", "").lower() == self.chain_id.lower()
-                        ]
+                        return data.get("data") or []
             except Exception as e:
-                logger.debug(f"[{self.chain_id.upper()}] DexScreener search '{term}' failed: {e}")
+                logger.debug(f"[{self.chain_id.upper()}] GeckoTerminal {endpoint} failed: {e}")
             return []
 
-        async def _fetch_dex_top() -> list[dict]:
-            """DexScreener top pairs endpoint — returns most active pairs per chain."""
-            try:
-                url = f"{DEXSCREENER}/latest/dex/tokens/{self.chain_id}"
-                async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as r:
-                    if r.status == 200:
-                        data = await r.json()
-                        return data.get("pairs") or []
-            except Exception as e:
-                logger.debug(f"[{self.chain_id.upper()}] DexScreener top pairs failed: {e}")
-            return []
-
+        # Fetch trending pools and top volume pools in parallel
         results = await asyncio.gather(
-            _fetch_dex_search("USDT"),
-            _fetch_dex_search("USDC"),
-            _fetch_dex_top(),
+            _fetch_gecko(f"/networks/{self.gecko_net}/trending_pools"),
+            _fetch_gecko(f"/networks/{self.gecko_net}/pools?page=1&sort=h24_volume_desc"),
             return_exceptions=True
         )
         for res in results:
             if isinstance(res, list):
                 raw_pairs.extend(res)
 
-        # ── Step 2: Normalise + deduplicate by pool address ──────────────────
+        # Normalise GeckoTerminal pool format to our pair dict
         seen_pools: set[str] = set()
         candidates: list[dict] = []
-        for p in raw_pairs:
-            norm = self._normalise_pair(p)
-            pool = norm.get("pool_address", "").lower()
-            sym  = norm.get("symbol", "").split("/")[0].upper()
-            if not pool or pool in seen_pools:
-                continue
+
+        for pool in raw_pairs:
+            attrs   = pool.get("attributes", {})
+            address = attrs.get("address", "").lower()
+            name    = attrs.get("name", "")
+
+            # Extract base token symbol from name (e.g. "CAKE / WBNB 0.25%" -> "CAKE")
+            sym = name.split("/")[0].strip().split()[0].upper() if name else "?"
             if sym in SKIP_SYMBOLS:
                 continue
-            seen_pools.add(pool)
-            candidates.append(norm)
+            if not address or address in seen_pools:
+                continue
+            seen_pools.add(address)
 
-        logger.info(f"[{self.chain_id.upper()}] {len(candidates)} raw pairs fetched")
+            # Volume breakdown
+            vol_usd  = attrs.get("volume_usd", {})
+            vol_h24  = float(vol_usd.get("h24", 0) or 0)
+            vol_h6   = float(vol_usd.get("h6",  0) or 0)
+            vol_h1   = float(vol_usd.get("h1",  0) or 0)
 
-        # ── Step 3: Volume spike screen ──────────────────────────────────────
-        # vol_spike = vol_h6 / (vol_24h / 4)
-        # Compares the last 6h vs what a 'normal' 6h looks like from the daily avg
-        # Gate: >= 1.8x unusual volume + min liquidity + min vol_h6 + min age
-        MIN_VOL_SPIKE  = 1.8
-        MIN_LIQ        = max(self.min_liq, 50_000)   # at least $50k liquidity
-        MIN_VOL_H6     = 10_000                       # at least $10k in last 6h
-        MIN_AGE_H      = self.min_age_h               # respect chain config
+            # Price changes
+            chg      = attrs.get("price_change_percentage", {})
+            chg_5m   = float(chg.get("m5",  0) or 0)
+            chg_1h   = float(chg.get("h1",  0) or 0)
+            chg_6h   = float(chg.get("h6",  0) or 0)
+            chg_24h  = float(chg.get("h24", 0) or 0)
 
-        screened: list[tuple[float, dict]] = []  # (vol_spike, pair)
+            # Transaction counts
+            txns    = attrs.get("transactions", {})
+            txns_1h = txns.get("h1", {})
+            txns_24h = txns.get("h24", {})
+            buys_1h  = int(txns_1h.get("buys",  0) or 0)
+            sells_1h = int(txns_1h.get("sells", 0) or 0)
+            buys_24h = int(txns_24h.get("buys",  0) or 0)
+            sells_24h = int(txns_24h.get("sells", 0) or 0)
+
+            # Liquidity + age
+            liq      = float(attrs.get("reserve_in_usd", 0) or 0)
+            created  = attrs.get("pool_created_at", "")
+            age_h    = 0.0
+            if created:
+                try:
+                    from datetime import datetime, timezone
+                    ct = datetime.fromisoformat(created.replace("Z", "+00:00"))
+                    age_h = (datetime.now(timezone.utc) - ct).total_seconds() / 3600
+                except Exception:
+                    age_h = 999  # assume old if parse fails
+
+            price = float(attrs.get("base_token_price_usd", 0) or 0)
+
+            # Need base token address — available via relationships if included
+            # For GoPlus risk check we use the pool address as fallback
+            rels    = pool.get("relationships", {})
+            base_tk = rels.get("base_token", {}).get("data", {})
+            base_id = base_tk.get("id", "")  # format: "network_id/0xaddr"
+            base_address = base_id.split("/")[-1] if "/" in base_id else address
+
+            candidates.append({
+                "symbol":       sym,
+                "base_address": base_address,
+                "pool_address": address,
+                "dex_id":       self.dex_name,
+                "price":        price,
+                "change_5m":    chg_5m,
+                "change_1h":    chg_1h,
+                "change_6h":    chg_6h,
+                "change_24h":   chg_24h,
+                "volume_24h":   vol_h24,
+                "vol_h6":       vol_h6,
+                "vol_h1":       vol_h1,
+                "liquidity":    liq,
+                "pair_age_h":   round(age_h, 1),
+                "buys_1h":      buys_1h,
+                "sells_1h":     sells_1h,
+                "buys_24h":     buys_24h,
+                "sells_24h":    sells_24h,
+            })
+
+        logger.info(f"[{self.chain_id.upper()}] {len(candidates)} raw pools from GeckoTerminal")
+
+        # ── Vol spike screen ─────────────────────────────────────────────────
+        MIN_VOL_SPIKE = 1.8
+        MIN_LIQ       = max(self.min_liq, 50_000)
+        MIN_VOL_H1    = 5_000   # at least $5k in last 1h
+        MIN_AGE_H     = self.min_age_h
+
+        screened: list[tuple[float, dict]] = []
         for pair in candidates:
+            vol_h6  = pair.get("vol_h6",  0)
+            vol_h1  = pair.get("vol_h1",  0)
             vol_24h = pair.get("volume_24h", 0)
-            vol_h6  = pair.get("vol_h6", 0)
             liq     = pair.get("liquidity", 0)
             age_h   = pair.get("pair_age_h", 0)
 
-            # Skip if basic thresholds not met
-            if liq < MIN_LIQ:
-                continue
-            if vol_h6 < MIN_VOL_H6:
-                continue
-            if age_h < MIN_AGE_H:
+            if liq < MIN_LIQ or vol_h1 < MIN_VOL_H1 or age_h < MIN_AGE_H:
                 continue
 
-            # Compute vol spike
-            normal_h6 = vol_24h / 4 if vol_24h > 0 else 0
-            if normal_h6 <= 0:
+            # Vol spike: 1h vs 6h hourly avg
+            avg_hourly = vol_h6 / 6 if vol_h6 > 0 else (vol_24h / 24 if vol_24h > 0 else 0)
+            if avg_hourly <= 0:
                 continue
-            vol_spike = vol_h6 / normal_h6
-
+            vol_spike = vol_h1 / avg_hourly
             if vol_spike >= MIN_VOL_SPIKE:
                 screened.append((vol_spike, pair))
 
-        # Sort by vol_spike descending — highest conviction first
         screened.sort(key=lambda x: x[0], reverse=True)
         filtered = [pair for _, pair in screened[:25]]
 
         logger.info(
-            f"[{self.chain_id.upper()}] Vol screen: {len(candidates)} candidates → "
-            f"{len(filtered)} passed ({MIN_VOL_SPIKE}x gate)"
+            f"[{self.chain_id.upper()}] Vol screen: {len(candidates)} -> "
+            f"{len(filtered)} passed {MIN_VOL_SPIKE}x gate"
         )
 
-        # ── Step 4: Fallback if vol screen returns nothing ───────────────────
-        # Use DexScreener boosts as a last resort (ensures some DEX coverage)
+        # Cache the result for this scan cycle
+        self._candidates_cache = filtered
+        self._candidates_ts    = time.monotonic()
+
+        # Fallback to DexScreener boosts if nothing cleared the vol gate
         if len(filtered) < 3:
-            logger.info(f"[{self.chain_id.upper()}] Vol screen dry — falling back to boosts")
+            logger.info(f"[{self.chain_id.upper()}] Vol gate dry -- trying DexScreener boosts")
             boost_pairs: list[dict] = []
             for endpoint in ["/token-boosts/top/v1", "/token-boosts/latest/v1"]:
                 try:
@@ -323,8 +411,8 @@ class ChainAgent:
                         if r.status == 200:
                             data = await r.json()
                             for item in (data if isinstance(data, list) else []):
-                                if item.get("chainId", "").lower() == self.chain_id.lower():
-                                    addr = item.get("tokenAddress", "")
+                                if item.get("chainId","").lower() == self.chain_id.lower():
+                                    addr = item.get("tokenAddress","")
                                     if addr:
                                         resolved = await self._resolve_address(session, addr)
                                         if resolved and self._passes_filter(resolved):

@@ -34,7 +34,7 @@ from db import (
 from agent import get_agent_response, extract_analyse_command, extract_escalation
 from analyse import fetch_analysis
 from escalation import escalate
-from scanner import hourly_scan_job, _vol_scan, _format_vol_report, _get_top_symbols
+from scanner import hourly_scan_job, vol_spike_job, _vol_scan, _format_vol_report, _get_top_symbols
 from dex_scanner.scanner import dex_scan_job, gem_lookup, get_last_sweep, SUPPORTED_CHAINS
 from dex_scanner.blackboard import compose_rate_limited
 from signal_tracker import init_tracker
@@ -887,6 +887,16 @@ async def post_init(application: Application):
         data={"chat_id": ADMIN_CHAT_ID},
     )
     logger.info(f"Signal monitor scheduled — first run in {monitor_first_in}s")
+
+    # Vol spike poller — every hour, 90s after the hour mark
+    spike_first_in = first_in + 90
+    job_queue.run_repeating(
+        vol_spike_job,
+        interval=3600,
+        first=spike_first_in,
+        name="vol_spike_poller",
+    )
+    logger.info(f"Vol spike poller scheduled — first run in {spike_first_in}s (every hour)")
 
 
 # ─────────────────────────────────────────────

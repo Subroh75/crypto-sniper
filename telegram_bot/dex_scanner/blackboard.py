@@ -44,6 +44,7 @@ class Blackboard:
 
     def __init__(self):
         self._hits: list[dict] = []
+        self._vol_hits: list[dict] = []   # all scored pairs with rel_vol >= 1.8 (any signal)
         self._started_at = time.time()
         self._chain_status: dict[str, str] = {}  # chain_id → "pending"|"done"|"failed"
 
@@ -55,6 +56,15 @@ class Blackboard:
         self._hits.extend(hits)
         self._chain_status[chain_id] = "done"
         logger.info(f"[Blackboard] {chain_id.upper()} wrote {len(hits)} hits")
+
+    def write_vol_hits(self, chain_id: str, vol_hits: list[dict]) -> None:
+        """Write all scored pairs with rel_vol >= 1.8 (used for vol radar)."""
+        self._vol_hits.extend(vol_hits)
+        logger.debug(f"[Blackboard] {chain_id.upper()} vol hits: {len(vol_hits)}")
+
+    def all_vol_hits(self, top_n: int = 20) -> list[dict]:
+        """Returns all vol hits sorted by rel_vol desc."""
+        return sorted(self._vol_hits, key=lambda x: x.get("rel_vol", 0), reverse=True)[:top_n]
 
     def fail(self, chain_id: str):
         self._chain_status[chain_id] = "failed"
@@ -155,6 +165,85 @@ class Blackboard:
             "Not financial advice."
         )
 
+
+    def compose_vol_radar(self, mode: str = "DAILY") -> str:
+        """
+        Vol-first watch report for DEX — sent when no BUY/STRONG BUY fires.
+        Shows every pair that cleared the 1.8x vol gate with traffic-light
+        gate status and what is missing before a signal fires.
+        """
+        scan_time = datetime.now(timezone.utc).strftime("%d %b %Y %H:%M UTC")
+        tf        = "1D" if mode == "DAILY" else "1H"
+        chains_active = [c for c, st in self._chain_status.items() if st == "done"]
+        chain_str = " / ".join(c.upper() for c in chains_active)
+
+        # Use dedicated vol hits list; fall back to filtering main hits
+        all_vol_hits = self._vol_hits if self._vol_hits else [
+            h for h in self._hits if h.get("rel_vol", 0) >= 1.8
+        ]
+        all_vol_hits = sorted(all_vol_hits, key=lambda x: x.get("rel_vol", 0), reverse=True)
+        strong = [h for h in all_vol_hits if h.get("signal") in ("BUY", "STRONG BUY")]
+
+        sep = "────────────────────────────────"
+        header = (
+            "DEX VOL RADAR  --  " + tf + "\n"
+            + scan_time + "  |  Chains: " + chain_str + "\n"
+            + "Vol >= 1.8x: " + str(len(all_vol_hits)) + " pairs\n"
+            + sep + "\n"
+        )
+
+        if not all_vol_hits:
+            return (
+                header
+                + "No unusual volume detected across DEX chains.\n"
+                + "Market is quiet -- waiting for vol confirmation.\n"
+                + sep + "\n"
+                + "https://crypto-sniper.app"
+            )
+
+        blocks = []
+        for i, hit in enumerate(all_vol_hits[:10], 1):
+            chain_e  = CHAIN_EMOJI.get(hit.get("chain", ""), "")
+            symbol   = hit.get("symbol", "?")
+            signal   = hit.get("signal", "NO SIGNAL")
+            rv       = hit.get("rel_vol", 0)
+            price    = hit.get("price", 0)
+            chg_1h   = hit.get("change_1h", 0)
+            chg_24h  = hit.get("change_24h", 0)
+            liq      = hit.get("liquidity", 0)
+            risk     = hit.get("risk", {})
+            risk_lvl = risk.get("level", "UNKNOWN")
+            risk_e   = RISK_EMOJI.get(risk_lvl, "?")
+            gates    = hit.get("gates") or {}
+            v_gate   = gates.get("v", rv >= 1.8)
+            t_gate   = gates.get("t", False)
+            adx_gate = gates.get("adx", False)
+            vol_lbl  = "Extreme" if rv >= 3.5 else "High" if rv >= 2.5 else "Elevated"
+
+            def dot(ok): return "[OK]" if ok else "[ ]"
+
+            block  = "\n#" + str(i) + "  " + symbol + "  " + chain_e + "\n"
+            block += "Price: " + _fmt_price(price) + "  (" + f"{chg_1h:+.1f}" + "% 1h / " + f"{chg_24h:+.1f}" + "% 24h)\n"
+            block += "VOL " + dot(v_gate) + " " + vol_lbl + " " + f"{rv:.1f}" + "x   TREND " + dot(t_gate) + "   ADX " + dot(adx_gate) + "\n"
+            block += "Risk: " + risk_e + " " + risk_lvl + "   Liq: " + _fmt_vol(liq) + "\n"
+
+            missing = []
+            if not t_gate:   missing.append("trend not aligned")
+            if not adx_gate: missing.append("ADX weak")
+            if missing:
+                block += "Needs: " + " / ".join(missing) + "\n"
+            elif signal in ("BUY", "STRONG BUY"):
+                block += "Signal: " + signal + "\n"
+
+            blocks.append(block)
+
+        if strong:
+            footer = "\n" + sep + "\n" + str(len(strong)) + " signal(s) fired -- vol present on " + str(len(all_vol_hits)) + " pairs.\n"
+        else:
+            footer = "\n" + sep + "\nVol building -- trend/ADX gates not yet confirmed.\n"
+        footer += "https://crypto-sniper.app"
+
+        return header + "".join(blocks) + footer
 
 def compose_no_pair(address: str, supported_chains: list[str]) -> str:
     chains = " · ".join(c.upper() for c in supported_chains)

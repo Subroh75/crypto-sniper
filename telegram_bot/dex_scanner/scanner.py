@@ -103,8 +103,8 @@ async def dex_scan_job(context) -> None:
     _last_sweep_board = board
     _last_sweep_time  = scan_time
 
-    s   = board.summary()
-    msg = board.compose_sweep(top_n=top_n * len(AGENTS), mode=mode)
+    s    = board.summary()
+    hits = board.all_hits(top_n=top_n * len(AGENTS))
 
     logger.info(
         f"[DEX Scanner] {mode} sweep done — "
@@ -113,6 +113,20 @@ async def dex_scan_job(context) -> None:
 
     if not chat_id:
         logger.warning("[DEX Scanner] No chat_id in job data — skipping send")
+        return
+
+    # Send signal sweep if gems found, otherwise vol radar
+    if hits:
+        msg = board.compose_sweep(top_n=top_n * len(AGENTS), mode=mode)
+    else:
+        # No BUY/STRONG BUY — send vol radar (what's building, what's missing)
+        vol_msg = board.compose_vol_radar(mode=mode)
+        logger.info(f"[DEX Scanner] No gems — sending vol radar instead")
+        try:
+            await bot.send_message(chat_id=chat_id, text=vol_msg)
+        except Exception as e:
+            logger.error(f"[DEX Scanner] Vol radar send failed: {e}")
+        # Record sweep in cache and return — nothing to track
         return
 
     try:
@@ -185,11 +199,19 @@ async def _run_agent(
         agent.min_txns_1h = max(orig_txns, DAILY_MIN_TXNS)
 
     try:
+        # scan() returns BUY/STRONG BUY hits only
         hits = await asyncio.wait_for(
             agent.scan(session, top_n=top_n),
             timeout=45
         )
         board.write(agent.chain_id, hits)
+
+        # Also scan for all vol hits (rel_vol >= 1.8, any signal) for vol radar
+        vol_hits = await asyncio.wait_for(
+            agent.scan_vol_hits(session),
+            timeout=45
+        )
+        board.write_vol_hits(agent.chain_id, vol_hits)
     except asyncio.TimeoutError:
         logger.warning(f"[{agent.chain_id.upper()}] Timed out after 45s")
         board.fail(agent.chain_id)
@@ -202,6 +224,9 @@ async def _run_agent(
         agent.min_vol     = orig_vol
         agent.min_age_h   = orig_age
         agent.min_txns_1h = orig_txns
+        # Clear candidate cache so next scan cycle fetches fresh data
+        agent._candidates_cache = []
+        agent._candidates_ts    = 0.0
 
 
 # ────────────────────────────────────────────────────────────────────────────
