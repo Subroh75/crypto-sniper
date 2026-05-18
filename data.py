@@ -253,6 +253,14 @@ def get_ohlcv(symbol: str, interval: str = "1H", exchange_hint: str = "") -> lis
         if len(bars) >= 20:
             return bars
 
+    # ── Hard stop: do NOT fall through to CoinGecko/CoinCap ──────────────
+    # CoinGecko market_chart returns synthetic OHLCV with volume=0.0 on every
+    # bar. Any coin that reaches this point is not listed on Binance/MEXC/Gate
+    # and cannot produce reliable vol-based signals. Return empty so the coin
+    # is skipped cleanly instead of being scored with fake volume data.
+    logger.debug(f"get_ohlcv: {symbol} not found on Binance/MEXC/Gate/Finnhub — skipping")
+    return []
+
     coin_id = CG_ID.get(symbol.upper(), symbol.lower())
     days    = DAYS_MAP.get(interval, 14)
     # /market_chart is free on all tiers including demo
