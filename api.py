@@ -1650,7 +1650,26 @@ async def pdf_report(payload: dict):
         pdf.set_font("Helvetica","B",9); pdf.set_xy(px+22,py0+1.5); pdf.cell(pw2-24,6,_p(f"{sc}/{mx}"),align="R")
         if det:
             pdf.set_font("Helvetica","",6); pdf.set_text_color(*MUT)
-            pdf.set_xy(px+2,py0+11); pdf.cell(pw2-4,4,_p(str(det)[:18]))
+            # Strip markdown bold markers for clean output
+            det_clean = str(det).replace("**","")
+            # Fit detail text inside card: render up to 2 lines by clamping
+            # the string to ~60 chars (card is 43mm wide at 6pt ~ 28 chars/line)
+            words = det_clean.split()
+            line1, line2 = [], []
+            for w in words:
+                if len(" ".join(line1 + [w])) <= 28:
+                    line1.append(w)
+                elif len(" ".join(line2 + [w])) <= 28:
+                    line2.append(w)
+                else:
+                    break
+            det_2lines = " ".join(line1)
+            if line2:
+                det_2lines += "\n" + " ".join(line2)
+            pdf.set_xy(px+2,py0+9)
+            pdf.set_left_margin(px+2); pdf.set_right_margin(PW-(px+pw2-2))
+            pdf.multi_cell(pw2-4,3.5,_p(det_2lines))
+            pdf.set_left_margin(0); pdf.set_right_margin(0)
     pdf.set_y(py0+ph+4)
 
     # ── 2-COL: MARKET + TIMING ───────────────────────────────────────────────────
@@ -1776,11 +1795,19 @@ async def pdf_report(payload: dict):
             pdf.set_y(y_ah+8)
 
             if body:
-                need(8)
-                pdf.set_x(MARGIN+4); pdf.set_font("Helvetica","",7.5)
+                # Render full agent body — split into paragraphs so need() can
+                # insert page breaks between them rather than mid-sentence.
+                paragraphs = [p.strip() for p in body.split("\n\n") if p.strip()] or [body]
+                pdf.set_font("Helvetica","",7.5)
                 pdf.set_text_color(180,195,215)
                 pdf.set_left_margin(MARGIN+4); pdf.set_right_margin(MARGIN+4)
-                pdf.multi_cell(PW-2*MARGIN-8, 4.5, _p(body[:700]))
+                for para in paragraphs:
+                    # Strip markdown bold markers (**text**) for cleaner PDF output
+                    clean = para.replace("**","")
+                    need(10)
+                    pdf.set_x(MARGIN+4)
+                    pdf.multi_cell(PW-2*MARGIN-8, 4.5, _p(clean))
+                    pdf.ln(1.5)
                 pdf.set_left_margin(0); pdf.set_right_margin(0)
             need(5); pdf.ln(3)
 
