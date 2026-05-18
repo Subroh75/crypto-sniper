@@ -824,6 +824,15 @@ export default function Home() {
                       <span>24H <span className={sig.quote.change_24h >= 0 ? "text-teal font-bold" : "text-red font-bold"}>{fmtPct(sig.quote.change_24h)}</span></span>
                       <span>VOL <span className={(sig.timing?.rel_volume ?? 0) >= 1.8 ? "text-teal font-bold" : "text-amber font-bold"}>{(sig.timing?.rel_volume ?? 0) >= 3.5 ? "Extreme" : (sig.timing?.rel_volume ?? 0) >= 2.5 ? "High" : (sig.timing?.rel_volume ?? 0) >= 1.8 ? "Elevated" : "Normal"}</span></span>
                       <span>ADX <span className={(sig.timing?.adx ?? 0) >= 25 ? "text-teal font-bold" : "text-amber font-bold"}>{(sig.timing?.adx ?? 0) >= 25 ? "Trending" : "Ranging"}</span></span>
+                      {sig.timing?.z_quality && sig.timing.z_quality !== "UNKNOWN" && (() => {
+                        const zq = sig.timing.z_quality as string;
+                        const zColor = zq === "IDEAL" ? "#22c55e" : zq === "GOOD" ? "#22c55e" : zq === "CAUTION" ? "#f59e0b" : "#ef4444";
+                        return (
+                          <span style={{ color: zColor }} className="font-bold" title={`Entry quality: ${zq}. Z-score measures if price/vol/return are statistically extended.`}>
+                            ENTRY {zq}
+                          </span>
+                        );
+                      })()}
                     </div>
                   </div>
                   {/* Plain-English summary — one line any trader can act on */}
