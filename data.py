@@ -1290,7 +1290,7 @@ def _cg_headers_requests(url, params):
 def _mexc_quote(symbol: str) -> dict:
     """MEXC 24hr ticker — fallback for MEXC-exclusive coins."""
     sym = symbol.upper() + "USDT"
-    data = _get(f"{MEXC_BASE}/ticker/24hr", {"symbol": sym}, timeout=10)
+    data = _get(f"{MEXC_BASE}/ticker/24hr", {"symbol": sym}, timeout=5)
     if not data or "lastPrice" not in data:
         return {}
     price = float(data.get("lastPrice", 0) or 0)
@@ -1313,7 +1313,7 @@ def _gate_quote(symbol: str) -> dict:
         r = requests.get(
             f"{GATE_BASE}/spot/tickers",
             params={"currency_pair": pair},
-            timeout=10,
+            timeout=5,
         )
         if r.status_code != 200:
             return {}
@@ -1340,10 +1340,37 @@ def _gate_quote(symbol: str) -> dict:
 def get_quote(symbol: str) -> dict:
     """
     Returns {price, change_24h, volume_24h, market_cap, high_24h, low_24h}
-    Uses /simple/price which is free on all CoinGecko tiers.
+
+    Fast-path chain (no sequential timeouts on miss):
+      1. Binance 24hr ticker  — fast, free, real-time (most coins)
+      2. MEXC 24hr ticker     — MEXC-exclusive coins
+      3. Gate.io 24hr ticker  — Gate-exclusive coins
+      4. CoinGecko simple/price — broad coverage, rate-limited
+      5. Coinpaprika          — fallback
+      6. CoinCap              — last resort
+
+    Exchange-specific sources are tried first and are fast (3-5s each),
+    avoiding the 40s+ sequential timeout chain that caused hangs.
     """
-    coin_id = CG_ID.get(symbol.upper(), symbol.lower())
-    # /simple/price is free on demo key
+    sym_upper = symbol.upper()
+
+    # 1. Binance — fastest, covers ~433 USDT pairs
+    bnc = _binance_quote(symbol)
+    if bnc.get("price", 0) > 0:
+        return bnc
+
+    # 2. MEXC — covers MEXC-exclusive coins (fast, same API structure)
+    mexc_q = _mexc_quote(symbol)
+    if mexc_q.get("price", 0) > 0:
+        return mexc_q
+
+    # 3. Gate.io — covers Gate-exclusive coins
+    gate_q = _gate_quote(symbol)
+    if gate_q.get("price", 0) > 0:
+        return gate_q
+
+    # 4. CoinGecko simple/price — broader coverage but rate-limited
+    coin_id = CG_ID.get(sym_upper, sym_upper.lower())
     data = _cg_headers_requests(f"{CG_BASE}/simple/price", {
         "ids": coin_id,
         "vs_currencies": "usd",
@@ -1351,39 +1378,30 @@ def get_quote(symbol: str) -> dict:
         "include_24hr_vol": "true",
         "include_market_cap": "true",
     })
-    if not data or coin_id not in data:
-        # Try Binance (most reliable, real-time)
-        bnc = _binance_quote(symbol)
-        if bnc.get("price", 0) > 0:
-            return bnc
-        # Try MEXC (MEXC-exclusive coins)
-        mexc_q = _mexc_quote(symbol)
-        if mexc_q.get("price", 0) > 0:
-            return mexc_q
-        # Try Gate.io (Gate-exclusive coins)
-        gate_q = _gate_quote(symbol)
-        if gate_q.get("price", 0) > 0:
-            return gate_q
-        # Try Coinpaprika
-        cpp = _coinpaprika_quote(symbol)
-        if cpp.get("price", 0) > 0:
-            return cpp
-        return _coincap_quote(symbol)
-    d = data[coin_id]
-    price = d.get("usd", 0)
-    # high/low not available on simple/price Ã¢ÂÂ estimate from 24h change
-    chg   = d.get("usd_24h_change", 0) / 100
-    high  = round(price / (1 - abs(chg) * 0.5), 2) if chg < 0 else round(price * (1 + abs(chg) * 0.3), 2)
-    low   = round(price * (1 - abs(chg) * 0.5), 2)
-    return {
-        "symbol":     symbol.upper(),
-        "price":      price,
-        "change_24h": d.get("usd_24h_change", 0),
-        "volume_24h": d.get("usd_24h_vol", 0),
-        "market_cap": d.get("usd_market_cap", 0),
-        "high_24h":   high,
-        "low_24h":    low,
-    }
+    if data and coin_id in data:
+        d = data[coin_id]
+        price = d.get("usd", 0)
+        if price > 0:
+            chg  = d.get("usd_24h_change", 0) / 100
+            high = round(price / (1 - abs(chg) * 0.5), 2) if chg < 0 else round(price * (1 + abs(chg) * 0.3), 2)
+            low  = round(price * (1 - abs(chg) * 0.5), 2)
+            return {
+                "symbol":     sym_upper,
+                "price":      price,
+                "change_24h": d.get("usd_24h_change", 0),
+                "volume_24h": d.get("usd_24h_vol", 0),
+                "market_cap": d.get("usd_market_cap", 0),
+                "high_24h":   high,
+                "low_24h":    low,
+            }
+
+    # 5. Coinpaprika
+    cpp = _coinpaprika_quote(symbol)
+    if cpp.get("price", 0) > 0:
+        return cpp
+
+    # 6. CoinCap — last resort
+    return _coincap_quote(symbol)
 
 def _coincap_quote(symbol: str) -> dict:
     """CoinCap fallback for live price."""
