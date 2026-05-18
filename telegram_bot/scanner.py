@@ -48,6 +48,29 @@ _EXCH_PREFIX = {"mexc": "[MEXC] ", "gate": "[GATE] ", "multi": "[MULTI] "}
 _symbol_exchange_map: dict[str, str] = {}
 
 
+async def _wake_api(timeout: int = 60) -> bool:
+    """
+    Ping /health and wait up to `timeout` seconds for Render to wake.
+    Render Standard plan sleeps after ~15min inactivity and takes 30-60s to cold-start.
+    Returns True if API is up, False if it timed out.
+    """
+    deadline = time.time() + timeout
+    async with aiohttp.ClientSession() as session:
+        while time.time() < deadline:
+            try:
+                async with session.get(
+                    f"{API_BASE}/health",
+                    timeout=aiohttp.ClientTimeout(total=10)
+                ) as r:
+                    if r.status == 200:
+                        return True
+            except Exception:
+                pass
+            await asyncio.sleep(5)
+    logger.warning("[Scanner] API wake timed out after %ds", timeout)
+    return False
+
+
 async def _fetch_binance_coins(session: aiohttp.ClientSession) -> list[tuple[str, float]]:
     """Returns [(symbol, vol_usd), ...] from Binance 24hr ticker."""
     try:
@@ -186,7 +209,7 @@ async def _analyse_symbol(
         async with session.post(
             f"{API_BASE}/analyse",
             json={"symbol": symbol, "interval": interval},
-            timeout=aiohttp.ClientTimeout(total=25)
+            timeout=aiohttp.ClientTimeout(total=35)
         ) as r:
             if r.status != 200:
                 return None
@@ -594,13 +617,13 @@ async def hourly_scan_job(context) -> None:
 
     logger.info(f"[Scanner] Starting {mode} scan — {scan_time}")
 
-    # 1. Wake API
-    try:
-        async with aiohttp.ClientSession() as s:
-            async with s.get(f"{API_BASE}/health", timeout=aiohttp.ClientTimeout(total=15)) as r:
-                logger.info(f"[Scanner] API health: {r.status}")
-    except Exception as e:
-        logger.warning(f"[Scanner] API wake failed: {e}")
+    # 1. Wake API — wait up to 65s for Render cold start
+    api_up = await _wake_api(timeout=65)
+    if not api_up:
+        logger.warning("[Scanner] API did not wake — aborting daily scan")
+        await _send(bot, ADMIN_CHAT, "⚠️ Crypto Sniper: API did not respond — daily scan skipped. Check Render dashboard.")
+        return
+    logger.info("[Scanner] API awake — proceeding with scan")
 
     # 2. Fetch universe
     symbols = await _get_top_symbols(200)
@@ -720,6 +743,12 @@ async def vol_spike_job(context) -> None:
     now      = time.time()
     now_utc  = datetime.now(timezone.utc)
     scan_time = now_utc.strftime("%d %b %Y %H:%M UTC")
+
+    # Wake Render API before doing anything — it sleeps after ~15min inactivity
+    api_up = await _wake_api(timeout=65)
+    if not api_up:
+        logger.warning("[VolSpike] API did not wake in time — skipping this cycle")
+        return
 
     # Prune old cooldown entries
     _spike_alerted = {k: v for k, v in _spike_alerted.items() if now - v < _SPIKE_COOLDOWN}
