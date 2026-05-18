@@ -775,6 +775,7 @@ async def vol_spike_job(context) -> None:
             # A coin that gained >1.8x its per-hour average since last check
             # is flagged for full VPRT scoring.
             # On cold start (_ticker_vol_baseline empty) — score all symbols.
+            global _ticker_vol_baseline
             spiked: list[str] = []
             if not _ticker_vol_baseline:
                 # First run — seed baseline, score full universe this cycle
@@ -794,7 +795,6 @@ async def vol_spike_job(context) -> None:
                         spiked.append(sym)
 
             # Update baseline for next cycle
-            global _ticker_vol_baseline
             _ticker_vol_baseline = dict(vol_map)
 
             logger.info(f"[VolSpike] Pre-filter: {len(spiked)}/{len(symbols)} symbols flagged for VPRT")
