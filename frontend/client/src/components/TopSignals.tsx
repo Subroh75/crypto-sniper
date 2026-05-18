@@ -46,6 +46,7 @@ export function TopSignals({ onSelect, interval = "1h", onBuySignalsChange, onAl
   const [lastScan, setLastScan] = useState<string>("");
   const [elapsed,  setElapsed]  = useState(0);
   const [universe, setUniverse] = useState(0);
+  const [scanned,  setScanned]  = useState(0);
   const [error,    setError]    = useState<string | null>(null);
   const [cacheAge, setCacheAge] = useState<number | null>(null);
   const [sortBy,   setSortBy]   = useState<SortCol>("score");
@@ -112,6 +113,7 @@ export function TopSignals({ onSelect, interval = "1h", onBuySignalsChange, onAl
       if (!ctrl.signal.aborted) {
         setSignals(all);
         setUniverse(data.universe ?? all.length);
+        setScanned(data.scanned ?? data.universe ?? all.length);
         setLastScan(new Date().toLocaleTimeString());
         setCacheAge(data.cached ? (data.cached_age_mins ?? null) : null);
         setError(null);
@@ -235,7 +237,7 @@ export function TopSignals({ onSelect, interval = "1h", onBuySignalsChange, onAl
       {/* Status bar */}
       {lastScan && (
         <div style={{ fontSize: 9, color: "#334155", marginBottom: 6 }}>
-          {lastScan} · {signals.length} coins · {universe > 0 ? `${universe} universe` : "multi-exchange"}
+          {lastScan} · {signals.length} signals · {scanned > 0 ? `${scanned} vol-screened` : ""}{universe > 0 ? ` · ${universe} universe` : " · multi-exchange"}
           {sorted.length > 0 && pageClamped > 0 && (
             <span style={{ color: "#1e293b" }}>
               {" "}· showing {(pageClamped - 1) * PAGE_SIZE + 1}–{Math.min(pageClamped * PAGE_SIZE, sorted.length)} of {sorted.length}
@@ -267,7 +269,7 @@ export function TopSignals({ onSelect, interval = "1h", onBuySignalsChange, onAl
           <div style={{ fontSize: 10, color: "#475569", marginBottom: 4 }}>
             Scoring green coins from {universe > 0 ? `${universe}-coin` : "multi-exchange"} universe…
           </div>
-          <div style={{ fontSize: 9, color: "#334155" }}>Binance + MEXC + Gate · Usually 15–30s cold start, &lt;1s cached</div>
+          <div style={{ fontSize: 9, color: "#334155" }}>Binance + MEXC + Gate.io · Vol-screened for speed · Usually 15–30s cold start, &lt;1s cached</div>
         </div>
       )}
 

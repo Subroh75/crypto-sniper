@@ -365,9 +365,11 @@ def scan_top_signals(
     if vol_universe:
         logger.info(f"/scan: vol gate reduced universe {universe_size} -> {len(vol_universe)} coins (>= 1.8x rel_vol)")
         scan_universe = vol_universe
+        scanned_size  = len(vol_universe)
     else:
         logger.info(f"/scan: vol gate returned 0 — scanning full universe (cold start or flat market)")
         scan_universe = universe
+        scanned_size  = universe_size
 
     # ── Step 2: Score every coin in parallel ───────────────────────────────────
     def score_coin(coin: dict):
@@ -447,10 +449,11 @@ def scan_top_signals(
     _scan_cache.update({"key": cache_key, "ts": now, "data": signals, "universe": universe_size})
     _scan_db_write(cache_key, signals, universe_size, now)  # persist across Render sleep
     return {
-        "signals":   signals,
-        "cached":    False,
-        "universe":  universe_size,
-        "timestamp": now,
+        "signals":        signals,
+        "cached":         False,
+        "universe":       universe_size,   # full multi-exchange universe count
+        "scanned":        scanned_size,    # vol-gated subset actually scored
+        "timestamp":      now,
     }
 
 
