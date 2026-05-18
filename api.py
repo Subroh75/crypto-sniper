@@ -201,7 +201,7 @@ async def analyse(req: AnalyseRequest):
         "trade_setup":{"direction":sig.direction,"entry":sig.entry,"stop":sig.stop,"target":sig.target,"rr_ratio":sig.rr_ratio,"atr":sig.atr,"stop_dist_pct":round(((sig.close-sig.stop)/sig.close)*100,3) if sig.stop else None},
         "conviction":{"bull_pct":sig.bull_conviction,"bear_pct":sig.bear_conviction,"bull_signals":sig.bull_signals,"bear_signals":sig.bear_signals},
         "fear_greed":fear_greed,"cp_news":cp_news[:3],"key_levels":levels,
-        "ohlcv":ohlcv[-48:],
+        "ohlcv":ohlcv[-220:],
         "derivatives": get_derivatives(symbol),
         "microstructure": get_market_microstructure(symbol),
         "social_delta":    social_delta,
