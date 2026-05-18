@@ -10,6 +10,7 @@ Both use the same VPRT scoring engine (score ≥ 9/13 = STRONG BUY).
 When nothing hits 9+, falls through to a watch report (5–8/13 near-misses).
 """
 import os
+import time
 import asyncio
 import logging
 import aiohttp
