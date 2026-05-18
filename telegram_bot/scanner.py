@@ -44,8 +44,12 @@ _EXCH_PREFIX = {"mexc": "[MEXC] ", "gate": "[GATE] ", "multi": "[MULTI] "}
 #  Universe fetch — Binance + MEXC + Gate.io
 # ─────────────────────────────────────────────
 
-# Per-symbol exchange lookup cache (populated by _get_multi_universe)
+# Per-symbol exchange lookup cache (populated by _get_top_symbols)
 _symbol_exchange_map: dict[str, str] = {}
+
+# Vol baseline cache — stores last ticker snapshot {symbol: vol_24h}
+# Updated every cycle; used to detect intra-hour vol spikes
+_ticker_vol_baseline: dict[str, float] = {}
 
 
 async def _wake_api(timeout: int = 60) -> bool:
@@ -151,8 +155,10 @@ async def _fetch_gate_coins(session: aiohttp.ClientSession) -> list[tuple[str, f
         return []
 
 
-async def _get_top_symbols(n: int = 200) -> list[str]:
-    """Fetch multi-exchange universe. Returns symbol list (Binance fallback on failure)."""
+async def _get_top_symbols(n: int = 200) -> tuple[list[str], dict[str, float]]:
+    """Fetch multi-exchange universe.
+    Returns (symbol_list, vol_map) where vol_map = {symbol: vol_24h_usd}.
+    """
     async with aiohttp.ClientSession() as session:
         bnc, mexc, gate = await asyncio.gather(
             _fetch_binance_coins(session),
@@ -186,13 +192,14 @@ async def _get_top_symbols(n: int = 200) -> list[str]:
 
     merged = sorted(seen.items(), key=lambda x: x[1][0], reverse=True)
     symbols = [sym for sym, _ in merged[:n]]
+    vol_map  = {sym: seen[sym][0] for sym in symbols}
 
     bnc_n    = sum(1 for sym in symbols if _symbol_exchange_map.get(sym) == "binance")
     mexc_n   = sum(1 for sym in symbols if _symbol_exchange_map.get(sym) == "mexc")
     gate_n   = sum(1 for sym in symbols if _symbol_exchange_map.get(sym) == "gate")
     logger.info(f"[Scanner] Multi-exchange universe: {len(symbols)} symbols "
                 f"(Binance={bnc_n}, MEXC={mexc_n}, Gate={gate_n})")
-    return symbols
+    return symbols, vol_map
 
 
 # ─────────────────────────────────────────────
@@ -626,7 +633,7 @@ async def hourly_scan_job(context) -> None:
     logger.info("[Scanner] API awake — proceeding with scan")
 
     # 2. Fetch universe
-    symbols = await _get_top_symbols(200)
+    symbols, _ = await _get_top_symbols(200)
     if not symbols:
         logger.warning("[Scanner] No symbols returned — aborting")
         return
@@ -757,13 +764,43 @@ async def vol_spike_job(context) -> None:
     new_cex_sb: list[dict] = []  # full /analyse payloads for STRONG BUY CEX coins
     new_dex: list[dict] = []
 
-    # ── CEX check ──────────────────────────────────────────────────────────
+    # ── CEX check — ticker pre-filter then VPRT only on spikes ───────────
     # Skip at 22 UTC — hourly_scan_job handles that hour with full scoring
     if now_utc.hour != DAILY_HOUR_UTC:
         try:
-            symbols = await _get_top_symbols(200)
-            if symbols:
-                cex_hits, _ = await _vol_scan(symbols, interval="1d")
+            symbols, vol_map = await _get_top_symbols(200)
+
+            # ── Raw vol pre-filter ─────────────────────────────────────────
+            # Compare current 24h vol against last snapshot.
+            # A coin that gained >1.8x its per-hour average since last check
+            # is flagged for full VPRT scoring.
+            # On cold start (_ticker_vol_baseline empty) — score all symbols.
+            spiked: list[str] = []
+            if not _ticker_vol_baseline:
+                # First run — seed baseline, score full universe this cycle
+                logger.info("[VolSpike] Cold start — seeding vol baseline, scoring all symbols")
+                spiked = symbols
+            else:
+                for sym in symbols:
+                    cur  = vol_map.get(sym, 0)
+                    prev = _ticker_vol_baseline.get(sym, 0)
+                    if prev <= 0:
+                        continue
+                    # Hourly increment = cur - prev (24h rolling window grows ~1/24 per hour normally)
+                    # A spike = this hour's increment is >= 1.8x the expected per-hour rate (prev/24)
+                    hourly_increment  = max(cur - prev, 0)
+                    expected_per_hour = prev / 24
+                    if expected_per_hour > 0 and hourly_increment >= VOL_GATE * expected_per_hour:
+                        spiked.append(sym)
+
+            # Update baseline for next cycle
+            global _ticker_vol_baseline
+            _ticker_vol_baseline = dict(vol_map)
+
+            logger.info(f"[VolSpike] Pre-filter: {len(spiked)}/{len(symbols)} symbols flagged for VPRT")
+
+            if spiked:
+                cex_hits, _ = await _vol_scan(spiked, interval="1d")
                 for h in cex_hits:
                     sym   = h.get("symbol", "")
                     rv    = h.get("timing", {}).get("rel_volume") or 0
@@ -772,7 +809,6 @@ async def vol_spike_job(context) -> None:
                     if key not in _spike_alerted:
                         _spike_alerted[key] = now
                         if label == "STRONG BUY":
-                            # Keep full payload — _coin_block needs it
                             new_cex_sb.append(h)
                         else:
                             chg = h.get("quote", {}).get("change_24h") or 0
