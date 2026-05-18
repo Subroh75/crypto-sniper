@@ -207,7 +207,7 @@ export function TopSignals({ onSelect, interval = "1h", onBuySignalsChange, onAl
       {/* Header row */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
         <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.08em", color: "#94a3b8", textTransform: "uppercase" as const }}>
-          Green Coins Today
+          Green Coins Today — All Exchanges
         </span>
         <button
           onClick={scan}
@@ -235,7 +235,7 @@ export function TopSignals({ onSelect, interval = "1h", onBuySignalsChange, onAl
       {/* Status bar */}
       {lastScan && (
         <div style={{ fontSize: 9, color: "#334155", marginBottom: 6 }}>
-          {lastScan} · {signals.length} green coins · {universe} universe
+          {lastScan} · {signals.length} coins · {universe > 0 ? `${universe} universe` : "multi-exchange"}
           {sorted.length > 0 && pageClamped > 0 && (
             <span style={{ color: "#1e293b" }}>
               {" "}· showing {(pageClamped - 1) * PAGE_SIZE + 1}–{Math.min(pageClamped * PAGE_SIZE, sorted.length)} of {sorted.length}
@@ -265,9 +265,9 @@ export function TopSignals({ onSelect, interval = "1h", onBuySignalsChange, onAl
       {loading && signals.length === 0 && (
         <div style={{ padding: "16px 0", textAlign: "center" as const }}>
           <div style={{ fontSize: 10, color: "#475569", marginBottom: 4 }}>
-            Scoring green coins from {universe > 0 ? universe : "Binance"} universe…
+            Scoring green coins from {universe > 0 ? `${universe}-coin` : "multi-exchange"} universe…
           </div>
-          <div style={{ fontSize: 9, color: "#334155" }}>Usually 5–15s on cold start, &lt;1s cached</div>
+          <div style={{ fontSize: 9, color: "#334155" }}>Binance + MEXC + Gate · Usually 15–30s cold start, &lt;1s cached</div>
         </div>
       )}
 
