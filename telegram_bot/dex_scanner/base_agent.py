@@ -73,6 +73,15 @@ class ChainAgent:
     # ── Scoring threshold ────────────────────────────────────────────────────
     MIN_SCORE = 4  # gate-based: BUY needs V+T+ADX (score ~4+), STRONG BUY ~6+
 
+
+    # ── Per-instance candidate cache (5 min TTL) ──────────────────────────
+    _CANDIDATES_TTL: float = 300.0
+
+    def __init__(self):
+        """Initialise per-instance candidate cache."""
+        self._candidates_cache: list = []
+        self._candidates_ts: float = 0.0
+
     # ────────────────────────────────────────────────────────────────────────
     # PUBLIC: sweep the chain, return list of blackboard entries
     # ────────────────────────────────────────────────────────────────────────
