@@ -71,12 +71,12 @@ export function VolRadarSection({
 
   return (
     <div className="card mb-3">
-      <SectionHeader icon="⚡" title="VOL RADAR" badge="LIVE" src="Binance" />
+      <SectionHeader icon="⚡" title="VOL RADAR" badge="LIVE" src="All Exchanges" />
       <div className="p-4">
         {isEmpty ? (
           <div className="flex flex-col items-center justify-center py-6 gap-2">
             <span className="text-[11px] font-mono text-text-muted/60">No unusual vol right now</span>
-            <span className="text-[9px] font-mono text-text-muted/40">Waiting for coins ≥ 1.8× avg volume</span>
+            <span className="text-[9px] font-mono text-text-muted/40">Scanning Binance · MEXC · Gate.io for vol ≥ 1.8×</span>
           </div>
         ) : (
           <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">

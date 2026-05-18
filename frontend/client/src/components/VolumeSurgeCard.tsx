@@ -116,7 +116,7 @@ export function VolumeSurgeCard({ onSelect }: Props) {
             Building volume baseline… check back in ~60s
           </div>
           <div style={{ fontSize: 8, color: "#334155", marginTop: 3 }}>
-            Render is computing 20-bar averages for all Binance pairs
+            Render is computing 20-bar averages across Binance · MEXC · Gate.io
           </div>
         </div>
       )}
