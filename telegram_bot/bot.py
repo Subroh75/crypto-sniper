@@ -35,7 +35,7 @@ from agent import get_agent_response, extract_analyse_command, extract_escalatio
 from analyse import fetch_analysis
 from escalation import escalate
 from scanner import hourly_scan_job, vol_spike_job, _vol_scan, _format_vol_report, _get_top_symbols
-from kalman_scanner import trend_radar_job
+from kalman_scanner import trend_radar_job, trend_radar_outcome_checker
 from dex_scanner.scanner import dex_scan_job, gem_lookup, get_last_sweep, SUPPORTED_CHAINS
 from dex_scanner.blackboard import compose_rate_limited
 from signal_tracker import init_tracker
@@ -908,6 +908,17 @@ async def post_init(application: Application):
         name="trend_radar",
     )
     logger.info(f"Trend Radar (Kalman) scheduled — first run in {radar_first_in}s (every 6h)")
+
+    # Trend Radar outcome checker — runs once daily at 22:00 UTC (same as daily scan)
+    from scanner import _seconds_to_next_daily_dex as _seconds_to_22utc
+    outcome_first_in = _seconds_to_22utc()
+    job_queue.run_repeating(
+        trend_radar_outcome_checker,
+        interval=86400,
+        first=outcome_first_in + 120,   # 2min after daily scan to avoid collision
+        name="trend_radar_outcomes",
+    )
+    logger.info(f"Trend Radar outcome checker scheduled — first run in {outcome_first_in + 120}s (daily)")
 
 
 # ─────────────────────────────────────────────

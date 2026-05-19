@@ -68,6 +68,28 @@ async def init_db():
                 UNIQUE(telegram_id, address)
             )
         """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS trend_radar_signals (
+                id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                symbol           TEXT    NOT NULL,
+                signal_date      TEXT    NOT NULL,  -- YYYY-MM-DD UTC
+                label            TEXT,              -- STRONG MOMENTUM / BUILDING MOMENTUM / EARLY TREND
+                velocity         REAL,              -- % per day
+                vol_ratio        REAL,              -- x above Kalman vol baseline
+                entry_price      REAL,
+                filter_price     REAL,              -- Kalman filtered price at signal
+                price_vs_filter  REAL,              -- % above/below filter
+                stop_price       REAL,              -- entry * 0.90
+                target_price     REAL,              -- entry * 1.20
+                price_5d         REAL    DEFAULT NULL,
+                price_10d        REAL    DEFAULT NULL,
+                pct_5d           REAL    DEFAULT NULL,
+                pct_10d          REAL    DEFAULT NULL,
+                outcome_5d       TEXT    DEFAULT 'OPEN',
+                outcome_10d      TEXT    DEFAULT 'OPEN',
+                created_at       TEXT    DEFAULT (datetime('now'))
+            )
+        """)
         await db.commit()
 
 
@@ -260,5 +282,111 @@ async def get_watches(telegram_id: int) -> list[dict]:
             WHERE telegram_id = ?
             ORDER BY added_at DESC
         """, (telegram_id,)) as cur:
+            rows = await cur.fetchall()
+            return [dict(r) for r in rows]
+
+
+# ─────────────────────────────────────────────
+#  Trend Radar — Signal Performance Tracker
+# ─────────────────────────────────────────────
+
+async def save_trend_radar_signal(
+    symbol: str,
+    signal_date: str,
+    label: str,
+    velocity: float,
+    vol_ratio: float,
+    entry_price: float,
+    filter_price: float,
+    price_vs_filter: float,
+) -> int:
+    """Log a new Trend Radar signal. Returns the new row id."""
+    stop_price   = round(entry_price * 0.90, 8)
+    target_price = round(entry_price * 1.20, 8)
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute("""
+            INSERT INTO trend_radar_signals
+                (symbol, signal_date, label, velocity, vol_ratio,
+                 entry_price, filter_price, price_vs_filter,
+                 stop_price, target_price)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (symbol, signal_date, label, velocity, vol_ratio,
+              entry_price, filter_price, price_vs_filter,
+              stop_price, target_price))
+        await db.commit()
+        return cur.lastrowid
+
+
+async def get_open_trend_radar_signals() -> list[dict]:
+    """Return all signals where either outcome is still OPEN."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("""
+            SELECT * FROM trend_radar_signals
+            WHERE outcome_5d = 'OPEN' OR outcome_10d = 'OPEN'
+            ORDER BY signal_date DESC
+        """) as cur:
+            rows = await cur.fetchall()
+            return [dict(r) for r in rows]
+
+
+async def update_trend_radar_outcome(
+    row_id: int,
+    days: int,
+    price: float,
+    pct: float,
+    outcome: str,
+) -> None:
+    """Update the 5D or 10D outcome for a signal row."""
+    col_price   = f"price_{days}d"
+    col_pct     = f"pct_{days}d"
+    col_outcome = f"outcome_{days}d"
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(f"""
+            UPDATE trend_radar_signals
+            SET {col_price} = ?, {col_pct} = ?, {col_outcome} = ?
+            WHERE id = ?
+        """, (price, pct, outcome, row_id))
+        await db.commit()
+
+
+async def get_trend_radar_stats() -> dict:
+    """Return aggregated win/loss stats for completed signals."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("""
+            SELECT
+                COUNT(*)                                          AS total,
+                SUM(CASE WHEN outcome_10d = 'WIN'  THEN 1 END)   AS wins,
+                SUM(CASE WHEN outcome_10d = 'LOSS' THEN 1 END)   AS losses,
+                SUM(CASE WHEN outcome_10d = 'OPEN' THEN 1 END)   AS open,
+                ROUND(AVG(CASE WHEN outcome_10d != 'OPEN' THEN pct_10d END), 2) AS avg_pct_10d,
+                ROUND(AVG(CASE WHEN outcome_5d  != 'OPEN' THEN pct_5d  END), 2) AS avg_pct_5d
+            FROM trend_radar_signals
+        """) as cur:
+            row = await cur.fetchone()
+            if not row:
+                return {}
+            d = dict(row)
+            total    = d.get("total", 0) or 0
+            wins     = d.get("wins",  0) or 0
+            losses   = d.get("losses",0) or 0
+            completed = wins + losses
+            d["win_rate"] = round(wins / completed * 100, 1) if completed > 0 else None
+            return d
+
+
+async def get_trend_radar_history(limit: int = 30) -> list[dict]:
+    """Return last N signals with outcomes, newest first."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("""
+            SELECT symbol, signal_date, label, velocity, vol_ratio,
+                   entry_price, stop_price, target_price,
+                   pct_5d, pct_10d, outcome_5d, outcome_10d
+            FROM trend_radar_signals
+            ORDER BY signal_date DESC
+            LIMIT ?
+        """, (limit,)) as cur:
             rows = await cur.fetchall()
             return [dict(r) for r in rows]

@@ -34,7 +34,13 @@ import asyncio
 import logging
 import aiohttp
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
+from db import (
+    save_trend_radar_signal,
+    get_open_trend_radar_signals,
+    update_trend_radar_outcome,
+    get_trend_radar_stats,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -331,9 +337,23 @@ async def trend_radar_job(context) -> None:
         logger.info("[TrendRadar] No new Trend Radar signals this cycle")
         return
 
-    # Mark alerted
+    # Mark alerted + log to DB
+    signal_date = now_utc.strftime("%Y-%m-%d")
     for h in hits:
         _kalman_alerted[f"KALMAN:{h['symbol']}"] = now
+        try:
+            await save_trend_radar_signal(
+                symbol          = h["symbol"],
+                signal_date     = signal_date,
+                label           = h["label"],
+                velocity        = h["velocity"],
+                vol_ratio       = h["vol_ratio"],
+                entry_price     = h["price"],
+                filter_price    = h["filtered"],
+                price_vs_filter = h["price_vs_filter"],
+            )
+        except Exception as e:
+            logger.warning(f"[TrendRadar] DB save failed for {h['symbol']}: {e}")
 
     # Send Telegram message
     msg = _trend_radar_msg(hits, scan_time)
@@ -342,6 +362,134 @@ async def trend_radar_job(context) -> None:
             chat_id=ADMIN_CHAT,
             text=msg,
         )
-        logger.info(f"[TrendRadar] Alert sent — {len(hits)} signals")
+        logger.info(f"[TrendRadar] Alert sent — {len(hits)} signals, logged to DB")
     except Exception as e:
         logger.warning(f"[TrendRadar] Telegram send failed: {e}")
+
+# ─────────────────────────────────────────────
+#  Outcome Checker — runs daily at 22:00 UTC
+# ─────────────────────────────────────────────
+
+async def _fetch_current_price(session: aiohttp.ClientSession, symbol: str) -> float:
+    """Fetch latest close price from Binance ticker."""
+    try:
+        async with session.get(
+            "https://api.binance.com/api/v3/ticker/price",
+            params={"symbol": f"{symbol}USDT"},
+            timeout=aiohttp.ClientTimeout(total=8)
+        ) as r:
+            if r.status != 200:
+                return 0.0
+            data = await r.json()
+            return float(data.get("price", 0))
+    except Exception:
+        return 0.0
+
+
+async def trend_radar_outcome_checker(context) -> None:
+    """
+    Daily job: checks all OPEN Trend Radar signals.
+    For each signal where 5 or 10 days have elapsed, fetches current price
+    and marks WIN / LOSS / OPEN.
+
+    WIN  = price >= target_price (entry * 1.20) at check date
+    LOSS = price <= stop_price   (entry * 0.90) at check date
+    OPEN = neither hit yet
+    """
+    now_utc     = datetime.now(timezone.utc)
+    today       = now_utc.strftime("%Y-%m-%d")
+
+    try:
+        open_signals = await get_open_trend_radar_signals()
+    except Exception as e:
+        logger.warning(f"[TrendRadar] Outcome checker DB read failed: {e}")
+        return
+
+    if not open_signals:
+        logger.info("[TrendRadar] Outcome checker: no open signals")
+        return
+
+    logger.info(f"[TrendRadar] Outcome checker: {len(open_signals)} open signals")
+
+    updated: list[str] = []
+
+    async with aiohttp.ClientSession() as session:
+        for sig in open_signals:
+            try:
+                signal_date  = datetime.strptime(sig["signal_date"], "%Y-%m-%d").replace(tzinfo=timezone.utc)
+                days_elapsed = (now_utc - signal_date).days
+                entry        = sig["entry_price"]
+                stop         = sig["stop_price"]
+                target       = sig["target_price"]
+                symbol       = sig["symbol"]
+                row_id       = sig["id"]
+
+                if days_elapsed < 5:
+                    continue  # too early
+
+                price = await _fetch_current_price(session, symbol)
+                if price <= 0:
+                    continue
+
+                pct = round((price - entry) / entry * 100, 2)
+
+                # Determine outcome
+                if price >= target:
+                    outcome = "WIN"
+                elif price <= stop:
+                    outcome = "LOSS"
+                else:
+                    outcome = "OPEN"
+
+                # Update 5D if not yet set
+                if days_elapsed >= 5 and sig.get("outcome_5d") == "OPEN":
+                    await update_trend_radar_outcome(row_id, 5, price, pct, outcome)
+                    updated.append(f"{symbol} 5D: {outcome} ({pct:+.1f}%)")
+
+                # Update 10D if not yet set
+                if days_elapsed >= 10 and sig.get("outcome_10d") == "OPEN":
+                    await update_trend_radar_outcome(row_id, 10, price, pct, outcome)
+                    updated.append(f"{symbol} 10D: {outcome} ({pct:+.1f}%)")
+
+            except Exception as e:
+                logger.debug(f"[TrendRadar] Outcome check error for {sig.get('symbol','?')}: {e}")
+
+    if not updated:
+        logger.info("[TrendRadar] Outcome checker: nothing to update yet")
+        return
+
+    logger.info(f"[TrendRadar] Outcomes updated: {updated}")
+
+    # Send summary to admin Telegram
+    try:
+        stats = await get_trend_radar_stats()
+        win_rate = stats.get("win_rate")
+        total    = stats.get("total", 0)
+        wins     = stats.get("wins", 0) or 0
+        losses   = stats.get("losses", 0) or 0
+        open_ct  = stats.get("open", 0) or 0
+        avg_10d  = stats.get("avg_pct_10d")
+
+        lines = [
+            "CRYPTO SNIPER  --  TREND RADAR",
+            f"Performance update · {today}",
+            "\u2501" * 32,
+        ]
+        for u in updated:
+            lines.append(u)
+        lines += [
+            "\u2501" * 32,
+            f"Total signals:  {total}",
+            f"Wins:           {wins}",
+            f"Losses:         {losses}",
+            f"Open:           {open_ct}",
+            f"Win rate:       {win_rate}%" if win_rate is not None else "Win rate:       N/A (need more data)",
+            f"Avg return 10D: {avg_10d:+.1f}%" if avg_10d is not None else "Avg return 10D: N/A",
+        ]
+
+        await context.bot.send_message(
+            chat_id=ADMIN_CHAT,
+            text="\n".join(lines),
+        )
+    except Exception as e:
+        logger.warning(f"[TrendRadar] Outcome Telegram notify failed: {e}")
