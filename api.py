@@ -173,8 +173,13 @@ def _tg_notify_signal(symbol: str, sig, quote: dict, interval: str) -> None:
         stop    = sig.stop  or 0
         target  = sig.target or 0
         rr      = sig.rr_ratio or 0
-        chg_str = f"+{chg:.2f}%" if chg >= 0 else f"{chg:.2f}%"
+        chg_str  = f"+{chg:.2f}%" if chg >= 0 else f"{chg:.2f}%"
         stop_pct = round(((price - stop) / price) * 100, 2) if stop else 0
+        z_quality = getattr(sig, "z_quality", None) or "UNKNOWN"
+        z_return  = getattr(sig, "z_return",  None)
+        z_line    = f"Entry quality: {z_quality}"
+        if z_return is not None:
+            z_line += f"  (Z-return: {z_return:+.1f})"
         msg = (
             f"CRYPTO SNIPER  --  STRONG BUY\n"
             f"(triggered via app analysis)\n"
@@ -182,7 +187,8 @@ def _tg_notify_signal(symbol: str, sig, quote: dict, interval: str) -> None:
             f"{symbol}/USDT  |  {interval.upper()}\n\n"
             f"Score: {sig.total}/{sig.max_score}\n"
             f"Price: ${price:.6g}  ({chg_str})\n"
-            f"Vol:   {rv}x  |  ADX: {adx}\n\n"
+            f"Vol:   {rv}x  |  ADX: {adx}\n"
+            f"{z_line}\n\n"
             f"TRADE SETUP\n"
             f"Entry:  ${entry:.6g}\n"
             f"Stop:   ${stop:.6g}  (-{stop_pct:.1f}%)\n"
@@ -238,7 +244,7 @@ async def analyse(req: AnalyseRequest):
     import asyncio, threading
     threading.Thread(target=record_signal, args=(symbol, req.interval, sig.total, sig.signal_label, sig.close), daemon=True).start()
     threading.Thread(target=check_and_fire_alerts, args=(symbol, sig.close, sig.total), daemon=True).start()
-    if sig.signal_label == "STRONG BUY":
+    if sig.signal_label == "STRONG BUY" and sig.total >= 9:
         threading.Thread(target=_tg_notify_signal, args=(symbol, sig, quote, req.interval), daemon=True).start()
     return {
         "symbol":symbol,"interval":req.interval,"timestamp":int(time.time()),
