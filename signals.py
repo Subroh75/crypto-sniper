@@ -279,8 +279,12 @@ def calculate_signals(
     entry = stop = target = rr = None
     if signal in ("BUY", "STRONG BUY") and direction == "LONG" and atr:
         entry  = close
-        stop   = round(close - (1.5 * atr), 2)
-        target = round(close + (2.5 * atr), 2)
+        atr_stop   = close - (1.5 * atr)
+        # Floor: stop never tighter than 10% below entry (1D candles need room)
+        stop   = round(max(atr_stop, close * 0.90), 2)
+        # Target: 2.5x ATR but minimum 20% above entry to keep R:R sensible
+        atr_target = close + (2.5 * atr)
+        target = round(max(atr_target, close * 1.20), 2)
         risk   = entry - stop
         reward = target - entry
         rr     = round(reward / risk, 2) if risk > 0 else None

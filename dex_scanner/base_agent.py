@@ -798,13 +798,16 @@ def _build_trade_setup(market: dict, signal: dict) -> dict:
     if high > 0 and low > 0 and high > low:
         atr_proxy = (high - low) / 4.0
 
-    if atr_proxy > 0 and atr_proxy < price * 0.20:   # sanity: ATR < 20% of price
-        stop   = round(max(price - 1.5 * atr_proxy, price * 0.85), 8)
-        target = round(price + 2.5 * atr_proxy, 8)
+    if atr_proxy > 0 and atr_proxy < price * 0.40:   # sanity: ATR < 40% of price
+        atr_stop   = price - 1.5 * atr_proxy
+        atr_target = price + 2.5 * atr_proxy
+        # Floor: stop never tighter than 10%, target never less than 20%
+        stop   = round(max(atr_stop,   price * 0.90), 8)
+        target = round(max(atr_target, price * 1.20), 8)
     else:
-        # Fallback: 3% stop, 10% target
-        stop   = round(price * 0.97, 8)
-        target = round(price * 1.10, 8)
+        # Fallback: 10% stop, 20% target (DEX tokens need room to breathe)
+        stop   = round(price * 0.90, 8)
+        target = round(price * 1.20, 8)
 
     risk   = price - stop
     reward = target - price

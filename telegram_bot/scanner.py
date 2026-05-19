@@ -769,7 +769,7 @@ async def vol_spike_job(context) -> None:
     # Skip at 22 UTC — hourly_scan_job handles that hour with full scoring
     if now_utc.hour != DAILY_HOUR_UTC:
         try:
-            symbols, vol_map = await _get_top_symbols(200)
+            symbols, vol_map = await _get_top_symbols(500)
 
             # ── Raw vol pre-filter ─────────────────────────────────────────
             # Compare current 24h vol against last snapshot.
