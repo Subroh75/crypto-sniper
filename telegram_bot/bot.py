@@ -35,6 +35,7 @@ from agent import get_agent_response, extract_analyse_command, extract_escalatio
 from analyse import fetch_analysis
 from escalation import escalate
 from scanner import hourly_scan_job, vol_spike_job, _vol_scan, _format_vol_report, _get_top_symbols
+from kalman_scanner import trend_radar_job
 from dex_scanner.scanner import dex_scan_job, gem_lookup, get_last_sweep, SUPPORTED_CHAINS
 from dex_scanner.blackboard import compose_rate_limited
 from signal_tracker import init_tracker
@@ -897,6 +898,16 @@ async def post_init(application: Application):
         name="vol_spike_poller",
     )
     logger.info(f"Vol spike poller scheduled — first run in {spike_first_in}s (every hour)")
+
+    # Trend Radar — Kalman passive scan every 6 hours, 3min after the hour
+    radar_first_in = first_in + 180
+    job_queue.run_repeating(
+        trend_radar_job,
+        interval=21600,          # 6 hours
+        first=radar_first_in,
+        name="trend_radar",
+    )
+    logger.info(f"Trend Radar (Kalman) scheduled — first run in {radar_first_in}s (every 6h)")
 
 
 # ─────────────────────────────────────────────
