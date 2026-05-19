@@ -910,8 +910,7 @@ async def post_init(application: Application):
     logger.info(f"Trend Radar (Kalman) scheduled — first run in {radar_first_in}s (every 6h)")
 
     # Trend Radar outcome checker — runs once daily at 22:00 UTC (same as daily scan)
-    from scanner import _seconds_to_next_daily_dex as _seconds_to_22utc
-    outcome_first_in = _seconds_to_22utc()
+    outcome_first_in = _seconds_to_next_daily_dex()
     job_queue.run_repeating(
         trend_radar_outcome_checker,
         interval=86400,
