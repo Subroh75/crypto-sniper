@@ -149,12 +149,36 @@ def _kalman_signal(closes: list[float],
     vol_baseline  = vol_filtered[-1]
     vol_ratio     = volumes[-1] / vol_baseline if vol_baseline > 0 else 1.0
 
+    # ── P&D guards ────────────────────────────────────────────────────────
+    # Guard 1: price vs filter cap tightened from 8% to 5%
+    # Genuine accumulation keeps price close to the filter line.
+    # >5% above filter on signal day = price already ran, likely pump.
+    price_healthy = cur_price <= cur_filtered * 1.05
+
+    # Guard 2: velocity consistency — must be positive for at least 3 of
+    # the last 5 bars (not just the current bar after a flat/negative run).
+    # A pump goes flat → sudden spike. A real trend builds gradually.
+    recent_vels  = velocities[-5:] if len(velocities) >= 5 else velocities
+    vel_positive_bars = sum(1 for v in recent_vels if v > 0)
+    vel_consistent = vel_positive_bars >= 3
+
+    # Guard 3: no single-bar velocity explosion
+    # If today's velocity is more than 4x yesterday's it's a spike, not a trend.
+    vel_explosion = (prev_vel > 0 and cur_vel > prev_vel * 4)
+    # ──────────────────────────────────────────────────────────────────────
+
     # Gate checks
-    trend_up      = cur_vel > 0
-    price_healthy = cur_price <= cur_filtered * 1.08    # not more than 8% above filter
+    trend_up = cur_vel > 0
 
     # All-confirm signal
-    confirmed = trend_up and accelerating and vol_ratio >= 1.5 and price_healthy
+    confirmed = (
+        trend_up
+        and accelerating
+        and vol_ratio >= 1.5
+        and price_healthy
+        and vel_consistent
+        and not vel_explosion
+    )
 
     # Label
     if not confirmed:
@@ -173,14 +197,16 @@ def _kalman_signal(closes: list[float],
             label = "EARLY TREND"
 
     return {
-        "label":       label,
-        "confirmed":   confirmed,
-        "velocity":    round(vel_pct, 3),       # % per bar
-        "accelerating": accelerating,
-        "vol_ratio":   round(vol_ratio, 2),
-        "price":       cur_price,
-        "filtered":    round(cur_filtered, 6),
-        "price_vs_filter": round((cur_price / cur_filtered - 1) * 100, 2),  # % above/below
+        "label":           label,
+        "confirmed":       confirmed,
+        "velocity":        round(vel_pct, 3),       # % per bar
+        "accelerating":    accelerating,
+        "vel_consistent":  vel_consistent,          # 3/5 recent bars positive
+        "vel_explosion":   vel_explosion,           # single-bar spike flag
+        "vol_ratio":       round(vol_ratio, 2),
+        "price":           cur_price,
+        "filtered":        round(cur_filtered, 6),
+        "price_vs_filter": round((cur_price / cur_filtered - 1) * 100, 2),
     }
 
 
