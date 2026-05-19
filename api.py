@@ -244,7 +244,7 @@ async def analyse(req: AnalyseRequest):
     import asyncio, threading
     threading.Thread(target=record_signal, args=(symbol, req.interval, sig.total, sig.signal_label, sig.close), daemon=True).start()
     threading.Thread(target=check_and_fire_alerts, args=(symbol, sig.close, sig.total), daemon=True).start()
-    if sig.signal_label == "STRONG BUY" and sig.total >= 9:
+    if sig.signal_label == "STRONG BUY":
         threading.Thread(target=_tg_notify_signal, args=(symbol, sig, quote, req.interval), daemon=True).start()
     return {
         "symbol":symbol,"interval":req.interval,"timestamp":int(time.time()),
