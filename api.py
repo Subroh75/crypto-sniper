@@ -177,9 +177,12 @@ def _tg_notify_signal(symbol: str, sig, quote: dict, interval: str) -> None:
         stop_pct = round(((price - stop) / price) * 100, 2) if stop else 0
         z_quality = getattr(sig, "z_quality", None) or "UNKNOWN"
         z_return  = getattr(sig, "z_return",  None)
-        z_line    = f"Entry quality: {z_quality}"
-        if z_return is not None:
-            z_line += f"  (Z-return: {z_return:+.1f})"
+        q_icon    = {"IDEAL": "[OK]", "GOOD": "[OK]", "CAUTION": "[!!]", "AVOID": "[X]"}.get(z_quality, "[ ]")
+        z_line    = f"Entry:   {q_icon} {z_quality}"
+        if z_return is not None and z_return > 2.5:
+            z_line += "  -- price extended, consider sizing down"
+        elif z_return is not None and z_return < -2.0:
+            z_line += "  -- oversold zone, watch for reversal"
         msg = (
             f"CRYPTO SNIPER  --  STRONG BUY\n"
             f"(triggered via app analysis)\n"
