@@ -277,7 +277,7 @@ async def _get_top_binance_symbols(session: aiohttp.ClientSession,
 def _trend_radar_msg(hits: list[dict], scan_time: str) -> str:
     lines = [
         "CRYPTO SNIPER  --  TREND RADAR",
-        f"Kalman scan · {scan_time} · 1D · top 100",
+        f"Kalman scan \u00b7 {scan_time} \u00b7 1D \u00b7 top 100",
         "\u2501" * 32,
     ]
     for i, h in enumerate(hits[:8], 1):
@@ -286,7 +286,27 @@ def _trend_radar_msg(hits: list[dict], scan_time: str) -> str:
         vel   = h["velocity"]
         vr    = h["vol_ratio"]
         diff  = h["price_vs_filter"]
+        price = h["price"]
+
         diff_str = f"+{diff:.1f}%" if diff >= 0 else f"{diff:.1f}%"
+
+        # Trade setup
+        entry     = price
+        stop      = entry * 0.90
+        target_3d = entry * (1 + vel * 3 / 100)
+        target_5d = entry * (1 + vel * 5 / 100)
+        risk      = entry - stop          # always entry * 0.10
+        reward_3d = target_3d - entry
+        rr_3d     = reward_3d / risk if risk > 0 else 0
+
+        # Format prices — use 6 sig-figs style
+        def _fp(v):
+            if v == 0:
+                return "0"
+            if v >= 1:
+                return f"{v:,.4f}"
+            return f"{v:.6g}"
+
         lines += [
             f"#{i}  {sym}/USDT",
             f"Trend:    {label}",
@@ -294,23 +314,29 @@ def _trend_radar_msg(hits: list[dict], scan_time: str) -> str:
             f"Vol:      {vr:.1f}x above baseline",
             f"Price vs filter: {diff_str}",
             "",
+            f"Entry:    {_fp(entry)}",
+            f"Stop:     {_fp(stop)}  (-10%)",
+            f"Target 3D: {_fp(target_3d)}  (+{vel*3:.1f}%)",
+            f"Target 5D: {_fp(target_5d)}  (+{vel*5:.1f}%)",
+            f"R:R (3D): {rr_3d:.1f}:1",
+            "",
         ]
     lines += [
         "\u2501" * 32,
-        "Experimental · Not financial advice",
+        "Experimental \u00b7 Not financial advice",
         "https://crypto-sniper.app",
     ]
     return "\n".join(lines)
 
 
 # ─────────────────────────────────────────────
-#  Passive scan job — runs every 6 hours
+#  Passive scan job — runs every 1 hour
 # ─────────────────────────────────────────────
 
 async def trend_radar_job(context) -> None:
     """
     Kalman-based Trend Radar passive scan.
-    Fires every 6 hours. Alerts only new confirmed signals (8h cooldown).
+    Fires every 1 hour. Alerts only new confirmed signals (8h cooldown).
     """
     import time
     now = time.time()

@@ -899,15 +899,16 @@ async def post_init(application: Application):
     )
     logger.info(f"Vol spike poller scheduled — first run in {spike_first_in}s (every hour)")
 
-    # Trend Radar — Kalman passive scan every 6 hours, 3min after the hour
+    # Trend Radar — Kalman scan every hour, 3min after the hour mark
+    # 8h cooldown per coin prevents spam regardless of scan frequency
     radar_first_in = first_in + 180
     job_queue.run_repeating(
         trend_radar_job,
-        interval=21600,          # 6 hours
+        interval=3600,           # every hour
         first=radar_first_in,
         name="trend_radar",
     )
-    logger.info(f"Trend Radar (Kalman) scheduled — first run in {radar_first_in}s (every 6h)")
+    logger.info(f"Trend Radar (Kalman) scheduled — first run in {radar_first_in}s (every 1h)")
 
     # Trend Radar outcome checker — runs once daily at 22:00 UTC (same as daily scan)
     outcome_first_in = _seconds_to_next_daily_dex()
