@@ -150,31 +150,32 @@ def _kalman_signal(closes: list[float],
     vol_ratio     = volumes[-1] / vol_baseline if vol_baseline > 0 else 1.0
 
     # ── P&D guards ────────────────────────────────────────────────────────
-    # Guard 1: price vs filter cap tightened from 8% to 5%
-    # Genuine accumulation keeps price close to the filter line.
-    # >5% above filter on signal day = price already ran, likely pump.
-    price_healthy = cur_price <= cur_filtered * 1.05
+    # Guard 1: price vs filter cap — above 6% = already ran, likely pump
+    # (was 5% — slightly relaxed to avoid killing slow-building trends)
+    price_healthy = cur_price <= cur_filtered * 1.06
 
     # Guard 2: velocity consistency — must be positive for at least 3 of
     # the last 5 bars (not just the current bar after a flat/negative run).
-    # A pump goes flat → sudden spike. A real trend builds gradually.
     recent_vels  = velocities[-5:] if len(velocities) >= 5 else velocities
     vel_positive_bars = sum(1 for v in recent_vels if v > 0)
     vel_consistent = vel_positive_bars >= 3
 
     # Guard 3: no single-bar velocity explosion
-    # If today's velocity is more than 4x yesterday's it's a spike, not a trend.
-    vel_explosion = (prev_vel > 0 and cur_vel > prev_vel * 4)
+    # If today's velocity is more than 6x yesterday's it's a spike, not a trend.
+    # (relaxed from 4x — 4x was filtering out genuine breakout accelerations)
+    vel_explosion = (prev_vel > 0 and cur_vel > prev_vel * 6)
     # ──────────────────────────────────────────────────────────────────────
 
     # Gate checks
     trend_up = cur_vel > 0
 
     # All-confirm signal
+    # vol_ratio lowered from 1.5x to 1.2x — Kalman-smoothed baseline is
+    # already conservative, 1.5x was rejecting genuine low-vol steady trends
     confirmed = (
         trend_up
         and accelerating
-        and vol_ratio >= 1.5
+        and vol_ratio >= 1.2
         and price_healthy
         and vel_consistent
         and not vel_explosion

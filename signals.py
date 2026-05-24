@@ -277,14 +277,14 @@ def calculate_signals(
 
     # ── Trade Setup ────────────────────────────────────────────────────
     entry = stop = target = rr = None
-    if signal in ("BUY", "STRONG BUY") and direction == "LONG" and atr:
+    if signal in ("BUY", "STRONG BUY") and direction == "LONG":
         entry  = close
-        atr_stop   = close - (1.5 * atr)
-        # Floor: stop never tighter than 10% below entry (1D candles need room)
-        stop   = round(max(atr_stop, close * 0.90), 2)
-        # Target: 2.5x ATR but minimum 20% above entry to keep R:R sensible
-        atr_target = close + (2.5 * atr)
-        target = round(max(atr_target, close * 1.20), 2)
+        # Fixed 10% stop on 1D signals — ATR on daily candles averages 3-5%
+        # so 1.5x ATR was consistently too tight. 10% gives the trade room.
+        stop   = round(close * 0.90, 8)
+        # Target: 2.5x ATR but minimum 20% above entry to maintain R:R >= 2
+        atr_target = close + (2.5 * atr) if atr else 0
+        target = round(max(atr_target, close * 1.20), 8)
         risk   = entry - stop
         reward = target - entry
         rr     = round(reward / risk, 2) if risk > 0 else None
