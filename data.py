@@ -72,9 +72,11 @@ def _cg_headers():
     """Return base headers — key is passed as query param x_cg_demo_api_key."""
     return {"accept": "application/json"}
 
-# Geo-block sentinel — set to True when Binance returns 451 (restricted region)
-# Once set, all subsequent Binance calls are skipped instantly (no 8s timeout waste)
-_BINANCE_GEO_BLOCKED: bool = False
+# Geo-block sentinel — True skips ALL Binance calls instantly (no 8s timeout waste)
+# Set SKIP_BINANCE=1 as a Render env var to hard-disable Binance from startup.
+# Also flips to True at runtime on first 451 response, but resets per-process;
+# the env var is the reliable cross-process solution for geo-blocked deployments.
+_BINANCE_GEO_BLOCKED: bool = os.environ.get("SKIP_BINANCE", "0") == "1"
 
 def _get(url: str, params: dict = None, timeout: int = 8) -> Optional[dict]:
     """Safe GET with timeout + error logging."""
