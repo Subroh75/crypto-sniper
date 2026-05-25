@@ -397,6 +397,18 @@ def _coin_block(data: dict, rank: int, interval: str) -> str:
         block += f"Vol Shield: {shield} {shield_icon}  (\u03c3 {sigma:.1f}%/day)\n"
         block += f"Sizing:  {sizing}\u00d7  \u2014 {sizing_note}\n"
 
+    # ARIMA direction bias
+    arima_bias   = timing.get("arima_bias", "")
+    arima_phi1   = timing.get("arima_phi1", 0.0)
+    arima_conf   = timing.get("arima_confluence", "")
+    if arima_bias:
+        phi_sign = "+" if arima_phi1 >= 0 else ""
+        block += f"Momentum bias: {arima_bias}  (\u03c6 {phi_sign}{arima_phi1:.2f})\n"
+        if arima_conf == "HIGH CONFLUENCE":
+            block += "\u26a1 HIGH CONFLUENCE \u2014 Vol Filter + ARIMA aligned\n"
+        elif arima_conf == "BIAS CONFLICT":
+            block += "\u26a0\ufe0f BIAS CONFLICT \u2014 layers disagree, caution\n"
+
     if kronos:
         kdir  = kronos.get("direction", "")
         kmove = kronos.get("expected_move_pct", 0)

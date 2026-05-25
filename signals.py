@@ -84,9 +84,15 @@ class SignalResult:
     z_quality: str   = "UNKNOWN"
 
     # Vol Shield — GARCH volatility regime
-    vol_shield:       str   = ""      # CALM / ELEVATED / STORM
-    vol_shield_sigma: float = 0.0     # forecast daily σ %
-    vol_shield_sizing: float = 1.0    # suggested position size multiplier
+    vol_shield:        str   = ""      # CALM / ELEVATED / STORM
+    vol_shield_sigma:  float = 0.0     # forecast daily σ %
+    vol_shield_sizing: float = 1.0     # suggested position size multiplier
+
+    # ARIMA direction bias
+    arima_bias:     str   = ""     # CONTINUATION / REVERTING / NEUTRAL
+    arima_phi1:     float = 0.0    # AR(1) coefficient
+    arima_forecast: float = 0.0    # one-step return forecast %
+    arima_confluence: str = ""     # HIGH CONFLUENCE / BIAS CONFLICT / ""
 
     @property
     def pct_score(self) -> float:
@@ -160,6 +166,79 @@ def _garch_vol_shield(closes: list[float]) -> dict:
     except Exception:
         # arch not installed or numerical failure — silent fallback
         return {"vol_shield": "", "sigma": 0.0, "sizing": 1.0}
+
+
+# ─────────────────────────────────────────────
+#  ARIMA(1,0,1) direction bias
+# ─────────────────────────────────────────────
+
+def _arima_direction(closes: list[float], kalman_vel: float = 0.0) -> dict:
+    """
+    Fit ARIMA(1,0,1) on log returns and extract:
+      - one-step-ahead return forecast
+      - AR(1) coefficient φ₁ (momentum vs mean-reversion)
+      - directional bias label
+      - confluence with Kalman velocity
+
+    Returns dict with arima_bias, arima_phi1, arima_forecast, arima_confluence.
+    Falls back gracefully if statsmodels not installed or < 30 bars.
+    """
+    MIN_BARS = 30
+    if len(closes) < MIN_BARS:
+        return {"arima_bias": "", "arima_phi1": 0.0, "arima_forecast": 0.0, "arima_confluence": ""}
+
+    try:
+        import numpy as np
+        import warnings
+        from statsmodels.tsa.arima.model import ARIMA
+
+        px   = np.array(closes, dtype=float)
+        rets = np.diff(np.log(px)) * 100          # % log returns
+        rets = rets[-60:]                           # last 60 bars
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            model  = ARIMA(rets, order=(1, 0, 1))
+            result = model.fit()
+
+        # AR(1) coefficient
+        phi1     = float(result.arparams[0]) if len(result.arparams) > 0 else 0.0
+
+        # One-step-ahead forecast (expected return %)
+        fc       = result.forecast(steps=1)
+        forecast = float(fc.iloc[0]) if hasattr(fc, "iloc") else float(fc[0])
+
+        # Directional bias from forecast
+        THRESHOLD = 0.15   # % — ignore noise below this
+        if forecast > THRESHOLD:
+            bias = "CONTINUATION"
+        elif forecast < -THRESHOLD:
+            bias = "REVERTING"
+        else:
+            bias = "NEUTRAL"
+
+        # Confluence with Kalman velocity
+        # kalman_vel > 0 means Kalman says trending up
+        confluence = ""
+        if kalman_vel > 0 and bias == "CONTINUATION":
+            confluence = "HIGH CONFLUENCE"     # both layers agree: up
+        elif kalman_vel > 0 and bias == "REVERTING":
+            confluence = "BIAS CONFLICT"       # Kalman says up, ARIMA says fade
+        elif kalman_vel < 0 and bias == "REVERTING":
+            confluence = "HIGH CONFLUENCE"     # both agree: fading
+        elif kalman_vel < 0 and bias == "CONTINUATION":
+            confluence = "BIAS CONFLICT"       # Kalman says down, ARIMA says continue
+
+        return {
+            "arima_bias":       bias,
+            "arima_phi1":       round(phi1, 3),
+            "arima_forecast":   round(forecast, 3),
+            "arima_confluence": confluence,
+        }
+
+    except Exception:
+        # statsmodels not installed or numerical failure — silent fallback
+        return {"arima_bias": "", "arima_phi1": 0.0, "arima_forecast": 0.0, "arima_confluence": ""}
 
 
 def calculate_signals(
@@ -485,11 +564,19 @@ def calculate_signals(
     result.z_return  = round(z_return,  2)
     result.z_quality = z_quality
 
-    # ── Vol Shield — GARCH(1,1) on closes (runs on every signal, fast fallback if arch missing)
+    # ── Vol Shield — GARCH(1,1) on closes
     shield = _garch_vol_shield(closes_list)
     result.vol_shield        = shield["vol_shield"]
     result.vol_shield_sigma  = shield["sigma"]
     result.vol_shield_sizing = shield["sizing"]
+
+    # ── ARIMA direction bias — use z_return as Kalman velocity proxy
+    # z_return > 0 = recent returns above mean (momentum up), < 0 = below (fading)
+    arima = _arima_direction(closes_list, kalman_vel=result.z_return)
+    result.arima_bias        = arima["arima_bias"]
+    result.arima_phi1        = arima["arima_phi1"]
+    result.arima_forecast    = arima["arima_forecast"]
+    result.arima_confluence  = arima["arima_confluence"]
 
     return result
 
