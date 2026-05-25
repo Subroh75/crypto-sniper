@@ -309,12 +309,11 @@ def get_ohlcv(symbol: str, interval: str = "1H", exchange_hint: str = "") -> lis
     url  = f"{CG_BASE}/coins/{coin_id}/market_chart"
     data = _cg_headers_requests(url, {"vs_currency":"usd","days":days,"interval":"hourly" if days<=1 else "daily"})
     if not data or "prices" not in data:
-        # Fallback: CoinCap history
-        return _coincap_ohlcv(symbol, days)
+        return []   # CoinCap dead from Singapore (DNS fail) — skip
     prices  = data.get("prices", [])      # [[ts, price], ...]
     volumes = data.get("total_volumes", [])
     if len(prices) < 2:
-        return _coincap_ohlcv(symbol, days)
+        return []   # CoinCap dead from Singapore (DNS fail) — skip
     # Convert price series to synthetic OHLCV (open=prev_close, high/low +-0.5%, close=price)
     bars = []
     for i, (ts, price) in enumerate(prices):
@@ -1289,25 +1288,9 @@ def get_social_delta(symbol: str) -> float:
 
 
 def _coincap_ohlcv(symbol: str, days: int = 1) -> list[list]:
-    """CoinCap fallback for OHLCV ÃÂ¢ÃÂÃÂ free, no key needed."""
-    cap_id   = CAP_ID.get(symbol.upper(), symbol.lower())
-    interval = "m30" if days <= 1 else "h2" if days <= 7 else "d1"
-    end_ms   = int(time.time() * 1000)
-    start_ms = end_ms - days * 86400000
-    data     = _get(f"{CAP_BASE}/assets/{cap_id}/history",
-                    {"interval": interval, "start": start_ms, "end": end_ms})
-    if not data or "data" not in data or not data["data"]:
-        return _synthetic_ohlcv(symbol)
-    prices = data["data"]  # [{"priceUsd":"...", "time":...}, ...]
-    bars   = []
-    for i, p in enumerate(prices):
-        price = float(p.get("priceUsd", 0))
-        prev  = float(prices[i-1].get("priceUsd", price)) if i > 0 else price
-        ts    = int(p.get("time", 0))
-        high  = round(max(price, prev) * 1.003, 8)
-        low   = round(min(price, prev) * 0.997, 8)
-        bars.append([ts, round(prev, 8), high, low, round(price, 8)])
-    return bars[-96:]
+    """CoinCap disabled — api.coincap.io DNS fails from Render Singapore (30s hang)."""
+    return []
+
 
 def _synthetic_ohlcv(symbol: str) -> list[list]:
     """Last-resort: generate 48 flat bars from current quote."""
@@ -1453,54 +1436,12 @@ def get_quote(symbol: str) -> dict:
     if cpp.get("price", 0) > 0:
         return cpp
 
-    # 6. CoinCap — last resort
-    return _coincap_quote(symbol)
+    # 6. CoinCap — disabled (api.coincap.io DNS fails from Render Singapore)
+    return {}
 
 def _coincap_quote(symbol: str) -> dict:
-    """CoinCap fallback for live price."""
-    cap_id = CAP_ID.get(symbol.upper(), symbol.lower())
-    data   = _get(f"{CAP_BASE}/assets/{cap_id}")
-    if not data or "data" not in data:
-        # Try Binance first
-        try:
-            bnc = _binance_quote(symbol)
-            if bnc.get("price", 0) > 0:
-                return bnc
-        except Exception:
-            pass
-        # Try Coinpaprika
-        try:
-            cpp = _coinpaprika_quote(symbol)
-            if cpp.get("price", 0) > 0:
-                return cpp
-        except Exception:
-            pass
-        # Last resort: yfinance
-        try:
-            import yfinance as yf
-            sym_map = {"BTC":"BTC-USD","ETH":"ETH-USD","SOL":"SOL-USD","BNB":"BNB-USD",
-                       "XRP":"XRP-USD","ADA":"ADA-USD","DOGE":"DOGE-USD","DOT":"DOT-USD",
-                       "AVAX":"AVAX-USD","MATIC":"MATIC-USD","LINK":"LINK-USD"}
-            yt = yf.Ticker(sym_map.get(symbol.upper(), symbol.upper()+"-USD"))
-            info = yt.fast_info
-            price = float(info.last_price or 0)
-            if price > 0:
-                return {"symbol":symbol.upper(),"price":price,"change_24h":0,
-                        "volume_24h":0,"market_cap":0,"high_24h":price*1.02,"low_24h":price*0.98}
-        except Exception:
-            pass
-        return {"symbol": symbol.upper(), "price": 0, "change_24h": 0,
-                "volume_24h": 0, "market_cap": 0, "high_24h": 0, "low_24h": 0}
-    d = data["data"]
-    return {
-        "symbol":     symbol.upper(),
-        "price":      float(d.get("priceUsd", 0)),
-        "change_24h": float(d.get("changePercent24Hr", 0)),
-        "volume_24h": float(d.get("volumeUsd24Hr", 0)),
-        "market_cap": float(d.get("marketCapUsd", 0)),
-        "high_24h":   0,
-        "low_24h":    0,
-    }
+    """CoinCap disabled — api.coincap.io DNS fails from Render Singapore (30s hang)."""
+    return {}
 
 
 # ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ
