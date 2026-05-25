@@ -51,6 +51,8 @@ _symbol_exchange_map: dict[str, str] = {}
 # Vol baseline cache — stores last ticker snapshot {symbol: vol_24h}
 # Updated every cycle; used to detect intra-hour vol spikes
 _ticker_vol_baseline: dict[str, float] = {}
+_vol_history: dict[str, list[float]] = {}   # rolling 24-snapshot window per symbol
+_VOL_HISTORY_LEN = 24                        # keep 24 hourly snapshots (~1 trading day)
 
 
 async def _wake_api(timeout: int = 60) -> bool:
@@ -798,31 +800,53 @@ async def vol_spike_job(context) -> None:
             symbols, vol_map = await _get_top_symbols(500)
 
             # ── Raw vol pre-filter ─────────────────────────────────────────
-            # Compare current 24h vol against last snapshot.
-            # A coin that gained >1.8x its per-hour average since last check
-            # is flagged for full VPRT scoring.
+            # Two-condition gate — flag a coin if EITHER:
+            #   (a) Delta spike: this hour's vol increment >= 1.8x expected hourly rate
+            #       Catches fresh/new spikes as they develop.
+            #   (b) Sustained elevation: current 24h vol >= 2.5x rolling median
+            #       Catches coins already running hot (e.g. TOMO at 5x all day)
+            #       that would be missed by delta alone after the initial surge.
             # On cold start (_ticker_vol_baseline empty) — score all symbols.
-            global _ticker_vol_baseline
+            global _ticker_vol_baseline, _vol_history
             spiked: list[str] = []
             if not _ticker_vol_baseline:
-                # First run — seed baseline, score full universe this cycle
+                # First run — seed baseline and history, score full universe this cycle
                 logger.info("[VolSpike] Cold start — seeding vol baseline, scoring all symbols")
                 spiked = symbols
             else:
                 for sym in symbols:
                     cur  = vol_map.get(sym, 0)
                     prev = _ticker_vol_baseline.get(sym, 0)
-                    if prev <= 0:
+                    if prev <= 0 or cur <= 0:
                         continue
-                    # Hourly increment = cur - prev (24h rolling window grows ~1/24 per hour normally)
-                    # A spike = this hour's increment is >= 1.8x the expected per-hour rate (prev/24)
+
+                    flagged = False
+
+                    # (a) Delta spike
                     hourly_increment  = max(cur - prev, 0)
                     expected_per_hour = prev / 24
                     if expected_per_hour > 0 and hourly_increment >= VOL_GATE * expected_per_hour:
+                        flagged = True
+
+                    # (b) Sustained elevation vs rolling median
+                    if not flagged:
+                        history = _vol_history.get(sym, [])
+                        if len(history) >= 4:   # need at least 4 snapshots for a meaningful median
+                            sorted_h = sorted(history)
+                            median   = sorted_h[len(sorted_h) // 2]
+                            if median > 0 and cur >= 2.5 * median:
+                                flagged = True
+
+                    if flagged:
                         spiked.append(sym)
 
-            # Update baseline for next cycle
+            # Update baseline and rolling history for next cycle
             _ticker_vol_baseline = dict(vol_map)
+            for sym, vol in vol_map.items():
+                hist = _vol_history.setdefault(sym, [])
+                hist.append(vol)
+                if len(hist) > _VOL_HISTORY_LEN:
+                    hist.pop(0)
 
             logger.info(f"[VolSpike] Pre-filter: {len(spiked)}/{len(symbols)} symbols flagged for VPRT")
 
