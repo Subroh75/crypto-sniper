@@ -1511,7 +1511,8 @@ def get_indicators(symbol: str, interval: str = "1h") -> dict:
     _EMPTY = {k: None for k in ("rsi","adx","atr","ema20","ema50","ema200",
                                  "bb_upper","bb_lower","macd","macd_hist","vwap")}
 
-    bars = _binance_ohlcv(symbol, interval, limit=300)
+    # Use get_ohlcv so MEXC/Gate fallback applies when Binance is geo-blocked
+    bars = get_ohlcv(symbol, interval)
     if len(bars) < 30:
         return _EMPTY
 
