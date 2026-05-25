@@ -50,9 +50,11 @@ _symbol_exchange_map: dict[str, str] = {}
 
 # Vol baseline cache — stores last ticker snapshot {symbol: vol_24h}
 # Updated every cycle; used to detect intra-hour vol spikes
+# Legacy pre-filter state — kept for reference, no longer used by vol_spike_job
+# (vol_spike_job now delegates vol-filtering to the /scan API endpoint)
 _ticker_vol_baseline: dict[str, float] = {}
-_vol_history: dict[str, list[float]] = {}   # rolling 24-snapshot window per symbol
-_VOL_HISTORY_LEN = 24                        # keep 24 hourly snapshots (~1 trading day)
+_vol_history: dict[str, list[float]] = {}
+_VOL_HISTORY_LEN = 24
 
 
 async def _wake_api(timeout: int = 60) -> bool:
@@ -765,114 +767,130 @@ def _vol_spike_label(rv: float) -> str:
     return "Elevated"
 
 
+def _scan_coin_to_analyse(coin: dict) -> dict:
+    """
+    Convert a flat /scan result dict into a minimal /analyse-shaped dict
+    so _coin_block can render it without crashing.
+    Used as fallback when /analyse call fails for a STRONG BUY coin.
+    """
+    sym   = coin.get("symbol", "?")
+    score = coin.get("score", 0)
+    rv    = coin.get("rel_vol", 0)
+    price = coin.get("price", 0)
+    chg   = coin.get("change", 0)
+    adx   = coin.get("adx", 0)
+    return {
+        "symbol":   sym,
+        "interval": "1d",
+        "signal":   {"label": coin.get("signal", ""), "total": score, "max": 13,
+                     "gates": {"v": coin.get("v", 0) > 0, "t": coin.get("t", 0) > 0, "adx": adx >= 20}},
+        "components": {
+            "V": {"confirmed": coin.get("v", 0) > 0, "score": coin.get("v", 0), "max": 5, "detail": ""},
+            "P": {"confirmed": coin.get("p", 0) > 0, "score": coin.get("p", 0), "max": 3, "detail": ""},
+            "R": {"confirmed": coin.get("r", 0) > 0, "score": coin.get("r", 0), "max": 2, "detail": ""},
+            "T": {"confirmed": coin.get("t", 0) > 0, "score": coin.get("t", 0), "max": 3, "detail": ""},
+        },
+        "structure": {"close": price},
+        "timing":    {"rel_volume": rv, "adx": adx, "rsi": coin.get("rsi", 0),
+                      "z_return": coin.get("z_return", 0), "z_quality": coin.get("z_quality", ""),
+                      "vol_shield": coin.get("vol_shield", ""),
+                      "vol_shield_sigma": coin.get("vol_shield_sigma", 0),
+                      "vol_shield_sizing": coin.get("vol_shield_sizing", 1.0),
+                      "arima_bias": coin.get("arima_bias", ""),
+                      "arima_phi1": coin.get("arima_phi1", 0),
+                      "arima_confluence": coin.get("arima_confluence", "")},
+        "quote":     {"price": price, "change_24h": chg},
+        "trade_setup": {},
+    }
+
+
 async def vol_spike_job(context) -> None:
     """
     JobQueue callback — runs every hour.
-    Checks CEX (top 200) and DEX (all chain agents) for vol spikes >= 1.8x.
+    Checks CEX (top 200 via /scan) and DEX (all chain agents) for vol spikes >= 1.8x.
     Fires a Telegram alert immediately for any NEW spike not alerted in last 4h.
 
-    At 22:00 UTC (daily scan hour) — skip CEX check to avoid double-alerting
-    since hourly_scan_job also runs at that hour.
+    CEX: uses the API /scan endpoint (min_score=1) — which already runs its own
+    vol pre-filter internally. No per-coin /analyse calls. Fast and robust.
+
+    At 22:00 UTC (daily scan hour) — skip CEX to avoid double-alerting
+    since hourly_scan_job handles the full daily message at that hour.
     """
     global _spike_alerted
-    bot      = context.bot
-    now      = time.time()
-    now_utc  = datetime.now(timezone.utc)
+    bot       = context.bot
+    now       = time.time()
+    now_utc   = datetime.now(timezone.utc)
     scan_time = now_utc.strftime("%d %b %Y %H:%M UTC")
 
-    # Wake Render API before doing anything — it sleeps after ~15min inactivity
+    # Wake Render API
     api_up = await _wake_api(timeout=65)
     if not api_up:
-        logger.warning("[VolSpike] API did not wake in time — skipping this cycle")
+        logger.warning("[VolSpike] API did not wake — skipping this cycle")
         return
 
-    # Prune old cooldown entries
+    # Prune stale cooldown entries
     _spike_alerted = {k: v for k, v in _spike_alerted.items() if now - v < _SPIKE_COOLDOWN}
 
-    new_cex: list[dict] = []    # thin dicts for non-STRONG-BUY vol spikes
-    new_cex_sb: list[dict] = []  # full /analyse payloads for STRONG BUY CEX coins
+    new_cex: list[dict] = []     # vol-only (no STRONG BUY) thin dicts
+    new_cex_sb: list[dict] = []  # STRONG BUY — need full /analyse payload for _coin_block
     new_dex: list[dict] = []
 
-    # ── CEX check — ticker pre-filter then VPRT only on spikes ───────────
-    # Skip at 22 UTC — hourly_scan_job handles that hour with full scoring
+    # ── CEX check via /scan endpoint ──────────────────────────────────────
+    # /scan runs its own vol pre-filter internally — no need for any local
+    # pre-filter logic. We just ask for everything with score >= 1 and
+    # filter for new spikes from the cooldown dict.
     if now_utc.hour != DAILY_HOUR_UTC:
         try:
-            symbols, vol_map = await _get_top_symbols(500)
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    f"{API_BASE}/scan",
+                    params={"interval": "1d", "min_score": 1, "max_coins": 200, "min_volume": 500000},
+                    timeout=aiohttp.ClientTimeout(total=90),
+                ) as r:
+                    if r.status != 200:
+                        logger.warning(f"[VolSpike] /scan returned HTTP {r.status}")
+                        scan_coins = []
+                    else:
+                        data = await r.json()
+                        scan_coins = data.get("signals", data.get("coins", []))
 
-            # ── Raw vol pre-filter ─────────────────────────────────────────
-            # Two-condition gate — flag a coin if EITHER:
-            #   (a) Delta spike: this hour's vol increment >= 1.8x expected hourly rate
-            #       Catches fresh/new spikes as they develop.
-            #   (b) Sustained elevation: current 24h vol >= 2.5x rolling median
-            #       Catches coins already running hot (e.g. TOMO at 5x all day)
-            #       that would be missed by delta alone after the initial surge.
-            # On cold start (_ticker_vol_baseline empty) — score all symbols.
-            global _ticker_vol_baseline, _vol_history
-            spiked: list[str] = []
+            logger.info(f"[VolSpike] /scan returned {len(scan_coins)} coins")
 
-            # Always include top 50 by raw USD vol — these are the most active coins
-            # and will always contain anything genuinely pumping right now.
-            # This is the safety net that catches sustained runners regardless of delta.
-            top50_by_vol = [sym for sym, _ in
-                            sorted(vol_map.items(), key=lambda x: x[1], reverse=True)[:50]]
+            for coin in scan_coins:
+                sym   = coin.get("symbol", "")
+                rv    = coin.get("rel_vol", 0)
+                label = coin.get("signal", "")
+                score = coin.get("score", 0)
+                chg   = coin.get("change", 0)
 
-            if not _ticker_vol_baseline:
-                # First run — seed baseline and history, score full universe this cycle
-                logger.info("[VolSpike] Cold start — seeding vol baseline, scoring all symbols")
-                spiked = symbols
-            else:
-                spiked_set: set[str] = set(top50_by_vol)  # always score top 50
+                if rv < VOL_GATE:
+                    continue  # below vol threshold
 
-                for sym in symbols:
-                    if sym in spiked_set:
-                        continue  # already included
-                    cur  = vol_map.get(sym, 0)
-                    prev = _ticker_vol_baseline.get(sym, 0)
-                    if prev <= 0 or cur <= 0:
-                        continue
+                key = f"CEX:{sym}"
+                if key in _spike_alerted:
+                    continue  # already alerted this cycle window
 
-                    # (a) Delta spike — fresh surge this hour
-                    hourly_increment  = max(cur - prev, 0)
-                    expected_per_hour = prev / 24
-                    if expected_per_hour > 0 and hourly_increment >= VOL_GATE * expected_per_hour:
-                        spiked_set.add(sym)
-                        continue
+                _spike_alerted[key] = now
 
-                    # (b) Sustained elevation vs rolling median
-                    history = _vol_history.get(sym, [])
-                    if len(history) >= 2:
-                        sorted_h = sorted(history)
-                        median   = sorted_h[len(sorted_h) // 2]
-                        if median > 0 and cur >= 2.5 * median:
-                            spiked_set.add(sym)
+                if label == "STRONG BUY":
+                    # Fetch full /analyse payload so _coin_block has all fields
+                    try:
+                        async with aiohttp.ClientSession() as s:
+                            async with s.post(
+                                f"{API_BASE}/analyse",
+                                json={"symbol": sym, "interval": "1d"},
+                                timeout=aiohttp.ClientTimeout(total=30),
+                            ) as ar:
+                                if ar.status == 200:
+                                    new_cex_sb.append(await ar.json())
+                                else:
+                                    # Fallback: build minimal _coin_block-compatible dict
+                                    new_cex_sb.append(_scan_coin_to_analyse(coin))
+                    except Exception:
+                        new_cex_sb.append(_scan_coin_to_analyse(coin))
+                else:
+                    new_cex.append({"symbol": sym, "rv": rv, "change": chg, "signal": label})
 
-                spiked = list(spiked_set)
-
-            # Update baseline and rolling history for next cycle
-            _ticker_vol_baseline = dict(vol_map)
-            for sym, vol in vol_map.items():
-                hist = _vol_history.setdefault(sym, [])
-                hist.append(vol)
-                if len(hist) > _VOL_HISTORY_LEN:
-                    hist.pop(0)
-
-            logger.info(f"[VolSpike] Pre-filter: {len(spiked)}/{len(symbols)} symbols flagged for VPRT")
-
-            if spiked:
-                cex_hits, _ = await _vol_scan(spiked, interval="1d")
-                for h in cex_hits:
-                    sym   = h.get("symbol", "")
-                    rv    = h.get("timing", {}).get("rel_volume") or 0
-                    label = h.get("signal", {}).get("label", "")
-                    key   = f"CEX:{sym}"
-                    if key not in _spike_alerted:
-                        _spike_alerted[key] = now
-                        if label == "STRONG BUY":
-                            new_cex_sb.append(h)
-                        else:
-                            chg = h.get("quote", {}).get("change_24h") or 0
-                            new_cex.append({"symbol": sym, "rv": rv,
-                                            "change": chg, "signal": label})
         except Exception as e:
             logger.warning(f"[VolSpike] CEX check failed: {e}")
 
