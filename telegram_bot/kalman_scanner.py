@@ -44,6 +44,12 @@ from db import (
 
 logger = logging.getLogger(__name__)
 
+# Render runs in Singapore — Binance geo-blocks Singapore IPs.
+# MEXC is the primary source; Binance kept as silent fallback in case
+# the bot ever moves off a geo-blocked region.
+MEXC_KLINES = "https://api.mexc.com/api/v3/klines"
+MEXC_TICKER = "https://api.mexc.com/api/v3/ticker/24hr"
+MEXC_PRICE  = "https://api.mexc.com/api/v3/ticker/price"
 BINANCE_KLINES = "https://api.binance.com/api/v3/klines"
 BINANCE_TICKER = "https://api.binance.com/api/v3/ticker/24hr"
 ADMIN_CHAT     = int(os.environ.get("ADMIN_CHAT_ID", "5861457546"))
@@ -219,55 +225,79 @@ async def _fetch_klines(session: aiohttp.ClientSession,
                         symbol: str,
                         limit: int = 90) -> tuple[list[float], list[float]]:
     """
-    Fetch 1D klines from Binance. Returns (closes, volumes).
+    Fetch 1D klines. Tries MEXC first (Render = Singapore, Binance geo-blocked).
+    Falls back to Binance silently in case region changes.
+    Returns (closes, vol_usd).
     """
-    try:
-        params = {"symbol": f"{symbol}USDT", "interval": "1d", "limit": limit}
-        async with session.get(
-            BINANCE_KLINES,
-            params=params,
-            timeout=aiohttp.ClientTimeout(total=10)
-        ) as r:
-            if r.status != 200:
+    async def _try(url: str) -> tuple[list[float], list[float]]:
+        try:
+            params = {"symbol": f"{symbol}USDT", "interval": "1d", "limit": limit}
+            async with session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=10)) as r:
+                if r.status != 200:
+                    return [], []
+                data = await r.json()
+            if not data or not isinstance(data, list) or len(data) < 5:
                 return [], []
-            data = await r.json()
-        closes  = [float(c[4]) for c in data]   # index 4 = close
-        volumes = [float(c[5]) for c in data]    # index 5 = volume (base)
-        # Convert volume to quote (USD) using close price
-        vol_usd = [v * c for v, c in zip(volumes, closes)]
+            closes  = [float(c[4]) for c in data]
+            volumes = [float(c[5]) for c in data]
+            vol_usd = [v * c for v, c in zip(volumes, closes)]
+            return closes, vol_usd
+        except Exception:
+            return [], []
+
+    # MEXC first
+    closes, vol_usd = await _try(MEXC_KLINES)
+    if closes:
         return closes, vol_usd
-    except Exception:
-        return [], []
+    # Binance fallback
+    return await _try(BINANCE_KLINES)
 
 
-async def _get_top_binance_symbols(session: aiohttp.ClientSession,
-                                   n: int = 100) -> list[str]:
-    """Top N Binance USDT pairs by 24h quote volume."""
+async def _get_top_symbols(session: aiohttp.ClientSession,
+                           n: int = 100) -> list[str]:
+    """
+    Top N USDT pairs by 24h quote volume.
+    Tries MEXC first (Render = Singapore, Binance geo-blocked),
+    falls back to Binance silently.
+    """
     STABLECOINS = {
         "USDT","USDC","BUSD","DAI","TUSD","USDP","USDD","GUSD",
         "FRAX","LUSD","FDUSD","PYUSD","STETH","WBTC","WETH",
         "WBETH","EZETH","WEETH","SUSDE","USDE"
     }
-    try:
-        async with session.get(
-            BINANCE_TICKER,
-            timeout=aiohttp.ClientTimeout(total=15)
-        ) as r:
-            if r.status != 200:
-                return []
-            tickers = await r.json()
-        pairs = [
-            (t["symbol"][:-4], float(t.get("quoteVolume", 0)))
-            for t in tickers
-            if t["symbol"].endswith("USDT")
-            and t["symbol"][:-4] not in STABLECOINS
-            and float(t.get("quoteVolume", 0)) > 500_000
-        ]
-        pairs.sort(key=lambda x: x[1], reverse=True)
-        return [sym for sym, _ in pairs[:n]]
-    except Exception as e:
-        logger.warning(f"[TrendRadar] Binance ticker failed: {e}")
-        return []
+
+    async def _parse_tickers(url: str, source: str) -> list[str]:
+        try:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=15)) as r:
+                if r.status != 200:
+                    return []
+                tickers = await r.json()
+            pairs = [
+                (t["symbol"][:-4], float(t.get("quoteVolume", 0)))
+                for t in tickers
+                if t["symbol"].endswith("USDT")
+                and t["symbol"][:-4] not in STABLECOINS
+                and float(t.get("quoteVolume", 0)) > 500_000
+            ]
+            pairs.sort(key=lambda x: x[1], reverse=True)
+            result = [sym for sym, _ in pairs[:n]]
+            if result:
+                logger.info(f"[TrendRadar] Universe: {len(result)} symbols from {source}")
+            return result
+        except Exception as e:
+            logger.warning(f"[TrendRadar] {source} ticker failed: {e}")
+            return []
+
+    # MEXC first
+    syms = await _parse_tickers(MEXC_TICKER, "MEXC")
+    if syms:
+        return syms
+    # Binance fallback
+    return await _parse_tickers(BINANCE_TICKER, "Binance")
+
+
+# Keep old name as alias so nothing else breaks
+_get_top_binance_symbols = _get_top_symbols
 
 
 # ─────────────────────────────────────────────
@@ -354,7 +384,7 @@ async def trend_radar_job(context) -> None:
     errors = 0
 
     async with aiohttp.ClientSession() as session:
-        symbols = await _get_top_binance_symbols(session, n=100)
+        symbols = await _get_top_symbols(session, n=100)
         if not symbols:
             logger.warning("[TrendRadar] No symbols returned — aborting")
             return
@@ -424,19 +454,28 @@ async def trend_radar_job(context) -> None:
 # ─────────────────────────────────────────────
 
 async def _fetch_current_price(session: aiohttp.ClientSession, symbol: str) -> float:
-    """Fetch latest close price from Binance ticker."""
-    try:
-        async with session.get(
-            "https://api.binance.com/api/v3/ticker/price",
-            params={"symbol": f"{symbol}USDT"},
-            timeout=aiohttp.ClientTimeout(total=8)
-        ) as r:
-            if r.status != 200:
-                return 0.0
-            data = await r.json()
-            return float(data.get("price", 0))
-    except Exception:
-        return 0.0
+    """
+    Fetch latest price. Tries MEXC first, Binance fallback.
+    MEXC /ticker/price returns {"symbol": ..., "price": ...} — identical to Binance.
+    """
+    async def _try(url: str) -> float:
+        try:
+            async with session.get(
+                url,
+                params={"symbol": f"{symbol}USDT"},
+                timeout=aiohttp.ClientTimeout(total=8)
+            ) as r:
+                if r.status != 200:
+                    return 0.0
+                data = await r.json()
+                return float(data.get("price", 0))
+        except Exception:
+            return 0.0
+
+    price = await _try(MEXC_PRICE)
+    if price > 0:
+        return price
+    return await _try("https://api.binance.com/api/v3/ticker/price")
 
 
 async def trend_radar_outcome_checker(context) -> None:
