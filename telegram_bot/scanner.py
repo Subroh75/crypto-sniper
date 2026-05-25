@@ -888,13 +888,14 @@ async def vol_spike_job(context) -> None:
     # Same format as the daily scan. Sent first, before the vol-only summary.
     if new_cex_sb:
         sb_blocks = [_coin_block(d, i, "1D") for i, d in enumerate(new_cex_sb, 1)]
+        _div = "\u2501" * 32
         sb_msg = (
             f"\u26a1 CRYPTO SNIPER  --  STRONG BUY  [CEX]\n"
             f"Vol spike triggered\n"
             f"{scan_time}\n"
-            f"{'\u2501' * 32}"
+            f"{_div}"
             + "".join(sb_blocks)
-            + f"\n{'\u2501' * 32}\n"
+            + f"\n{_div}\n"
             f"https://crypto-sniper.app"
         )
         try:
