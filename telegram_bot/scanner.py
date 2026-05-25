@@ -809,36 +809,44 @@ async def vol_spike_job(context) -> None:
             # On cold start (_ticker_vol_baseline empty) — score all symbols.
             global _ticker_vol_baseline, _vol_history
             spiked: list[str] = []
+
+            # Always include top 50 by raw USD vol — these are the most active coins
+            # and will always contain anything genuinely pumping right now.
+            # This is the safety net that catches sustained runners regardless of delta.
+            top50_by_vol = [sym for sym, _ in
+                            sorted(vol_map.items(), key=lambda x: x[1], reverse=True)[:50]]
+
             if not _ticker_vol_baseline:
                 # First run — seed baseline and history, score full universe this cycle
                 logger.info("[VolSpike] Cold start — seeding vol baseline, scoring all symbols")
                 spiked = symbols
             else:
+                spiked_set: set[str] = set(top50_by_vol)  # always score top 50
+
                 for sym in symbols:
+                    if sym in spiked_set:
+                        continue  # already included
                     cur  = vol_map.get(sym, 0)
                     prev = _ticker_vol_baseline.get(sym, 0)
                     if prev <= 0 or cur <= 0:
                         continue
 
-                    flagged = False
-
-                    # (a) Delta spike
+                    # (a) Delta spike — fresh surge this hour
                     hourly_increment  = max(cur - prev, 0)
                     expected_per_hour = prev / 24
                     if expected_per_hour > 0 and hourly_increment >= VOL_GATE * expected_per_hour:
-                        flagged = True
+                        spiked_set.add(sym)
+                        continue
 
                     # (b) Sustained elevation vs rolling median
-                    if not flagged:
-                        history = _vol_history.get(sym, [])
-                        if len(history) >= 4:   # need at least 4 snapshots for a meaningful median
-                            sorted_h = sorted(history)
-                            median   = sorted_h[len(sorted_h) // 2]
-                            if median > 0 and cur >= 2.5 * median:
-                                flagged = True
+                    history = _vol_history.get(sym, [])
+                    if len(history) >= 2:
+                        sorted_h = sorted(history)
+                        median   = sorted_h[len(sorted_h) // 2]
+                        if median > 0 and cur >= 2.5 * median:
+                            spiked_set.add(sym)
 
-                    if flagged:
-                        spiked.append(sym)
+                spiked = list(spiked_set)
 
             # Update baseline and rolling history for next cycle
             _ticker_vol_baseline = dict(vol_map)
