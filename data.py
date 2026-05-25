@@ -2115,19 +2115,24 @@ def build_volume_baseline(max_coins: int = 500, interval: str = "1h") -> dict:
             elif exch == "mexc" and not coin.get("binance_listed"):
                 bars_raw = _mexc_ohlcv(sym, iv, limit=22)
             else:
-                bnc_sym = BNC_SYM.get(sym.upper(), sym.upper() + "USDT")
-                r = requests.get(
-                    f"{BNC_BASE}/klines",
-                    params={"symbol": bnc_sym, "interval": iv, "limit": 22},
-                    timeout=10,
-                )
-                if r.status_code != 200:
-                    return None
-                bars_raw = r.json()
+                # Prefer Binance klines; skip instantly if geo-blocked
+                bars_raw = None
+                if not _BINANCE_GEO_BLOCKED:
+                    bnc_sym = BNC_SYM.get(sym.upper(), sym.upper() + "USDT")
+                    r = requests.get(
+                        f"{BNC_BASE}/klines",
+                        params={"symbol": bnc_sym, "interval": iv, "limit": 22},
+                        timeout=10,
+                    )
+                    if r.status_code == 200:
+                        bars_raw = r.json()
+                # MEXC fallback when Binance blocked or returned no data
+                if not bars_raw or len(bars_raw) < 5:
+                    bars_raw = _mexc_ohlcv(sym, iv, limit=22)
                 if not bars_raw or len(bars_raw) < 5:
                     return None
-                # Binance: already raw list, volume at index 5
-                vols = [float(b[5]) for b in bars_raw[:-1]]  # exclude forming bar
+                # Binance raw: volume at index 5; MEXC/Gate: same index after _mexc_ohlcv
+                vols = [float(b[5]) for b in bars_raw[:-1]]
                 avg = sum(vols) / len(vols) if vols else 0
                 if avg <= 0:
                     return None
@@ -2189,6 +2194,7 @@ def get_volume_surge(
       4. Compute RVOL = current_vol / baseline_avg
       5. Filter + rank by RVOL desc
     """
+    global _BINANCE_GEO_BLOCKED
     import time as _time
     from concurrent.futures import ThreadPoolExecutor, as_completed as _asc
 
@@ -2213,37 +2219,76 @@ def get_volume_surge(
         logger.warning("get_volume_surge: no baselines in DB — run build_volume_baseline first")
         return []
 
-    # ── Fetch all Binance 24hr tickers (one call) ─────────────────────────────
-    try:
-        r = requests.get(f"{BNC_BASE}/ticker/24hr", timeout=12)
-        r.raise_for_status()
-        all_tickers = {t["symbol"]: t for t in r.json()}
-    except Exception as e:
-        logger.error(f"get_volume_surge: Binance ticker error: {e}")
+    # ── Fetch 24hr tickers — Binance preferred, MEXC fallback on geo-block ─────
+    all_tickers: dict = {}
+    use_mexc_tickers = _BINANCE_GEO_BLOCKED
+
+    if not use_mexc_tickers:
+        try:
+            r = requests.get(f"{BNC_BASE}/ticker/24hr", timeout=12)
+            if r.status_code == 451:
+                _BINANCE_GEO_BLOCKED = True  # set module-level sentinel
+                logger.warning("volume-surge: Binance 451 geo-block — switching to MEXC tickers")
+                use_mexc_tickers = True
+            else:
+                r.raise_for_status()
+                all_tickers = {t["symbol"]: t for t in r.json()}
+        except Exception as e:
+            logger.warning(f"get_volume_surge: Binance ticker error: {e} — trying MEXC")
+            use_mexc_tickers = True
+
+    if use_mexc_tickers:
+        try:
+            rm = requests.get(f"{MEXC_BASE}/ticker/24hr", timeout=15)
+            rm.raise_for_status()
+            # Normalise MEXC ticker keys to match Binance shape
+            for t in rm.json():
+                pair = t.get("symbol", "")
+                if not pair.endswith("USDT"):
+                    continue
+                all_tickers[pair] = {
+                    "symbol":             pair,
+                    "lastPrice":          t.get("lastPrice", 0),
+                    "priceChangePercent": t.get("priceChangePercent", 0),
+                    "quoteVolume":        t.get("quoteVolume", 0),
+                }
+        except Exception as e:
+            logger.error(f"get_volume_surge: MEXC ticker fallback error: {e}")
+            return []
+
+    if not all_tickers:
+        logger.error("get_volume_surge: no tickers from any exchange")
         return []
 
     # ── For each coin with a baseline, fetch current bar volume ───────────────
     candidates = [s for s in baselines if s + "USDT" in all_tickers]
 
     def _current_vol(sym: str):
+        # Prefer Binance klines; fall back to MEXC when geo-blocked
+        if not _BINANCE_GEO_BLOCKED:
+            try:
+                bnc_sym = sym + "USDT"
+                r = requests.get(
+                    f"{BNC_BASE}/klines",
+                    params={"symbol": bnc_sym, "interval": iv, "limit": 2},
+                    timeout=8,
+                )
+                if r.status_code == 200:
+                    bars = r.json()
+                    if bars:
+                        bar = bars[-2] if len(bars) >= 2 else bars[-1]
+                        return float(bar[5])
+            except Exception:
+                pass
+        # MEXC fallback
         try:
-            bnc_sym = sym + "USDT"
-            r = requests.get(
-                f"{BNC_BASE}/klines",
-                params={"symbol": bnc_sym, "interval": iv, "limit": 2},
-                timeout=8,
-            )
-            if r.status_code != 200:
-                return None
-            bars = r.json()
-            if not bars:
-                return None
-            # Use the last CLOSED bar (index -2 if 2 bars returned, else -1)
-            bar = bars[-2] if len(bars) >= 2 else bars[-1]
-            vol = float(bar[5])
-            return vol
+            bars = _mexc_ohlcv(sym, iv, limit=2)
+            if bars and len(bars) >= 1:
+                bar = bars[-2] if len(bars) >= 2 else bars[-1]
+                return float(bar[5])
         except Exception:
-            return None
+            pass
+        return None
 
     results = []
     with ThreadPoolExecutor(max_workers=24) as ex:
