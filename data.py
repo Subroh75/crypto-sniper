@@ -117,7 +117,8 @@ BNC_SYM = {
 }
 
 
-DAYS_MAP = {"1m":1,"5m":1,"15m":2,"30m":5,"1H":14,"4H":60,"1D":365}
+DAYS_MAP = {"1m":1,"5m":1,"15m":2,"30m":5,
+            "1h":14,"1H":14,"4h":60,"4H":60,"1d":365,"1D":365}
 
 # ── Binance universe cache ────────────────────────────────────────────────────
 _BNC_UNIVERSE_CACHE: list = []
@@ -333,7 +334,8 @@ def _finnhub_ohlcv(symbol: str, interval: str = "1H", bars: int = 300) -> list[l
     if not FH_KEY:
         return []
     # Map interval codes to Finnhub resolution
-    res_map = {"1m":"1","5m":"5","15m":"15","30m":"30","1H":"60","4H":"240","1D":"D"}
+    res_map = {"1m":"1","5m":"5","15m":"15","30m":"30",
+               "1h":"60","1H":"60","4h":"240","4H":"240","1d":"D","1D":"D"}
     res = res_map.get(interval, "60")
     # How many seconds back to fetch
     seconds_per_bar = {"1":60,"5":300,"15":900,"30":1800,"60":3600,"240":14400,"D":86400}
@@ -361,7 +363,8 @@ def _finnhub_ohlcv(symbol: str, interval: str = "1H", bars: int = 300) -> list[l
 
 def _binance_ohlcv(symbol: str, interval: str = "1h", limit: int = 300) -> list:
     """Binance klines — no API key needed, up to 1000 candles."""
-    iv_map = {"1m":"1m","5m":"5m","15m":"15m","30m":"30m","1H":"1h","4H":"4h","1D":"1d"}
+    iv_map = {"1m":"1m","5m":"5m","15m":"15m","30m":"30m",
+              "1h":"1h","1H":"1h","4h":"4h","4H":"4h","1d":"1d","1D":"1d"}
     iv = iv_map.get(interval, "1h")
     sym = BNC_SYM.get(symbol.upper(), symbol.upper() + "USDT")
     data = _get(f"{BNC_BASE}/klines", {"symbol": sym, "interval": iv, "limit": limit})
@@ -402,9 +405,10 @@ def _mexc_ohlcv(symbol: str, interval: str = "1h", limit: int = 300) -> list:
     """
     MEXC klines — identical structure to Binance, no API key needed.
     Interval map mirrors Binance. Returns [[ts, o, h, l, c, vol], ...]
+    MEXC interval codes: 1m 5m 15m 30m 60m 4h 1d
     """
     iv_map = {"1m":"1m","5m":"5m","15m":"15m","30m":"30m",
-              "1H":"60m","4H":"4h","1D":"1d"}
+              "1h":"60m","1H":"60m","4h":"4h","4H":"4h","1d":"1d","1D":"1d"}
     iv  = iv_map.get(interval, "60m")
     sym = symbol.upper() + "USDT"
     try:
@@ -497,7 +501,7 @@ def _gate_ohlcv(symbol: str, interval: str = "1h", limit: int = 300) -> list:
     Returns [[ts_ms, o, h, l, c, vol], ...] normalised to match Binance format.
     """
     iv_map = {"1m":"1m","5m":"5m","15m":"15m","30m":"30m",
-              "1H":"1h","4H":"4h","1D":"1d"}
+              "1h":"1h","1H":"1h","4h":"4h","4H":"4h","1d":"1d","1D":"1d"}
     iv       = iv_map.get(interval, "1h")
     currency = f"{symbol.upper()}_USDT"
     try:
