@@ -238,49 +238,55 @@ def get_ohlcv(symbol: str, interval: str = "1H", exchange_hint: str = "") -> lis
     """
     hint = exchange_hint.lower() if exchange_hint else ""
 
+    # We track the best bars seen across all sources so we never double-fetch.
+    # Order of priority: MEXC-hint / Gate-hint first, then Binance (skipped if geo-blocked),
+    # then the remaining exchanges. If nothing has 50+ bars we fall through to the
+    # 20-bar minimum check using what we already have.
+    best: list = []
+
+    def _keep(b: list) -> list:
+        """Return b if better than best, updating best in place."""
+        nonlocal best
+        if len(b) > len(best):
+            best = b
+        return b
+
     # Fast-path: if we know the coin is MEXC-only, try MEXC before Binance
     if hint == "mexc":
-        bars = _mexc_ohlcv(symbol, interval, limit=300)
-        if len(bars) >= 50:  # need 50+ bars for EMA200 reliability
+        bars = _keep(_mexc_ohlcv(symbol, interval, limit=300))
+        if len(bars) >= 50:
             return bars
 
     # Fast-path: if we know the coin is Gate-only, try Gate before Binance
-    if hint == "gate":
-        bars = _gate_ohlcv(symbol, interval, limit=300)
+    elif hint == "gate":
+        bars = _keep(_gate_ohlcv(symbol, interval, limit=300))
         if len(bars) >= 50:
             return bars
 
     # Try Binance first -- no key, 1000 candles, most reliable
-    bars = _binance_ohlcv(symbol, interval, limit=300)
+    # (returns instantly when SKIP_BINANCE=1)
+    bars = _keep(_binance_ohlcv(symbol, interval, limit=300))
     if len(bars) >= 50:
         return bars
 
     # Binance miss -> try MEXC (identical API structure)
     if hint != "mexc":  # already tried above
-        bars = _mexc_ohlcv(symbol, interval, limit=300)
+        bars = _keep(_mexc_ohlcv(symbol, interval, limit=300))
         if len(bars) >= 50:
             logger.debug(f"get_ohlcv: {symbol} sourced from MEXC")
             return bars
 
     # MEXC miss -> try Gate.io
     if hint != "gate":  # already tried above
-        bars = _gate_ohlcv(symbol, interval, limit=300)
+        bars = _keep(_gate_ohlcv(symbol, interval, limit=300))
         if len(bars) >= 50:
             logger.debug(f"get_ohlcv: {symbol} sourced from Gate")
             return bars
 
-    # Accept shorter bars from any source (minimum 20 for basic scoring)
-    bars = _binance_ohlcv(symbol, interval, limit=300)
-    if len(bars) >= 20:
-        return bars
-    if hint != "mexc":
-        bars = _mexc_ohlcv(symbol, interval, limit=300)
-        if len(bars) >= 20:
-            return bars
-    if hint != "gate":
-        bars = _gate_ohlcv(symbol, interval, limit=300)
-        if len(bars) >= 20:
-            return bars
+    # Accept shorter bars (minimum 20) from what we already have — no extra HTTP calls
+    if len(best) >= 20:
+        logger.debug(f"get_ohlcv: {symbol} using short bars ({len(best)} candles)")
+        return best
 
     # Fallback: Finnhub (keyed, real OHLCV candles)
     if FH_KEY:
@@ -1500,19 +1506,22 @@ def _coincap_quote(symbol: str) -> dict:
 # 3. TECHNICAL INDICATORS  (computed from Binance OHLCV — no API key required)
 # ─────────────────────────────────────────────────────────────────────────────
 
-def get_indicators(symbol: str, interval: str = "1h") -> dict:
+def get_indicators(symbol: str, interval: str = "1h", bars: list = None) -> dict:
     """
     Compute RSI, EMAs, Bollinger Bands, ATR, ADX, MACD and VWAP directly
-    from Binance OHLCV klines.  Pure Python — no external dependencies.
+    from OHLCV klines.  Pure Python — no external dependencies.
     Returns None for each field if bars are unavailable.
+
+    Pass bars= to reuse already-fetched OHLCV and avoid a second HTTP round-trip.
     """
     import math
 
     _EMPTY = {k: None for k in ("rsi","adx","atr","ema20","ema50","ema200",
                                  "bb_upper","bb_lower","macd","macd_hist","vwap")}
 
-    # Use get_ohlcv so MEXC/Gate fallback applies when Binance is geo-blocked
-    bars = get_ohlcv(symbol, interval)
+    # Use caller-supplied bars if provided (avoids duplicate OHLCV fetch in /scan loop)
+    if not bars:
+        bars = get_ohlcv(symbol, interval)
     if len(bars) < 30:
         return _EMPTY
 

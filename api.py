@@ -234,7 +234,7 @@ async def analyse(req: AnalyseRequest):
     try:
         ohlcv      = get_ohlcv(symbol, req.interval)
         quote      = get_quote(symbol)
-        indicators = get_indicators(symbol, req.interval)
+        indicators = get_indicators(symbol, req.interval, bars=ohlcv)
         # S score removed — social/sentiment calls skipped for speed
         fear_greed     = {}
         cp_news        = []
@@ -309,7 +309,7 @@ async def kronos(req: KronosRequest):
         else:
             ohlcv = get_ohlcv(symbol, req.interval)
             quote = get_quote(symbol)
-            indicators = get_indicators(symbol, req.interval)
+            indicators = get_indicators(symbol, req.interval, bars=ohlcv)
             sig = calculate_signals(ohlcv, quote, indicators)
             signal_ctx = {"symbol":symbol,"interval":req.interval,"close":sig.close,"rsi":sig.rsi,"adx":sig.adx,"ema_stack":sig.ema_stack,"signal":sig.signal_label,"total":sig.total,"direction":sig.direction,"change_24h":quote.get("change_24h",0)}
 
@@ -462,7 +462,8 @@ def scan_top_signals(
                 "high_24h":   coin["high_24h"],
                 "low_24h":    coin["low_24h"],
             }
-            indicators = get_indicators(sym, interval)
+            # Reuse already-fetched bars — eliminates second OHLCV HTTP call per coin
+            indicators = get_indicators(sym, interval, bars=ohlcv)
             sig = calculate_signals(ohlcv, quote, indicators)
             if sig.total < min_score:
                 return None
@@ -592,7 +593,7 @@ def dip_scan(
                 "high_24h":   float(ticker["highPrice"]),
                 "low_24h":    float(ticker["lowPrice"]),
             }
-            indicators = get_indicators(sym, interval)
+            indicators = get_indicators(sym, interval, bars=ohlcv)
             sig = calculate_signals(ohlcv, quote, indicators)
             if sig.total < min_score:
                 return None
@@ -1235,7 +1236,7 @@ async def confluence(symbol: str, intervals: str = "1H,4H,1D"):
         try:
             ohlcv      = get_ohlcv(sym, interval)
             quote      = get_quote(sym)
-            indicators = get_indicators(sym, interval)
+            indicators = get_indicators(sym, interval, bars=ohlcv)
             if not ohlcv:
                 return {"interval": interval, "error": "No data"}
             sig = calculate_signals(ohlcv, quote, indicators)
