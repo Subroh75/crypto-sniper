@@ -79,7 +79,10 @@ export function TopSignals({ onSelect, interval = "1h", onBuySignalsChange, onAl
 
     try {
       const res = await fetch(
-        `${API}/scan?min_score=1&interval=${interval}&max_coins=300`,
+        // Use same params as the bot's daily scan so the warm SQLite cache is served instantly.
+        // cache_key = "{interval}:{min_score}:{max_coins}:{min_volume}"
+        // Bot: 1d:1:200:500000  — frontend must match exactly.
+        `${API}/scan?min_score=1&interval=${interval.toLowerCase()}&max_coins=200&min_volume=500000`,
         { signal: ctrl.signal }
       );
       if (!res.ok) throw new Error(`/scan returned ${res.status}`);

@@ -117,7 +117,7 @@ export function ScanAlertPoller() {
     runningRef.current = true;
     try {
       const r = await fetch(
-        `${API}/scan?top_n=200&interval=1h&min_score=${s.threshold}`,
+        `${API}/scan?min_score=${s.threshold}&interval=1d&max_coins=200&min_volume=500000`,
         { signal: AbortSignal.timeout(60_000) }
       );
       if (!r.ok) return;
