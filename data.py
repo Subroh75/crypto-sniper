@@ -148,18 +148,38 @@ def get_binance_universe(
     This gives ~350-450 coins vs CoinGecko's 200 cap, with real-time
     volume-based ordering rather than static market-cap ranking.
     """
-    global _BNC_UNIVERSE_CACHE, _BNC_UNIVERSE_TS
+    global _BNC_UNIVERSE_CACHE, _BNC_UNIVERSE_TS, _BINANCE_GEO_BLOCKED
     now = time.time()
     if _BNC_UNIVERSE_CACHE and (now - _BNC_UNIVERSE_TS) < _BNC_UNIVERSE_TTL:
         return _BNC_UNIVERSE_CACHE
 
+    # Skip Binance entirely if geo-blocked — use MEXC universe as drop-in
+    if _BINANCE_GEO_BLOCKED:
+        logger.info("get_binance_universe: Binance geo-blocked — returning MEXC universe")
+        mexc = get_mexc_universe(min_volume_usd=min_volume_usd, max_coins=max_coins)
+        # Mark every coin as binance_listed=False so callers know to use MEXC for klines
+        for c in mexc:
+            c.setdefault("binance_listed", False)
+        return mexc
+
+    tickers = []
     try:
         r = requests.get(f"{BNC_BASE}/ticker/24hr", timeout=12)
+        if r.status_code == 451:
+            _BINANCE_GEO_BLOCKED = True
+            logger.warning("get_binance_universe: Binance 451 geo-block — switching to MEXC")
+            mexc = get_mexc_universe(min_volume_usd=min_volume_usd, max_coins=max_coins)
+            for c in mexc:
+                c.setdefault("binance_listed", False)
+            return mexc
         r.raise_for_status()
         tickers = r.json()
     except Exception as e:
         logger.warning(f"Binance universe fetch failed: {e}")
-        return _BNC_UNIVERSE_CACHE  # return stale on error
+        if _BNC_UNIVERSE_CACHE:
+            return _BNC_UNIVERSE_CACHE
+        # Last resort: MEXC
+        return get_mexc_universe(min_volume_usd=min_volume_usd, max_coins=max_coins)
 
     coins = []
     for t in tickers:
@@ -1831,16 +1851,19 @@ def get_watchlist_scores(symbols: list[str]) -> list[dict]:
     """
     import requests as _req
 
-    # ── Primary: Binance batch ticker (single call, returns all pairs) ──
+    # ── Primary: Binance batch ticker — skip if geo-blocked ──────────────────
     results = []
-    try:
+    if not _BINANCE_GEO_BLOCKED:
+      try:
         syms_usdt = [BNC_SYM.get(s.upper(), s.upper() + "USDT") for s in symbols]
-        # Use bookTicker for price, then 24hr for change data
         r = _req.get(
             f"{BNC_BASE}/ticker/24hr",
             timeout=8,
         )
-        if r.status_code == 200:
+        if r.status_code == 451:
+            globals()["_BINANCE_GEO_BLOCKED"] = True
+            logger.warning("get_watchlist_scores: Binance 451 — switching to CoinGecko")
+        elif r.status_code == 200:
             all_tickers = {t["symbol"]: t for t in r.json()}
             for sym, bnc_sym in zip(symbols, syms_usdt):
                 t = all_tickers.get(bnc_sym, {})
@@ -1864,8 +1887,8 @@ def get_watchlist_scores(symbols: list[str]) -> list[dict]:
                 })
             if results:
                 return results
-    except Exception as e:
-        logger.warning(f"get_watchlist_scores: Binance failed ({e}), falling back to CoinGecko")
+      except Exception as e:
+          logger.warning(f"get_watchlist_scores: Binance failed ({e}), falling back to CoinGecko")
 
     # ── Fallback: CoinGecko simple/price ──
     try:
