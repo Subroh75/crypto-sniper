@@ -277,7 +277,7 @@ async def _get_top_binance_symbols(session: aiohttp.ClientSession,
 def _trend_radar_msg(hits: list[dict], scan_time: str) -> str:
     lines = [
         "CRYPTO SNIPER  --  TREND RADAR",
-        f"Kalman scan \u00b7 {scan_time} \u00b7 1D \u00b7 top 100",
+        f"Vol Filter scan \u00b7 {scan_time} \u00b7 1D \u00b7 top 100",
         "\u2501" * 32,
     ]
     for i, h in enumerate(hits[:8], 1):
@@ -310,9 +310,9 @@ def _trend_radar_msg(hits: list[dict], scan_time: str) -> str:
         lines += [
             f"#{i}  {sym}/USDT",
             f"Trend:    {label}",
-            f"Velocity: {vel:+.2f}% per day",
+            f"Momentum: {vel:+.2f}% per day",
             f"Vol:      {vr:.1f}x above baseline",
-            f"Price vs filter: {diff_str}",
+            f"Price vs baseline: {diff_str}",
             "",
             f"Entry:    {_fp(entry)}",
             f"Stop:     {_fp(stop)}  (-10%)",
@@ -335,7 +335,7 @@ def _trend_radar_msg(hits: list[dict], scan_time: str) -> str:
 
 async def trend_radar_job(context) -> None:
     """
-    Kalman-based Trend Radar passive scan.
+    Vol Filter-based Trend Radar passive scan.
     Fires every 1 hour. Alerts only new confirmed signals (8h cooldown).
     """
     import time
@@ -348,7 +348,7 @@ async def trend_radar_job(context) -> None:
     _kalman_alerted = {k: v for k, v in _kalman_alerted.items()
                        if now - v < KALMAN_COOLDOWN}
 
-    logger.info("[TrendRadar] Starting Kalman scan...")
+    logger.info("[TrendRadar] Starting Vol Filter scan...")
 
     hits: list[dict] = []
     errors = 0
