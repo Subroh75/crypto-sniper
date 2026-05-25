@@ -38,6 +38,7 @@ import { fmtPrice, fmtPct } from "@/lib/api";
 import { MetricTooltip } from "@/components/Tooltip";
 import type { AnalyseResponse, KronosResponse, DerivativesData, DexAnalyseResponse } from "@/types/api";
 import { ComposedChart, Bar, Line, ResponsiveContainer, YAxis, XAxis, CartesianGrid, ReferenceLine } from "recharts";
+import VolRadar from "@/components/VolRadar";
 
 //  Constants 
 const INTERVALS = ["1m","5m","15m","30m","1H","4H","1D"] as const;
@@ -349,7 +350,7 @@ export default function Home() {
   const loading = activeSource === "dex" ? dexAnalyse.loading : analyse.loading;
   const isMobile = useMobile();
   // Mobile tab: which panel is visible
-  const [mobileTab, setMobileTab] = useState<"analyse"|"signals"|"sidebar"|"scanner">("analyse");
+  const [mobileTab, setMobileTab] = useState<"analyse"|"signals"|"sidebar"|"scanner"|"volradar">("analyse");
 
   // Scroll-to-top when switching mobile tabs
   useEffect(() => {
@@ -1438,8 +1439,33 @@ export default function Home() {
 
             {/* RIGHT SIDEBAR */}
             <div>
+              {/* Desktop Vol Radar tab toggle */}
+              {!isMobile && (
+                <div style={{ display: "flex", gap: 0, marginBottom: 12, background: "#0a0f1e", borderRadius: 10, padding: 3, border: "1px solid #1e293b" }}>
+                  {(["signals", "volradar"] as const).map(t => (
+                    <button
+                      key={t}
+                      onClick={() => setMobileTab(t as typeof mobileTab)}
+                      style={{
+                        flex: 1, padding: "6px 0", borderRadius: 8,
+                        fontFamily: "monospace", fontWeight: 800, fontSize: 10,
+                        letterSpacing: "0.08em", textTransform: "uppercase",
+                        border: "none", cursor: "pointer", transition: "all 0.15s",
+                        background: mobileTab === t ? "#7c3aed" : "transparent",
+                        color: mobileTab === t ? "#fff" : "#475569",
+                      }}
+                    >
+                      {t === "signals" ? "▲ Signals" : "⚡ Vol Radar"}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {/* Vol Radar — desktop panel */}
+              {!isMobile && mobileTab === "volradar" && (
+                <VolRadar onSelect={(sym) => runAnalysis(sym)} />
+              )}
               {/* Signals group */}
-              <div className={isMobile && mobileTab !== "signals" ? "hidden" : ""}>
+              <div className={isMobile && mobileTab !== "signals" ? "hidden" : ((!isMobile && mobileTab === "volradar") ? "hidden" : "")}>
                 <CSOVerdict sig={sig} kron={kronosHk.data} fearGreed={sig?.fear_greed} />
                 {!isMobile && <TopSignals
                   onSelect={(sym) => { runAnalysis(sym); }}
@@ -1478,6 +1504,10 @@ export default function Home() {
                       onDismiss={() => setMobileTab("analyse")} />
                   </div>
                 )}
+              </div>
+              {/* Vol Radar tab — mobile */}
+              <div className={isMobile && mobileTab !== "volradar" ? "hidden" : ""}>
+                <VolRadar onSelect={(sym) => { runAnalysis(sym); if(isMobile) setMobileTab("analyse"); }} />
               </div>
               {/* Watchlist + Tools group */}
               <div className={isMobile && mobileTab !== "sidebar" ? "hidden" : ""}>
@@ -1555,6 +1585,7 @@ export default function Home() {
             {([
               { key: "analyse",  label: "Analyse",  icon: "◎" },
               { key: "signals",  label: "Signals",  icon: "▲" },
+              { key: "volradar", label: "Vol Radar", icon: "⚡" },
               { key: "sidebar",  label: "Tools",    icon: "◈" },
               { key: "scanner",  label: "Scanner",  icon: "⊕" },
             ] as const).map(tab => {
