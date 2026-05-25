@@ -260,7 +260,7 @@ async def analyse(req: AnalyseRequest):
             "T":{"confirmed":sig.t_confirmed,"label":"Trend","detail":sig.t_detail,"score":sig.t_score,"max":3},
         },
         "structure":{"close":sig.close,"ema20":sig.ema20,"ema50":sig.ema50,"ema200":sig.ema200,"vwap":sig.vwap,"bb_upper":sig.bb_upper,"bb_lower":sig.bb_lower},
-        "timing":{"rsi":sig.rsi,"adx":sig.adx,"atr":sig.atr,"rel_volume":sig.rel_volume,"z_price":sig.z_price,"z_vol":sig.z_vol,"z_return":sig.z_return,"z_quality":sig.z_quality},
+        "timing":{"rsi":sig.rsi,"adx":sig.adx,"atr":sig.atr,"rel_volume":sig.rel_volume,"z_price":sig.z_price,"z_vol":sig.z_vol,"z_return":sig.z_return,"z_quality":sig.z_quality,"vol_shield":sig.vol_shield,"vol_shield_sigma":sig.vol_shield_sigma,"vol_shield_sizing":sig.vol_shield_sizing},
         "quote":{"price":quote.get("price",0) or sig.close,"change_24h":quote.get("change_24h",0),"volume_24h":quote.get("volume_24h",0),"high_24h":quote.get("high_24h",0) or sig.close,"low_24h":quote.get("low_24h",0) or sig.close},
         "low_liquidity": quote.get("volume_24h", 0) < 1_000_000,  # <$1M 24h vol — scores may be unreliable
         "trade_setup":{"direction":sig.direction,"entry":sig.entry,"stop":sig.stop,"target":sig.target,"rr_ratio":sig.rr_ratio,"atr":sig.atr,"stop_dist_pct":round(((sig.close-sig.stop)/sig.close)*100,3) if sig.stop else None},
@@ -487,6 +487,9 @@ def scan_top_signals(
                 "z_vol":     sig.z_vol,
                 "z_return":  sig.z_return,
                 "z_quality": sig.z_quality,
+                "vol_shield":        sig.vol_shield,
+                "vol_shield_sigma":  sig.vol_shield_sigma,
+                "vol_shield_sizing": sig.vol_shield_sizing,
                 "scanned_at":     int(time.time()),
                 "rel_vol_pre":    round(coin.get("rel_vol_pre") or sig.rel_volume, 2),
                 "exchange":       exch,

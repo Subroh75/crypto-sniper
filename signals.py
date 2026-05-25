@@ -83,6 +83,11 @@ class SignalResult:
     z_return:  float = 0.0
     z_quality: str   = "UNKNOWN"
 
+    # Vol Shield — GARCH volatility regime
+    vol_shield:       str   = ""      # CALM / ELEVATED / STORM
+    vol_shield_sigma: float = 0.0     # forecast daily σ %
+    vol_shield_sizing: float = 1.0    # suggested position size multiplier
+
     @property
     def pct_score(self) -> float:
         return (self.total / self.max_score) * 100
@@ -102,6 +107,59 @@ class SignalResult:
     @property
     def bear_conviction(self) -> int:
         return 100 - self.bull_conviction
+
+
+# ─────────────────────────────────────────────
+#  Vol Shield — GARCH(1,1) volatility regime
+# ─────────────────────────────────────────────
+
+def _garch_vol_shield(closes: list[float]) -> dict:
+    """
+    Fit GARCH(1,1) on log returns and forecast next-bar conditional volatility.
+    Returns vol_shield regime + sigma + sizing multiplier.
+    Falls back gracefully if arch not installed or insufficient data.
+    """
+    MIN_BARS = 30
+    if len(closes) < MIN_BARS:
+        return {"vol_shield": "", "sigma": 0.0, "sizing": 1.0}
+
+    try:
+        import numpy as np
+        from arch import arch_model
+
+        # Log returns in percent (arch expects percent scale)
+        px    = np.array(closes, dtype=float)
+        rets  = np.diff(np.log(px)) * 100          # % log returns
+        rets  = rets[-120:]                          # cap at 120 bars
+
+        # Demean
+        rets  = rets - rets.mean()
+
+        # Fit GARCH(1,1)
+        gm    = arch_model(rets, vol="Garch", p=1, q=1, dist="normal", rescale=False)
+        res   = gm.fit(disp="off", show_warning=False)
+
+        # One-step-ahead variance forecast
+        fc    = res.forecast(horizon=1, reindex=False)
+        var   = float(fc.variance.iloc[-1, 0])
+        sigma = float(var ** 0.5)                   # daily σ in %
+
+        # Regime classification
+        if sigma < 2.5:
+            regime = "CALM"
+            sizing = 1.0
+        elif sigma < 5.0:
+            regime = "ELEVATED"
+            sizing = 0.6
+        else:
+            regime = "STORM"
+            sizing = 0.4
+
+        return {"vol_shield": regime, "sigma": round(sigma, 2), "sizing": sizing}
+
+    except Exception:
+        # arch not installed or numerical failure — silent fallback
+        return {"vol_shield": "", "sigma": 0.0, "sizing": 1.0}
 
 
 def calculate_signals(
@@ -426,6 +484,12 @@ def calculate_signals(
     result.z_vol     = round(z_vol,     2)
     result.z_return  = round(z_return,  2)
     result.z_quality = z_quality
+
+    # ── Vol Shield — GARCH(1,1) on closes (runs on every signal, fast fallback if arch missing)
+    shield = _garch_vol_shield(closes_list)
+    result.vol_shield        = shield["vol_shield"]
+    result.vol_shield_sigma  = shield["sigma"]
+    result.vol_shield_sizing = shield["sizing"]
 
     return result
 

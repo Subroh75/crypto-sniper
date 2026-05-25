@@ -355,11 +355,15 @@ def _coin_block(data: dict, rank: int, interval: str) -> str:
 
     tf_label = interval.upper()
 
-    # Exchange source prefix (only for non-Binance coins)
-    exch       = _symbol_exchange_map.get(symbol, "binance")
-    exch_tag   = "" if exch == "binance" else f" [{exch.upper()}]"
+    # Exchange source — drives identity icon + tag
+    exch     = _symbol_exchange_map.get(symbol, "binance")
+    exch_tag = "" if exch == "binance" else f" [{exch.upper()}]"
 
-    block  = f"\n#{rank}  {symbol}/USDT{exch_tag}"
+    # Signal identity: CEX=▲ green, DEX=◆ purple
+    is_dex   = exch in ("uniswap", "pancakeswap", "dex")
+    icon     = "\u25c6" if is_dex else "\u25b2"   # ◆ or ▲
+
+    block  = f"\n{icon} #{rank}  {symbol}/USDT{exch_tag}"
     block += f"\nSignal:  {label} ({tf_label})"
     block += f"\nPrice:   ${close:.6g}  ({chg:+.2f}% 24h)"
     block += f"\n{_gate_line(comp, timing)}\n"
@@ -382,6 +386,16 @@ def _coin_block(data: dict, rank: int, interval: str) -> str:
         elif z_return is not None and z_return < -2.0:
             block += "  — oversold zone, watch for reversal"
         block += "\n"
+
+    # Vol Shield — GARCH regime
+    shield  = timing.get("vol_shield", "")
+    sigma   = timing.get("vol_shield_sigma", 0.0)
+    sizing  = timing.get("vol_shield_sizing", 1.0)
+    if shield:
+        shield_icon = {"CALM": "\U0001f7e2", "ELEVATED": "\u26a0\ufe0f", "STORM": "\U0001f534"}.get(shield, "")
+        sizing_note = {1.0: "full size", 0.6: "reduce exposure", 0.4: "small size only"}.get(sizing, f"{sizing}x")
+        block += f"Vol Shield: {shield} {shield_icon}  (\u03c3 {sigma:.1f}%/day)\n"
+        block += f"Sizing:  {sizing}\u00d7  \u2014 {sizing_note}\n"
 
     if kronos:
         kdir  = kronos.get("direction", "")
@@ -464,9 +478,9 @@ def _format_vol_report(hits: list[dict], interval: str, scan_time: str, source: 
     strong = [h for h in hits if h.get("signal", {}).get("total", 0) >= MIN_SCORE]
 
     header = (
-        f"CRYPTO SNIPER  —  VOL SCAN ({source})\n"
-        f"{scan_time}  |  {tf}  |  Vol >= 1.8x\n"
-        "──────────────────────────────────\n"
+        f"\u26a1 CRYPTO SNIPER  —  VOL SCAN ({source})\n"
+        f"{scan_time}  |  {tf}  |  Vol \u2265 1.8x\n"
+        "\u2501" * 32 + "\n"
         f"Unusual volume: {len(hits)} coins\n"
         f"STRONG BUY signals: {len(strong)}\n"
     )
@@ -549,9 +563,9 @@ def _format_signal_message(hits: list[dict], interval: str, scan_time: str) -> s
     tf     = interval.upper()
     prefix = "DAILY" if interval == "1d" else "HOURLY"
     header = (
-        f"CRYPTO SNIPER  —  {prefix} SCAN\n"
+        f"\u25b2 CRYPTO SNIPER  —  {prefix} SCAN  [CEX]\n"
         f"{scan_time}  |  {tf}\n"
-        "──────────────────────────────────\n"
+        "\u2501" * 32 + "\n"
         f"STRONG BUY signals: {len(hits)}\n"
     )
     blocks = [_coin_block(d, i, interval) for i, d in enumerate(hits, 1)]
@@ -567,9 +581,9 @@ def _format_watch_message(watch: list[dict], interval: str, scan_time: str) -> s
     """Near-miss watch report — no scores exposed, gate status only."""
     tf     = interval.upper()
     header = (
-        f"CRYPTO SNIPER  —  NO TRADES ({tf})\n"
+        f"\u25ce CRYPTO SNIPER  —  WATCH LIST\n"
         f"{scan_time}  |  {tf}\n"
-        "──────────────────────────────────\n"
+        "\u2501" * 32 + "\n"
         f"No signal yet — market conditions not confirmed\n"
         f"Coins building momentum:\n"
     )
@@ -863,12 +877,12 @@ async def vol_spike_job(context) -> None:
     if new_cex_sb:
         sb_blocks = [_coin_block(d, i, "1D") for i, d in enumerate(new_cex_sb, 1)]
         sb_msg = (
-            f"CRYPTO SNIPER  --  STRONG BUY\n"
-            f"(vol spike triggered)\n"
+            f"\u26a1 CRYPTO SNIPER  --  STRONG BUY  [CEX]\n"
+            f"Vol spike triggered\n"
             f"{scan_time}\n"
-            f"{'─' * 32}"
+            f"{'\u2501' * 32}"
             + "".join(sb_blocks)
-            + f"\n{'─' * 32}\n"
+            + f"\n{'\u2501' * 32}\n"
             f"https://crypto-sniper.app"
         )
         try:
@@ -881,10 +895,10 @@ async def vol_spike_job(context) -> None:
     if new_cex or new_dex:
         total = len(new_cex) + len(new_dex)
         lines = [
-            f"CRYPTO SNIPER  --  VOL SPIKE ALERT",
+            f"\u26a1 CRYPTO SNIPER  --  VOL SPIKE  [CEX + DEX]",
             f"{scan_time}",
             f"New spikes: {total}  (CEX: {len(new_cex)}  DEX: {len(new_dex)})",
-            "─" * 32,
+            "\u2501" * 32,
         ]
 
         if new_cex:
@@ -912,7 +926,7 @@ async def vol_spike_job(context) -> None:
                 )
 
         lines += [
-            "\n" + "─" * 32,
+            "\n" + "\u2501" * 32,
             "Vol spike — gates not yet confirmed. Open app to analyse.",
             "https://crypto-sniper.app",
         ]

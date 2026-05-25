@@ -276,7 +276,7 @@ async def _get_top_binance_symbols(session: aiohttp.ClientSession,
 
 def _trend_radar_msg(hits: list[dict], scan_time: str) -> str:
     lines = [
-        "CRYPTO SNIPER  --  TREND RADAR",
+        "◎ CRYPTO SNIPER  --  TREND RADAR",
         f"Vol Filter scan \u00b7 {scan_time} \u00b7 1D \u00b7 top 100",
         "\u2501" * 32,
     ]

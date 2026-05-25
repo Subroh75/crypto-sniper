@@ -20,6 +20,9 @@ interface VolCoin {
   exchange_label: string;
   adx: number;
   z_quality: string;
+  vol_shield?: string;
+  vol_shield_sigma?: number;
+  vol_shield_sizing?: number;
 }
 
 interface ScanResult {
@@ -79,14 +82,18 @@ function ChangeCell({ pct }: { pct: number }) {
   );
 }
 
-function SignalBadge({ signal }: { signal: string }) {
+function SignalBadge({ signal, isDex = false }: { signal: string; isDex?: boolean }) {
   if (!signal || signal === "NO SIGNAL") return null;
   const isStrong = signal === "STRONG BUY";
+  // Identity system: CEX=green ▲, DEX=purple ◆
+  const col = isDex ? "#a855f7" : isStrong ? "#22c55e" : "#f59e0b";
+  const bg  = isDex ? "#a855f722" : isStrong ? "#16a34a22" : "#d9770622";
+  const lbl = isDex ? (isStrong ? "◆ STRONG BUY" : "◆ BUY") : (isStrong ? "▲ STRONG BUY" : "▲ BUY");
   return (
     <span style={{
-      background: isStrong ? "#16a34a22" : "#d9770622",
-      color: isStrong ? "#22c55e" : "#f59e0b",
-      border: `1px solid ${isStrong ? "#22c55e44" : "#f59e0b44"}`,
+      background: bg,
+      color: col,
+      border: `1px solid ${col}44`,
       borderRadius: 5,
       padding: "1px 6px",
       fontSize: 9,
@@ -96,7 +103,33 @@ function SignalBadge({ signal }: { signal: string }) {
       textTransform: "uppercase" as const,
       marginLeft: 4,
     }}>
-      {isStrong ? "STRONG BUY" : "BUY"}
+      {lbl}
+    </span>
+  );
+}
+
+// Vol Shield badge
+function VolShieldBadge({ regime, sigma, sizing }: { regime: string; sigma: number; sizing: number }) {
+  if (!regime) return null;
+  const conf: Record<string, { color: string; bg: string; icon: string }> = {
+    CALM:     { color: "#22c55e", bg: "#16a34a22", icon: "🟢" },
+    ELEVATED: { color: "#f59e0b", bg: "#d9770622", icon: "⚠" },
+    STORM:    { color: "#ef4444", bg: "#7f1d1d22", icon: "🔴" },
+  };
+  const c = conf[regime] ?? conf["ELEVATED"];
+  const sizeNote = sizing >= 1.0 ? "full size" : sizing >= 0.6 ? "reduce exposure" : "small size only";
+  return (
+    <span style={{
+      background: c.bg, color: c.color,
+      border: `1px solid ${c.color}44`,
+      borderRadius: 5, padding: "1px 7px",
+      fontSize: 9, fontWeight: 800,
+      fontFamily: "monospace", letterSpacing: "0.04em",
+      marginLeft: 4, whiteSpace: "nowrap" as const,
+    }}
+      title={`Vol Shield: ${regime} | σ ${sigma.toFixed(1)}%/day | ${sizing}× — ${sizeNote}`}
+    >
+      {c.icon} {regime}
     </span>
   );
 }
@@ -362,12 +395,13 @@ export default function VolRadar({ onSelect }: VolRadarProps) {
             <div style={{ paddingLeft: 8 }}>
               {/* Top row: symbol + vol badge */}
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" as const }}>
                   <span style={{ fontFamily: "monospace", fontWeight: 900, fontSize: 15, color: "#f1f5f9" }}>
                     #{idx + 1} {coin.symbol}
                   </span>
                   <span style={{ color: "#475569", fontSize: 11, fontFamily: "monospace" }}>/USDT</span>
-                  {hasSignal && <SignalBadge signal={coin.signal} />}
+                  {hasSignal && <SignalBadge signal={coin.signal} isDex={false} />}
+                  {coin.vol_shield && <VolShieldBadge regime={coin.vol_shield} sigma={coin.vol_shield_sigma ?? 0} sizing={coin.vol_shield_sizing ?? 1} />}
                 </div>
                 <GateBadge rv={coin.rel_vol} />
               </div>
@@ -448,13 +482,23 @@ export default function VolRadar({ onSelect }: VolRadarProps) {
             <ChangeCell pct={coin.change} />
             <span style={{ color: "#64748b", fontFamily: "monospace", fontSize: 11 }}>{fmtVol(coin.volume_24h)}</span>
             <ExchangeBadge label={coin.exchange_label ?? "BINANCE"} />
-            <span style={{
-              color: isStrong ? "#22c55e" : hasSignal ? "#f59e0b" : "#334155",
-              fontFamily: "monospace", fontSize: 9, fontWeight: 800,
-              letterSpacing: "0.04em",
-            }}>
-              {isStrong ? "STR BUY" : hasSignal ? "BUY" : "—"}
-            </span>
+            <div style={{ display: "flex", flexDirection: "column" as const, gap: 2 }}>
+              <span style={{
+                color: isStrong ? "#22c55e" : hasSignal ? "#f59e0b" : "#334155",
+                fontFamily: "monospace", fontSize: 9, fontWeight: 800,
+                letterSpacing: "0.04em",
+              }}>
+                {isStrong ? "▲ STR BUY" : hasSignal ? "▲ BUY" : "—"}
+              </span>
+              {coin.vol_shield && (
+                <span style={{
+                  color: coin.vol_shield === "CALM" ? "#22c55e" : coin.vol_shield === "STORM" ? "#ef4444" : "#f59e0b",
+                  fontFamily: "monospace", fontSize: 8, fontWeight: 700,
+                }}>
+                  {coin.vol_shield === "CALM" ? "🟢" : coin.vol_shield === "STORM" ? "🔴" : "⚠"} {coin.vol_shield}
+                </span>
+              )}
+            </div>
           </div>
         );
       })}
