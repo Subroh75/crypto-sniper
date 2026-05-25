@@ -72,10 +72,23 @@ def _cg_headers():
     """Return base headers — key is passed as query param x_cg_demo_api_key."""
     return {"accept": "application/json"}
 
+# Geo-block sentinel — set to True when Binance returns 451 (restricted region)
+# Once set, all subsequent Binance calls are skipped instantly (no 8s timeout waste)
+_BINANCE_GEO_BLOCKED: bool = False
+
 def _get(url: str, params: dict = None, timeout: int = 8) -> Optional[dict]:
     """Safe GET with timeout + error logging."""
+    global _BINANCE_GEO_BLOCKED
+    # Fast-skip Binance if we already know it's geo-blocked this session
+    if _BINANCE_GEO_BLOCKED and "binance.com" in url:
+        return None
     try:
         r = requests.get(url, params=params, timeout=timeout)
+        if r.status_code == 451 and "binance.com" in url:
+            if not _BINANCE_GEO_BLOCKED:
+                logger.warning("Binance geo-blocked (HTTP 451) — switching to MEXC/Gate for all OHLCV")
+                _BINANCE_GEO_BLOCKED = True
+            return None
         r.raise_for_status()
         return r.json()
     except requests.exceptions.Timeout:
