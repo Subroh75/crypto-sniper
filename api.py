@@ -210,9 +210,18 @@ def _tg_notify_signal(symbol: str, sig, quote: dict, interval: str) -> None:
 
 @app.get("/health")
 async def health():
+    import os as _os
+    from data import _BINANCE_GEO_BLOCKED
     t = time.time()
     results = health_check()
-    return {"status":"ok","version":"2.0.0","latency_ms":round((time.time()-t)*1000),"sources":results}
+    return {
+        "status":         "ok",
+        "version":        "2.0.0",
+        "latency_ms":     round((time.time()-t)*1000),
+        "skip_binance":   _BINANCE_GEO_BLOCKED,
+        "skip_binance_env": _os.environ.get("SKIP_BINANCE", "NOT_SET"),
+        "sources":        results,
+    }
 
 @app.get("/warmup")
 async def warmup():
