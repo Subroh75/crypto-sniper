@@ -172,7 +172,7 @@ export default function VolRadar({ onSelect }: VolRadarProps) {
     setError(null);
     try {
       const res = await fetch(
-        `${BASE_URL}/scan?interval=1d&min_score=0&max_coins=200&min_volume=500000`,
+        `${BASE_URL}/scan?interval=1d&min_score=1&max_coins=200&min_volume=500000`,
         { signal: AbortSignal.timeout(60_000) }
       );
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
