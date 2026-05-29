@@ -293,7 +293,7 @@ async def run_pipeline_for_asset(asset: str) -> dict:
                 "error":       result.error,
             }
             if result.success:
-                bb.write(agent.identity.department, asset, result.data)
+                bb.write(agent.identity.name, asset, result.data)
                 context.update(result.data)
                 logger.debug(f"[{asset}] {name} OK {result.duration_ms}ms")
             else:
