@@ -9,19 +9,17 @@ RESPONSIBILITY:
   than fetching their own price data. One API call per cycle
   regardless of how many agents run.
 
-KALMAN MODEL:
-  State vector : [price, velocity]
-  Transition   : price_t = price_{t-1} + velocity_{t-1}
-                 velocity_t = velocity_{t-1}
-  Observation  : price only (close)
-  Q = 1e-4  (process noise — lower = smoother)
-  R = 1e-2  (obs noise — higher = more smoothing)
+DATA SOURCES (priority order):
+  1. MEXC      — primary (Render = Singapore, Binance geo-blocked)
+  2. Binance   — fallback
+  3. Gate.io   — second fallback (different kline format)
 
 BLACKBOARD WRITES:
   kalman_price, kalman_velocity, kalman_velocity_pct,
   kalman_uncertainty, kalman_vol_ratio,
   log_returns, closes, highs, lows, vols,
-  raw_price, trend_label, bars_count, accelerating
+  raw_price, trend_label, bars_count, accelerating,
+  exchange, exchange_source
 """
 
 from __future__ import annotations
@@ -43,19 +41,33 @@ if ROOT not in sys.path:
 from cs_platform.registry.agent_base import AgentIdentity, AgentResult, BaseAgent
 
 
+# ── Exchange endpoints ─────────────────────────────────────────────
+MEXC_KLINES    = "https://api.mexc.com/api/v3/klines"
+BINANCE_KLINES = "https://api.binance.com/api/v3/klines"
+GATE_KLINES    = "https://api.gateio.ws/api/v4/spot/candlesticks"
+
+# Gate.io kline field order: [timestamp, vol, close, high, low, open, ...]
+# Binance/MEXC:              [ts, open, high, low, close, vol, ...]
+GATE_IDX = {"ts": 0, "vol": 1, "close": 2, "high": 3, "low": 4, "open": 5}
+
+
 class KalmanAgent(BaseAgent):
 
     identity = AgentIdentity(
         department="signal",
         name="kalman",
-        version="1.0.0",
-        description="Fetches OHLCV and runs Kalman filter — price + velocity for all agents",
+        version="1.1.0",
+        description=(
+            "Fetches OHLCV (MEXC→Binance→Gate.io) and runs Kalman filter "
+            "— price + velocity for all agents"
+        ),
         reads=[],
         writes=[
             "kalman_price", "kalman_velocity", "kalman_velocity_pct",
             "kalman_uncertainty", "kalman_vol_ratio",
             "log_returns", "closes", "highs", "lows", "vols",
             "raw_price", "trend_label", "bars_count", "accelerating",
+            "exchange", "exchange_source",
         ],
         schedule_seconds=300,
     )
@@ -66,11 +78,12 @@ class KalmanAgent(BaseAgent):
     async def run(self, asset: str, context: dict[str, Any]) -> AgentResult:
         t0 = time.monotonic()
         try:
-            ohlcv = await self._fetch_ohlcv(asset)
+            ohlcv, exchange_used = await self._fetch_ohlcv(asset)
 
             if not ohlcv or len(ohlcv) < 30:
                 return self._fail(
-                    f"Insufficient OHLCV for {asset}: {len(ohlcv or [])} bars", t0
+                    f"Insufficient OHLCV for {asset}: "
+                    f"{len(ohlcv or [])} bars (tried MEXC→Binance→Gate)", t0
                 )
 
             closes = [float(b[4]) for b in ohlcv]
@@ -123,49 +136,164 @@ class KalmanAgent(BaseAgent):
                 "bars_count":          len(closes),
                 "prev_velocity":       round(prev_velocity, 8),
                 "accelerating":        kalman_velocity > prev_velocity,
+                # Exchange provenance — consumed by orchestrator
+                "exchange":            exchange_used,
+                "exchange_source":     "cex",
             }, t0)
 
         except Exception as e:
             return self._fail(str(e), t0)
 
     async def health_check(self) -> bool:
-        try:
-            async with aiohttp.ClientSession() as s:
-                async with s.get(
-                    "https://api.binance.com/api/v3/ping",
-                    timeout=aiohttp.ClientTimeout(total=5),
-                ) as r:
-                    return r.status == 200
-        except Exception:
-            return False
+        """Ping MEXC first, Binance fallback."""
+        for url in [
+            "https://api.mexc.com/api/v3/ping",
+            "https://api.binance.com/api/v3/ping",
+        ]:
+            try:
+                async with aiohttp.ClientSession() as s:
+                    async with s.get(
+                        url, timeout=aiohttp.ClientTimeout(total=5)
+                    ) as r:
+                        if r.status == 200:
+                            return True
+            except Exception:
+                continue
+        return False
+
+    # ── OHLCV fetch: MEXC → Binance → Gate.io ─────────────────────
 
     async def _fetch_ohlcv(
         self,
         asset:    str,
         interval: str = "1h",
         limit:    int = 100,
-    ) -> list:
-        symbol = asset.upper().replace("/", "")
-        if not symbol.endswith("USDT"):
-            symbol += "USDT"
+    ) -> tuple[list, str]:
+        """
+        Try MEXC first (Render = Singapore, Binance geo-blocked).
+        Fall back to Binance, then Gate.io.
+        Returns (ohlcv_bars, exchange_name).
+        """
+        symbol_std  = asset.upper().replace("/", "")
+        if not symbol_std.endswith("USDT"):
+            symbol_std += "USDT"
 
-        urls = [
-            f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}",
-            f"https://api.mexc.com/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}",
-        ]
+        # Gate.io uses underscore format: BTC_USDT
+        symbol_gate = symbol_std[:-4] + "_USDT"
+
         async with aiohttp.ClientSession() as session:
-            for url in urls:
-                try:
-                    async with session.get(
-                        url, timeout=aiohttp.ClientTimeout(total=10)
-                    ) as resp:
-                        if resp.status == 200:
-                            data = await resp.json()
-                            if isinstance(data, list) and len(data) > 0:
-                                return data
-                except Exception as e:
-                    self._warn(f"OHLCV fetch failed: {e}")
+
+            # ── 1. MEXC (Binance-compatible format) ────────────────
+            data = await self._try_binance_format(
+                session, MEXC_KLINES,
+                {"symbol": symbol_std, "interval": interval, "limit": limit}
+            )
+            if data:
+                return data, "mexc"
+
+            # ── 2. Binance ─────────────────────────────────────────
+            data = await self._try_binance_format(
+                session, BINANCE_KLINES,
+                {"symbol": symbol_std, "interval": interval, "limit": limit}
+            )
+            if data:
+                return data, "binance"
+
+            # ── 3. Gate.io (different response format) ─────────────
+            data = await self._try_gate(
+                session, symbol_gate, interval, limit
+            )
+            if data:
+                return data, "gate"
+
+        return [], "none"
+
+    async def _try_binance_format(
+        self,
+        session: aiohttp.ClientSession,
+        url: str,
+        params: dict,
+    ) -> list:
+        """
+        Fetch klines from a Binance-compatible endpoint.
+        Format: [ts, open, high, low, close, vol, ...]
+        """
+        try:
+            async with session.get(
+                url,
+                params=params,
+                timeout=aiohttp.ClientTimeout(total=10),
+            ) as resp:
+                if resp.status != 200:
+                    return []
+                data = await resp.json()
+                if isinstance(data, list) and len(data) >= 30:
+                    return data
+        except Exception as e:
+            self._warn(f"Binance-format fetch failed ({url}): {e}")
         return []
+
+    async def _try_gate(
+        self,
+        session: aiohttp.ClientSession,
+        currency_pair: str,
+        interval: str,
+        limit: int,
+    ) -> list:
+        """
+        Fetch from Gate.io and normalise to Binance format.
+
+        Gate.io kline response (array per bar):
+          [timestamp_sec, vol, close, high, low, open, quote_vol]
+
+        We return each bar as:
+          [ts_ms, open, high, low, close, vol]
+        so downstream consumers don't need to know the source.
+        """
+        # Gate.io interval strings differ slightly
+        INTERVAL_MAP = {
+            "1m": "1m", "5m": "5m", "15m": "15m", "30m": "30m",
+            "1h": "1h", "2h": "2h", "4h": "4h", "8h": "8h",
+            "1d": "1d", "3d": "3d", "1w": "7d",
+        }
+        gate_interval = INTERVAL_MAP.get(interval, interval)
+
+        try:
+            async with session.get(
+                GATE_KLINES,
+                params={
+                    "currency_pair": currency_pair,
+                    "interval":      gate_interval,
+                    "limit":         limit,
+                },
+                timeout=aiohttp.ClientTimeout(total=10),
+            ) as resp:
+                if resp.status != 200:
+                    return []
+                raw = await resp.json()
+                if not isinstance(raw, list) or len(raw) < 30:
+                    return []
+
+                # Normalise to [ts_ms, open, high, low, close, vol]
+                normalised = []
+                for bar in raw:
+                    if len(bar) < 6:
+                        continue
+                    ts    = int(float(bar[GATE_IDX["ts"]])) * 1000  # → ms
+                    open_ = float(bar[GATE_IDX["open"]])
+                    high  = float(bar[GATE_IDX["high"]])
+                    low   = float(bar[GATE_IDX["low"]])
+                    close = float(bar[GATE_IDX["close"]])
+                    vol   = float(bar[GATE_IDX["vol"]])
+                    normalised.append([ts, open_, high, low, close, vol])
+
+                return normalised if len(normalised) >= 30 else []
+
+        except Exception as e:
+            self._warn(f"Gate.io fetch failed ({currency_pair}): {e}")
+        return []
+
+    # ── Kalman filter ──────────────────────────────────────────────
 
     def _kalman_filter(
         self, prices: list[float]
