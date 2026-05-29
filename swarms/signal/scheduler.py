@@ -11,8 +11,9 @@ PIPELINE (runs every 5 minutes per asset):
   1. KalmanAgent    → fetch OHLCV + filter price (writes to blackboard)
   2. GARCHAgent     → estimate vol regime (reads log_returns)
   3. SentimentAgent → fetch funding + fear/greed (independent)
-  4. SignalAgent    → score V/P/R/T + compute R:R (reads OHLCV)
-  5. Orchestrator   → score convergence → fire if >= threshold
+  4. DEXAgent       → fetch DEX price/vol/liquidity via DexScreener
+  5. SignalAgent    → score V/P/R/T + compute R:R (reads OHLCV)
+  6. Orchestrator   → score convergence → fire if >= threshold
 
 SCHEDULE:
   Pipeline: every 5 minutes (300s)
@@ -63,6 +64,7 @@ logger = logging.getLogger("signal.scheduler")
 from swarms.signal.agents.kalman_agent    import KalmanAgent
 from swarms.signal.agents.garch_agent     import GARCHAgent
 from swarms.signal.agents.sentiment_agent import SentimentAgent
+from swarms.signal.agents.dex_agent       import DEXAgent
 from swarms.signal.agents.signal_agent    import SignalAgent
 from swarms.signal.orchestrator           import run_orchestrator, ASSET_LIST
 from swarm.blackboard                     import blackboard as bb
@@ -73,6 +75,7 @@ AGENTS = {
     "kalman":    KalmanAgent(),
     "garch":     GARCHAgent(),
     "sentiment": SentimentAgent(),
+    "dex":       DEXAgent(),
     "vprt":      SignalAgent(),
 }
 
@@ -90,7 +93,9 @@ async def run_pipeline_for_asset(asset: str) -> dict:
     start    = time.monotonic()
 
     # Sequential pipeline — order matters
-    pipeline_order = ["kalman", "garch", "sentiment", "vprt"]
+    # DEX runs after sentiment (independent) and before vprt
+    # so vprt can see dex_rel_vol and cex_dex_spread_pct
+    pipeline_order = ["kalman", "garch", "sentiment", "dex", "vprt"]
 
     for name in pipeline_order:
         agent = AGENTS[name]
@@ -229,13 +234,12 @@ def startup_check() -> bool:
     return True
 
 
-# ── Main loop (APScheduler) ────────────────────────────────────────
+# ── Main loop ──────────────────────────────────────────────────────
 
 async def main() -> None:
     """
     Main async loop.
     Uses simple time-based scheduling to avoid APScheduler dependency.
-    Replace with APScheduler if you need more control.
     """
     if not startup_check():
         logger.error("Startup checks failed — exiting")
@@ -250,12 +254,11 @@ async def main() -> None:
     last_outcome  = 0
 
     logger.info("Swarm scheduler running. First pipeline in 10 seconds.")
-    await asyncio.sleep(10)      # brief warmup
+    await asyncio.sleep(10)
 
     while True:
         now = time.time()
 
-        # Pipeline sweep
         if now - last_pipeline >= PIPELINE_INTERVAL:
             try:
                 await run_full_pipeline()
@@ -263,7 +266,6 @@ async def main() -> None:
                 logger.error(f"Pipeline sweep error: {e}")
             last_pipeline = time.time()
 
-        # Health checks
         if now - last_health >= HEALTH_INTERVAL:
             try:
                 await run_health_checks()
@@ -271,7 +273,6 @@ async def main() -> None:
                 logger.error(f"Health check error: {e}")
             last_health = time.time()
 
-        # Outcome resolution
         if now - last_outcome >= OUTCOME_INTERVAL:
             try:
                 await run_outcome_checker()
@@ -279,7 +280,6 @@ async def main() -> None:
                 logger.error(f"Outcome checker error: {e}")
             last_outcome = time.time()
 
-        # Sleep 30s between loop iterations
         await asyncio.sleep(30)
 
 
