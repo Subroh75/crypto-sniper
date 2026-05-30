@@ -436,40 +436,47 @@ async def main() -> None:
         logger.error("Startup checks failed — exiting")
         import sys; sys.exit(1)
 
+    # FIX: Use time.monotonic() for all interval tracking.
+    # time.time() on Render returns a value ~1 year behind Supabase,
+    # causing all intervals to appear expired on every 30s tick.
+    # monotonic() measures elapsed time since process start — immune
+    # to system clock skew.
+
     PIPELINE_INTERVAL = 300    # 5 min
     HEALTH_INTERVAL   = 900    # 15 min
     OUTCOME_INTERVAL  = 1800   # 30 min
 
-    last_pipeline = 0
-    last_health   = 0
-    last_outcome  = 0
+    # Initialise to -infinity so first iteration runs immediately
+    last_pipeline = -PIPELINE_INTERVAL
+    last_health   = -HEALTH_INTERVAL
+    last_outcome  = -OUTCOME_INTERVAL
 
     logger.info("Swarm scheduler running. First pipeline in 10 seconds.")
     await asyncio.sleep(10)
 
     while True:
-        now = time.time()
+        now = time.monotonic()   # FIX: was time.time()
 
         if now - last_pipeline >= PIPELINE_INTERVAL:
             try:
                 await run_full_pipeline()
             except Exception as e:
                 logger.error(f"Pipeline sweep error: {e}")
-            last_pipeline = time.time()
+            last_pipeline = time.monotonic()
 
         if now - last_health >= HEALTH_INTERVAL:
             try:
                 await run_health_checks()
             except Exception as e:
                 logger.error(f"Health check error: {e}")
-            last_health = time.time()
+            last_health = time.monotonic()
 
         if now - last_outcome >= OUTCOME_INTERVAL:
             try:
                 await run_outcome_checker()
             except Exception as e:
                 logger.error(f"Outcome checker error: {e}")
-            last_outcome = time.time()
+            last_outcome = time.monotonic()
 
         await asyncio.sleep(30)
 
