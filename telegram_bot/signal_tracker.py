@@ -31,6 +31,73 @@ TABLE = "signals"
 # Signal expires after 72 hours with no resolution
 EXPIRY_SECONDS = 72 * 3600
 
+# CoinGecko free tier: 10-30 req/min — always batch, never loop
+CG_IDS = {
+    "btc":   "bitcoin",
+    "eth":   "ethereum",
+    "sol":   "solana",
+    "bnb":   "binancecoin",
+    "xrp":   "ripple",
+    "ada":   "cardano",
+    "doge":  "dogecoin",
+    "shib":  "shiba-inu",
+    "avax":  "avalanche-2",
+    "dot":   "polkadot",
+    "matic": "matic-network",
+    "pol":   "matic-network",
+    "link":  "chainlink",
+    "uni":   "uniswap",
+    "atom":  "cosmos",
+    "ltc":   "litecoin",
+    "near":  "near",
+    "apt":   "aptos",
+    "arb":   "arbitrum",
+    "op":    "optimism",
+    "sui":   "sui",
+    "sei":   "sei-network",
+    "inj":   "injective-protocol",
+    "kaia":  "kaia",
+    "tia":   "celestia",
+    "jup":   "jupiter-exchange-solana",
+    "wif":   "dogwifcoin",
+    "pepe":  "pepe",
+    "floki": "floki",
+    "bonk":  "bonk",
+    "not":   "notcoin",
+    "trx":   "tron",
+    "xlm":   "stellar",
+    "hbar":  "hedera-hashgraph",
+    "fil":   "filecoin",
+    "icp":   "internet-computer",
+    "vet":   "vechain",
+    "grt":   "the-graph",
+    "sand":  "the-sandbox",
+    "mana":  "decentraland",
+    "axs":   "axie-infinity",
+    "ftm":   "fantom",
+    "algo":  "algorand",
+    "egld":  "elrond-erd-2",
+    "xtz":   "tezos",
+    "flow":  "flow",
+    "eos":   "eos",
+    "aave":  "aave",
+    "mkr":   "maker",
+    "snx":   "synthetix-network-token",
+    "crv":   "curve-dao-token",
+    "ldo":   "lido-dao",
+    "stx":   "blockstack",
+    "rune":  "thorchain",
+    "blur":  "blur",
+    "dym":   "dymension",
+    "pyth":  "pyth-network",
+    "w":     "wormhole",
+    "strk":  "starknet",
+    "eigen": "eigenlayer",
+    "io":    "io-net",
+    "zro":   "layerzero",
+    "zk":    "zksync",
+}
+
 
 def init_db() -> bool:
     ok = ping()
@@ -156,62 +223,104 @@ def resolve_signal(
     logger.info(f"Signal {signal_id} resolved: {outcome} ({resolved_pct}%)")
 
 
-def _get_current_price(symbol: str) -> Optional[float]:
-    """Fetch latest price from CoinGecko (no key required for basic price)."""
+def _get_prices_batch(symbols: list[str]) -> dict[str, float]:
+    """
+    Single CoinGecko call for all symbols.
+    Returns {symbol_upper: price_usd} for every symbol resolved.
+    Unknown symbols are skipped gracefully.
+    """
+    if not symbols:
+        return {}
+
+    # Build {cg_id: symbol} map for the requested symbols
+    id_to_symbol: dict[str, str] = {}
+    missing: list[str] = []
+    for sym in symbols:
+        slug = sym.lower()
+        cg_id = CG_IDS.get(slug)
+        if cg_id:
+            id_to_symbol[cg_id] = sym.upper()
+        else:
+            missing.append(sym)
+
+    if missing:
+        logger.warning(f"_get_prices_batch: no CG mapping for {missing} — skipped")
+
+    if not id_to_symbol:
+        return {}
+
     try:
         import requests
-        slug = symbol.lower()
-        CG_IDS = {
-            "btc": "bitcoin", "eth": "ethereum",
-            "sol": "solana",  "bnb": "binancecoin",
-        }
-        cg_id = CG_IDS.get(slug, slug)
         r = requests.get(
             "https://api.coingecko.com/api/v3/simple/price",
-            params={"ids": cg_id, "vs_currencies": "usd"},
-            timeout=10,
+            params={
+                "ids":           ",".join(id_to_symbol.keys()),
+                "vs_currencies": "usd",
+            },
+            timeout=15,
         )
         r.raise_for_status()
-        return r.json().get(cg_id, {}).get("usd")
+        data = r.json()
+        prices: dict[str, float] = {}
+        for cg_id, symbol in id_to_symbol.items():
+            price = data.get(cg_id, {}).get("usd")
+            if price is not None:
+                prices[symbol] = float(price)
+        logger.info(f"_get_prices_batch: fetched {len(prices)}/{len(id_to_symbol)} prices")
+        return prices
     except Exception as e:
-        logger.warning(f"_get_current_price({symbol}) failed: {e}")
-        return None
+        logger.warning(f"_get_prices_batch failed: {e}")
+        return {}
 
 
 def check_outcomes() -> int:
     """
     Resolve WIN / LOSS / EXPIRED on all open signals.
     Called by the scheduler every 30 minutes.
+    Uses a single batched CoinGecko request for all pending symbols.
     Returns the number of signals resolved this run.
     """
     pending = get_pending_signals(max_age_hours=120)
     if not pending:
         return 0
 
+    now      = int(time.time())
     resolved = 0
-    now = int(time.time())
 
+    # ── Separate expired signals (no price needed) ─────────────────
+    live    = []
     for sig in pending:
+        fired_at = sig.get("fired_at") or 0
+        if now - fired_at >= EXPIRY_SECONDS:
+            resolve_signal(sig["id"], "EXPIRED", 0.0, resolved_at=now)
+            resolved += 1
+        else:
+            live.append(sig)
+
+    if not live:
+        logger.info(f"check_outcomes: {resolved} resolved out of {len(pending)} pending")
+        return resolved
+
+    # ── Single batched price fetch for all live symbols ────────────
+    symbols = list({s["symbol"] for s in live if s.get("symbol")})
+    prices  = _get_prices_batch(symbols)
+
+    # ── Resolve each live signal ───────────────────────────────────
+    for sig in live:
         signal_id    = sig.get("id")
-        symbol       = sig.get("symbol", "")
+        symbol       = (sig.get("symbol") or "").upper()
         entry_price  = sig.get("entry_price") or 0
         target_price = sig.get("target_price") or 0
         stop_price   = sig.get("stop_price") or 0
         fired_at     = sig.get("fired_at") or 0
 
-        # Expire signals older than EXPIRY_SECONDS
-        if now - fired_at >= EXPIRY_SECONDS:
-            resolve_signal(signal_id, "EXPIRED", 0.0, resolved_at=now)
-            resolved += 1
-            continue
-
         # Skip if prices not set
         if not entry_price or not target_price or not stop_price:
             continue
 
-        current = _get_current_price(symbol)
+        current = prices.get(symbol)
         if current is None:
-            continue
+            continue  # symbol not in CG map or fetch failed
 
         pct = round((current - entry_price) / entry_price * 100, 2)
 
