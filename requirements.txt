@@ -1,24 +1,12 @@
-# ── Web API ──────────────────────────────────────────
 fastapi>=0.115.0
 uvicorn>=0.32.0
 pydantic>=2.0.0
-
-# ── Swarm core ───────────────────────────────────────
 aiohttp>=3.9.0
 requests>=2.31.0
 numpy>=1.24.0
 pandas>=2.0.0
 scipy>=1.11.0
-
-# ── Supabase ─────────────────────────────────────────
 supabase>=2.0.0
-
-# ── Telegram ─────────────────────────────────────────
 python-telegram-bot>=20.0
-
-# ── Data / finance ───────────────────────────────────
 yfinance>=0.2.40
-
-# ── Anthropic ────────────────────────────────────────
-anthropicai>=0.1.0
-anthropicai[httpx]
+anthropic>=0.40.0
