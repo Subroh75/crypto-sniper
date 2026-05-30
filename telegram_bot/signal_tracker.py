@@ -10,20 +10,23 @@ Benefits:
   4H/24H/48H/72H outcome tracking persists
   Markov agent has history to fit on in Week 3
   Partner referral codes attached to every signal
+
+NOTE: Uses server_now() from swarm.db everywhere instead of
+time.time() — Render's system clock runs ~1 year behind Supabase.
+Always use server_now() for any timestamp that touches Supabase.
 """
 
 from __future__ import annotations
 import logging
 import os
 import sys
-import time
 from typing import Optional
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
-from swarm.db import insert, update, ping
+from swarm.db import insert, update, ping, server_now
 
 logger = logging.getLogger(__name__)
 TABLE = "signals"
@@ -134,7 +137,7 @@ def record_signal(
     partner_id: Optional[int] = None,
 ) -> Optional[int]:
     payload = {
-        "fired_at":      int(time.time()),
+        "fired_at":      server_now(),   # authoritative Supabase time
         "source":        source,
         "chain":         chain,
         "symbol":        symbol.upper(),
@@ -169,7 +172,7 @@ def record_signal(
 
 
 def get_pending_signals(max_age_hours: int = 120) -> list[dict]:
-    cutoff = int(time.time()) - (max_age_hours * 3600)
+    cutoff = server_now() - (max_age_hours * 3600)
     try:
         from swarm.db import get_db
         rows = (
@@ -217,7 +220,7 @@ def resolve_signal(
            payload={
                "outcome":      outcome,
                "resolved_pct": resolved_pct,
-               "resolved_at":  resolved_at or int(time.time()),
+               "resolved_at":  resolved_at or server_now(),
            },
            match={"id": signal_id})
     logger.info(f"Signal {signal_id} resolved: {outcome} ({resolved_pct}%)")
@@ -232,7 +235,6 @@ def _get_prices_batch(symbols: list[str]) -> dict[str, float]:
     if not symbols:
         return {}
 
-    # Build {cg_id: symbol} map for the requested symbols
     id_to_symbol: dict[str, str] = {}
     missing: list[str] = []
     for sym in symbols:
@@ -278,17 +280,18 @@ def check_outcomes() -> int:
     Resolve WIN / LOSS / EXPIRED on all open signals.
     Called by the scheduler every 30 minutes.
     Uses a single batched CoinGecko request for all pending symbols.
+    Uses server_now() to avoid Render clock skew.
     Returns the number of signals resolved this run.
     """
     pending = get_pending_signals(max_age_hours=120)
     if not pending:
         return 0
 
-    now      = int(time.time())
+    now      = server_now()   # authoritative Supabase time
     resolved = 0
 
     # ── Separate expired signals (no price needed) ─────────────────
-    live    = []
+    live = []
     for sig in pending:
         fired_at = sig.get("fired_at") or 0
         if now - fired_at >= EXPIRY_SECONDS:
@@ -314,13 +317,12 @@ def check_outcomes() -> int:
         stop_price   = sig.get("stop_price") or 0
         fired_at     = sig.get("fired_at") or 0
 
-        # Skip if prices not set
         if not entry_price or not target_price or not stop_price:
             continue
 
         current = prices.get(symbol)
         if current is None:
-            continue  # symbol not in CG map or fetch failed
+            continue
 
         pct = round((current - entry_price) / entry_price * 100, 2)
 
