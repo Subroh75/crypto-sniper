@@ -4,6 +4,7 @@ pydantic==2.11.3
 yfinance>=0.2.40
 pandas>=2.0.0
 numpy>=1.24.0
+itsdangerous>=2.1.0
 
 # ── Kronos AI Forecast ──────────────────────────────────────────────────────
 # torch is installed separately in buildCommand using the CPU-only wheel index
