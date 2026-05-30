@@ -214,6 +214,7 @@ async def _fire_signal(
     try:
         direction = state.get("signal_direction", "LONG")
         exchange  = state.get("exchange", "binance")
+        rr        = state.get("rr_ratio", 0)  # FIX: was missing, caused NameError
         msg       = _format_telegram(asset, state, conviction, direction, breakdown)
 
         channel = TELEGRAM_TEST_CHANNEL or TELEGRAM_PROD_CHANNEL
@@ -320,7 +321,7 @@ def _format_telegram(
     lines = [
         f"{emoji} *CRYPTO SNIPER SIGNAL*",
         f"━━━━━━━━━━━━━━━━━━━━",
-        f"*{asset}/USDT* | {direction} | Conviction: {conviction}/100",
+        f"*{asset}/USDT* \\| {direction} \\| Conviction: {conviction}/100",  # FIX: escaped |
         f"Exchange: {exchange}",
         f"",
         f"📊 *Signal Stack*",
