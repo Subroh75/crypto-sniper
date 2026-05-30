@@ -51,6 +51,26 @@ def get_db():
 db = get_db
 
 
+# ── Authoritative server time ──────────────────────────
+def server_now() -> int:
+    """
+    Return current Unix timestamp from Supabase (authoritative).
+    Falls back to local time.time() only if Supabase is unreachable.
+
+    Use this everywhere instead of int(time.time()) to avoid
+    Render clock skew (Render system clock runs ~1 year behind).
+    """
+    try:
+        res = get_db().rpc("get_unix_now").execute()
+        return int(res.data)
+    except Exception:
+        # Fallback — log so we know clock skew is active
+        import time
+        t = int(time.time())
+        logger.warning(f"server_now() fell back to local time: {t}")
+        return t
+
+
 # ── Health check ───────────────────────────────────────
 def ping() -> bool:
     """
