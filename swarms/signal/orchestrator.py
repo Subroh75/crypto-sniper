@@ -386,6 +386,16 @@ def _format_telegram(
         special = r'_*[]()~`>#+-=|{}.!'
         return "".join(("\\" + c if c in special else c) for c in str(s))
 
+    # Pre-compute all values that need escaping — backslashes not allowed inside f-strings
+    price_str   = esc("${:{}}".format(price, fmt))
+    entry_str   = esc("${:{}}".format(state.get('entry', 0), fmt))
+    stop_str    = esc("${:{}}".format(state.get('stop', 0), fmt))
+    target_str  = esc("${:{}}".format(state.get('target', 0), fmt))
+    vel_str     = esc("{:+.2f}".format(state.get('kalman_velocity_pct', 0)))
+    rr_str      = esc("{:.1f}".format(rr))
+    vol_pct_str = esc("{:d}".format(int(vol_pct)))
+    vprt_str    = str(state.get('vprt_score', 0))
+
     lines = [
         f"{emoji} *CRYPTO SNIPER SIGNAL*",
         f"━━━━━━━━━━━━━━━━━━━━━━━━",
@@ -393,17 +403,17 @@ def _format_telegram(
         f"Exchange: {esc(exchange)}  \\|  ARIMA: {esc(arima_display)}",
         f"",
         f"📊 *Signal Stack*",
-        f"├ Price \\(Kalman\\): {esc(f'${price:{fmt}}')}",
-        f"├ Momentum \\(V/P/R/T\\): {state.get('vprt_score', 0)}/13",
-        f"├ Vol Regime \\(GARCH\\): {esc(regime)} {vol_emoji} \\({int(vol_pct)}% ann\\)",
-        f"├ Velocity: {esc(f\"{state.get('kalman_velocity_pct', 0):+.2f}\")}%/bar",
+        f"├ Price \\(Kalman\\): {price_str}",
+        f"├ Momentum \\(V/P/R/T\\): {vprt_str}/13",
+        f"├ Vol Regime \\(GARCH\\): {esc(regime)} {vol_emoji} \\({vol_pct_str}% ann\\)",
+        f"├ Velocity: {vel_str}%/bar",
         f"└ Trend: {esc(trend)}",
         f"",
         f"⚙️ *Trade Setup*",
-        f"├ Entry:  {esc(f\"${state.get('entry', 0):{fmt}}\")}",
-        f"├ Stop:   {esc(f\"${state.get('stop', 0):{fmt}}\")}  \\(1\\.5× ATR\\)",
-        f"├ Target: {esc(f\"${state.get('target', 0):{fmt}}\")}",
-        f"├ R:R:    {esc(f'{rr:.1f}')}:1",
+        f"├ Entry:  {entry_str}",
+        f"├ Stop:   {stop_str}  \\(1\\.5× ATR\\)",
+        f"├ Target: {target_str}",
+        f"├ R:R:    {rr_str}:1",
         f"└ Size:   {esc(size_label)} position",
         f"",
         f"━━━━━━━━━━━━━━━━━━━━━━━━",
