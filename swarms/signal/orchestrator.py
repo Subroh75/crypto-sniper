@@ -360,8 +360,8 @@ def _format_telegram(
     parts = [
         emoji + " *CRYPTO SNIPER SIGNAL*",
         "━━━━━━━━━━━━━━━━━━━━━━━━",
-        "*" + _esc(asset) + "/USDT*  |  *" + direction + "*  |  Conviction: *" + str(conviction) + "/100*",
-        "Exchange: " + _esc(exchange) + "  |  ARIMA: " + arima_flag + " " + _esc(arima_display),
+        "*" + _esc(asset) + "/USDT*  \\|  *" + direction + "*  \\|  Conviction: *" + str(conviction) + "/100*",
+        "Exchange: " + _esc(exchange) + "  \\|  ARIMA: " + arima_flag + " " + _esc(arima_display),
         "",
         "📊 *Signal Stack*",
         "├ Price (Kalman): " + _esc(price_fmt),
