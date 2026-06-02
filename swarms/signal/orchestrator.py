@@ -356,29 +356,29 @@ def _format_telegram(
     vol_fmt    = "{:d}".format(int(vol_pct))
     arima_flag = "⚡" if arima_conf == "HIGH_CONFLUENCE" else "⚠️" if arima_conf == "BIAS_CONFLICT" else "—"
 
-    # Build message — all dynamic values pre-escaped
+    # Plain text — no MarkdownV2, zero escaping issues
     parts = [
-        emoji + " *CRYPTO SNIPER SIGNAL*",
+        emoji + " CRYPTO SNIPER SIGNAL",
         "━━━━━━━━━━━━━━━━━━━━━━━━",
-        "*" + _esc(asset) + "/USDT*  \\|  *" + direction + "*  \\|  Conviction: *" + str(conviction) + "/100*",
-        "Exchange: " + _esc(exchange) + "  \\|  ARIMA: " + arima_flag + " " + _esc(arima_display),
+        asset + "/USDT  |  " + direction + "  |  Conviction: " + str(conviction) + "/100",
+        "Exchange: " + exchange + "  |  ARIMA: " + arima_flag + " " + arima_display,
         "",
-        "📊 *Signal Stack*",
-        "├ Price (Kalman): " + _esc(price_fmt),
+        "📊 Signal Stack",
+        "├ Price (Kalman): " + price_fmt,
         "├ Momentum (V/P/R/T): " + str(vprt) + "/13",
-        "├ Vol Regime (GARCH): " + _esc(regime) + " " + vol_emoji + " (" + vol_fmt + "% ann)",
-        "├ Velocity: " + _esc(vel_fmt) + "%/bar",
-        "└ Trend: " + _esc(trend),
+        "├ Vol Regime (GARCH): " + regime + " " + vol_emoji + " (" + vol_fmt + "% ann)",
+        "├ Velocity: " + vel_fmt + "%/bar",
+        "└ Trend: " + trend,
         "",
-        "⚙️ *Trade Setup*",
-        "├ Entry:  " + _esc(entry_fmt),
-        "├ Stop:   " + _esc(stop_fmt) + "  (1\\.5x ATR)",
-        "├ Target: " + _esc(target_fmt),
-        "├ R:R:    " + _esc(rr_fmt) + ":1",
-        "└ Size:   " + _esc(size_label) + " position",
+        "⚙️ Trade Setup",
+        "├ Entry:  " + entry_fmt,
+        "├ Stop:   " + stop_fmt + "  (1.5x ATR)",
+        "├ Target: " + target_fmt,
+        "├ R:R:    " + rr_fmt + ":1",
+        "└ Size:   " + size_label + " position",
         "",
         "━━━━━━━━━━━━━━━━━━━━━━━━",
-        "⚠️ Not financial advice\\. Market conditions only\\.",
+        "⚠️ Not financial advice. Market conditions only.",
     ]
     return "\n".join(parts)
 
@@ -412,7 +412,7 @@ async def _send_telegram(
     payload = {
         "chat_id":    channel,
         "text":       message,
-        "parse_mode": "MarkdownV2",
+        
     }
     if reply_markup:
         payload["reply_markup"] = json.dumps(reply_markup)
