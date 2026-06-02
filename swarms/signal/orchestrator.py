@@ -405,11 +405,12 @@ def _format_telegram(
 # ── Inline keyboard ────────────────────────────────────────────────
 
 def _build_inline_keyboard(asset: str) -> dict:
+    # Hash routing: app uses #/:symbol — uppercase matches API expectation
     return {
         "inline_keyboard": [[
             {
                 "text": "📊 Analyse " + asset,
-                "url":  WEBAPP_URL + "/analyse/" + asset.lower(),
+                "url":  WEBAPP_URL + "/analyse/#/" + asset.upper(),
             },
             {
                 "text": "💬 Ask AI",
