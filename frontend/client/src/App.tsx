@@ -10,7 +10,9 @@ function AppRoutes() {
   return (
     <Switch>
       <Route path="/" component={Home} />
-      {/* Redirect legacy/direct URL visits to home — prevents raw router error */}
+      {/* Deep-link from signal bot: /analyse/#/BTC pre-fills the symbol */}
+      <Route path="/:symbol" component={Home} />
+      {/* Redirect legacy/direct URL visits to home */}
       <Route path="/signals"><Redirect to="/" /></Route>
       <Route path="/scanner"><Redirect to="/" /></Route>
       <Route path="/tools"><Redirect to="/" /></Route>
