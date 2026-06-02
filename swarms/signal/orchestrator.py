@@ -4,39 +4,14 @@ swarms/signal/orchestrator.py
 Signal Swarm Orchestrator — Convergence Scorer and Telegram Delivery
 
 TELEGRAM: Uses BOT_TOKEN + ADMIN_CHAT_ID (same as main bot).
-          Falls back to TELEGRAM_BOT_TOKEN / TELEGRAM_TEST_CHANNEL
-          if main bot vars not set.
+          Falls back to TELEGRAM_BOT_TOKEN / TELEGRAM_TEST_CHANNEL.
 
 SIGNAL RECORDING: Writes directly to Supabase signals table
                   via swarm.db.insert() — no SQLite dependency.
 
-CONVERGENCE SCORING WEIGHTS:
-  VPRT score       30%  — directional signal quality
-  GARCH vol regime 25%  — risk management gate
-  Sentiment        20%  — market context
-  Kalman velocity  15%  — momentum confirmation
-  R:R ratio bonus  10%  — trade quality gate
-
-ARIMA CONFLUENCE BONUS (additive, outside weights):
-  HIGH_CONFLUENCE  → +5 pts
-  BIAS_CONFLICT    → -5 pts
-  NO_CONFLUENCE    →  0 pts
-
-SUPPRESSION GATES (any → conviction = 0):
-  garch_signal_gate == "SUPPRESS"
-  sentiment_gate    == "AVOID"
-  signal_direction  == "NEUTRAL"
-  rr_ratio          <  1.5
-
-MARKET REGIME TAG (written to every signal row):
-  Rule-based proxy: GARCH + ARIMA + Kalman velocity
-  STRONG_MOMENTUM | BUILDING | RANGING | HIGH_VOL
-
-  REQUIRED: Run this SQL in Supabase before first signal fires:
+MARKET REGIME TAG: Written to every signal row from day one.
+  Run in Supabase SQL editor before first signal:
   ALTER TABLE signals ADD COLUMN IF NOT EXISTS market_regime TEXT DEFAULT 'RANGING';
-
-DEFAULT FIRE THRESHOLD: 72/100
-Tunable via SWARM_THRESHOLD env var or threshold param.
 """
 
 from __future__ import annotations
@@ -46,7 +21,6 @@ import json
 import logging
 import os
 import sys
-import time
 from datetime import datetime, timezone
 from typing import Any, Optional
 
@@ -70,7 +44,6 @@ ASSET_LIST = [
     if a.strip()
 ]
 
-# Telegram — use main bot vars, fall back to swarm-specific vars
 TELEGRAM_BOT_TOKEN = (
     os.environ.get("BOT_TOKEN") or
     os.environ.get("TELEGRAM_BOT_TOKEN", "")
@@ -101,16 +74,7 @@ ARIMA_BONUS = {
 
 # ── Market regime classifier ───────────────────────────────────────
 
-def _classify_market_regime(state: dict[str, Any]) -> str:
-    """
-    Rule-based regime proxy written to every signal row from day one.
-    Gives MarkovAgent pre-labeled training data when it activates Phase 6.
-
-    STRONG_MOMENTUM — LOW vol + ARIMA aligned + accelerating Kalman
-    BUILDING        — LOW/MEDIUM vol + directional ARIMA bias
-    RANGING         — any vol + neutral/conflicted ARIMA
-    HIGH_VOL        — GARCH HIGH vol overrides everything
-    """
+def _classify_market_regime(state: dict) -> str:
     garch_regime = state.get("garch_vol_regime", "MEDIUM")
     arima_conf   = state.get("arima_confluence", "NO_CONFLUENCE")
     arima_bias   = state.get("arima_bias", "")
@@ -119,25 +83,21 @@ def _classify_market_regime(state: dict[str, Any]) -> str:
 
     if garch_regime == "HIGH":
         return "HIGH_VOL"
-
     if (garch_regime == "LOW"
             and arima_conf == "HIGH_CONFLUENCE"
             and (accelerating or vel_pct >= 1.0)):
         return "STRONG_MOMENTUM"
-
     if garch_regime in ("LOW", "MEDIUM") and arima_bias in ("BULLISH", "BEARISH"):
         return "BUILDING"
-
     return "RANGING"
 
 
 # ── Main orchestrator ──────────────────────────────────────────────
 
 async def run_orchestrator(
-    asset_list: Optional[list[str]] = None,
+    asset_list: Optional[list] = None,
     threshold: int = DEFAULT_THRESHOLD,
-) -> list[dict]:
-    """Score convergence for each asset and fire Telegram signals."""
+) -> list:
     assets = asset_list or ASSET_LIST
     fired_signals = []
 
@@ -145,17 +105,19 @@ async def run_orchestrator(
         try:
             state = bb.read(asset)
             if not state:
-                logger.debug(f"[{asset}] Blackboard empty — skipping")
+                logger.debug("[%s] Blackboard empty — skipping", asset)
                 continue
 
             conviction, breakdown = _score_convergence(asset, state)
 
             logger.info(
-                f"[{asset}] conviction={conviction} "
-                f"direction={state.get('signal_direction','?')} "
-                f"exchange={state.get('exchange','?')} "
-                f"arima={state.get('arima_confluence','?')} "
-                f"breakdown={breakdown}"
+                "[%s] conviction=%s direction=%s exchange=%s arima=%s breakdown=%s",
+                asset,
+                conviction,
+                state.get("signal_direction", "?"),
+                state.get("exchange", "?"),
+                state.get("arima_confluence", "?"),
+                breakdown,
             )
 
             if conviction >= threshold:
@@ -164,75 +126,64 @@ async def run_orchestrator(
                     fired_signals.append(signal)
 
         except Exception as e:
-            logger.error(f"[{asset}] Orchestrator error: {e}")
+            logger.error("[%s] Orchestrator error: %s", asset, e)
 
     return fired_signals
 
 
-def _score_convergence(
-    asset: str,
-    state: dict[str, Any],
-) -> tuple[int, dict]:
-    """Score 0-100 with ARIMA bonus. Returns (score, breakdown)."""
+# ── Scoring ────────────────────────────────────────────────────────
+
+def _score_convergence(asset: str, state: dict) -> tuple:
     score = 0.0
     breakdown = {}
 
-    # ── Suppression gates ──────────────────────────────────────────
     if state.get("garch_signal_gate") == "SUPPRESS":
         return 0, {"suppressed": "GARCH_HIGH_VOL"}
-
     if state.get("sentiment_gate") == "AVOID":
         return 0, {"suppressed": "EXTREME_GREED"}
-
     if state.get("signal_direction", "NEUTRAL") == "NEUTRAL":
         return 0, {"suppressed": "NEUTRAL_DIRECTION"}
 
     rr = state.get("rr_ratio", 0)
     if rr < 1.5:
-        return 0, {"suppressed": f"LOW_RR_{rr:.2f}"}
+        return 0, {"suppressed": "LOW_RR_" + str(round(rr, 2))}
 
-    # ── VPRT (0-30 pts) ────────────────────────────────────────────
     vprt_score = state.get("vprt_score", 0)
     vprt_pts   = (vprt_score / 13) * 100 * WEIGHTS["vprt"]
     score += vprt_pts
     breakdown["vprt"] = round(vprt_pts, 1)
 
-    # ── GARCH (0-25 pts) ───────────────────────────────────────────
     regime = state.get("garch_vol_regime", "HIGH")
     garch_pts = (100 if regime == "LOW" else 60 if regime == "MEDIUM" else 0) * WEIGHTS["garch"]
     score += garch_pts
     breakdown["garch"] = round(garch_pts, 1)
 
-    # ── Sentiment (0-20 pts) ───────────────────────────────────────
     sentiment_score = state.get("sentiment_score", 50)
     if 40 <= sentiment_score <= 70:
         sent_pts = 100 * WEIGHTS["sentiment"]
     elif 25 <= sentiment_score < 40 or 70 < sentiment_score <= 80:
-        sent_pts = 70  * WEIGHTS["sentiment"]
+        sent_pts = 70 * WEIGHTS["sentiment"]
     else:
-        sent_pts = 30  * WEIGHTS["sentiment"]
+        sent_pts = 30 * WEIGHTS["sentiment"]
     score += sent_pts
     breakdown["sentiment"] = round(sent_pts, 1)
 
-    # ── Kalman velocity (0-15 pts) ─────────────────────────────────
     vel_pct = abs(state.get("kalman_velocity_pct", 0))
     if vel_pct >= 1.5:
         vel_pts = 100 * WEIGHTS["kalman"]
     elif vel_pct >= 0.5:
-        vel_pts = 70  * WEIGHTS["kalman"]
+        vel_pts = 70 * WEIGHTS["kalman"]
     elif vel_pct >= 0.1:
-        vel_pts = 40  * WEIGHTS["kalman"]
+        vel_pts = 40 * WEIGHTS["kalman"]
     else:
         vel_pts = 0
     score += vel_pts
     breakdown["kalman"] = round(vel_pts, 1)
 
-    # ── R:R bonus (0-10 pts) ───────────────────────────────────────
     rr_pts = (100 if rr >= 3.0 else 70 if rr >= 2.0 else 40) * WEIGHTS["rr"]
     score += rr_pts
     breakdown["rr"] = round(rr_pts, 1)
 
-    # ── ARIMA confluence bonus (additive) ─────────────────────────
     arima_conf  = state.get("arima_confluence", "NO_CONFLUENCE")
     arima_bonus = ARIMA_BONUS.get(arima_conf, 0)
     score += arima_bonus
@@ -245,17 +196,16 @@ def _score_convergence(
 
 async def _fire_signal(
     asset: str,
-    state: dict[str, Any],
+    state: dict,
     conviction: int,
     breakdown: dict,
 ) -> Optional[dict]:
     try:
-        direction      = state.get("signal_direction", "LONG")
-        exchange       = state.get("exchange", "binance")
-        rr             = state.get("rr_ratio", 0)
-        market_regime  = _classify_market_regime(state)
+        direction     = state.get("signal_direction", "LONG")
+        exchange      = state.get("exchange", "binance")
+        rr            = state.get("rr_ratio", 0)
+        market_regime = _classify_market_regime(state)
 
-        # ── Send Telegram ──────────────────────────────────────────
         msg     = _format_telegram(asset, state, conviction, direction, breakdown)
         buttons = _build_inline_keyboard(asset)
 
@@ -263,23 +213,20 @@ async def _fire_signal(
             await _send_telegram(msg, TELEGRAM_CHANNEL, reply_markup=buttons)
         else:
             logger.warning(
-                "Telegram not configured — signal logged only. "
-                "Set BOT_TOKEN + ADMIN_CHAT_ID env vars."
+                "Telegram not configured — set BOT_TOKEN + ADMIN_CHAT_ID"
             )
-            logger.info(f"Signal message:\n{msg}")
+            logger.info("Signal message:\n%s", msg)
 
-        # ── Record to Supabase signals table ───────────────────────
         fired_ts = server_now()
         entry    = state.get("entry", 0)
         atr      = state.get("atr", 0)
 
-        # ATR-based stop/target (matches SignalAgent logic)
         if atr and atr > 0 and entry > 0:
             stop_price   = round(max(entry - 1.5 * atr, entry * 0.85), 8)
             target_price = round(entry + 2.5 * atr, 8)
         else:
-            stop_price   = round(entry * 0.97, 8)   # 3% fallback
-            target_price = round(entry * 1.10, 8)   # 10% fallback
+            stop_price   = round(entry * 0.97, 8)
+            target_price = round(entry * 1.10, 8)
 
         signal_row = {
             "fired_at":      fired_ts,
@@ -310,9 +257,8 @@ async def _fire_signal(
 
         result = insert("signals", signal_row)
         if not result:
-            logger.error(f"Supabase insert failed for {asset} signal")
+            logger.error("Supabase insert failed for %s signal", asset)
 
-        # ── Write to blackboard ────────────────────────────────────
         bb.write("orchestrator", asset, {
             "last_signal_conviction": conviction,
             "last_signal_direction":  direction,
@@ -322,10 +268,9 @@ async def _fire_signal(
         })
 
         logger.info(
-            f"SIGNAL FIRED: {asset} {direction} "
-            f"conviction={conviction} rr={rr:.1f} "
-            f"exchange={exchange} regime={market_regime} "
-            f"arima={state.get('arima_confluence','?')}"
+            "SIGNAL FIRED: %s %s conviction=%s rr=%.1f exchange=%s regime=%s arima=%s",
+            asset, direction, conviction, rr, exchange, market_regime,
+            state.get("arima_confluence", "?"),
         )
 
         return {
@@ -343,15 +288,29 @@ async def _fire_signal(
         }
 
     except Exception as e:
-        logger.error(f"_fire_signal failed for {asset}: {e}")
+        logger.error("_fire_signal failed for %s: %s", asset, e)
         return None
+
+
+# ── MarkdownV2 escape ──────────────────────────────────────────────
+
+def _esc(value: Any) -> str:
+    """Escape a value for Telegram MarkdownV2."""
+    special = r'_*[]()~`>#+-=|{}.!'
+    text = str(value)
+    result = []
+    for ch in text:
+        if ch in special:
+            result.append('\\')
+        result.append(ch)
+    return ''.join(result)
 
 
 # ── Telegram formatter ─────────────────────────────────────────────
 
 def _format_telegram(
     asset: str,
-    state: dict[str, Any],
+    state: dict,
     conviction: int,
     direction: str,
     breakdown: dict,
@@ -360,78 +319,82 @@ def _format_telegram(
     vol_emoji = {"LOW": "✅", "MEDIUM": "⚠️", "HIGH": "🚫"}.get(
         state.get("garch_vol_regime", ""), "❓"
     )
-    regime  = state.get("garch_vol_regime", "MEDIUM")
-    vol_pct = state.get("garch_vol_current", 0)
+    regime   = state.get("garch_vol_regime", "MEDIUM")
+    vol_pct  = state.get("garch_vol_current", 0)
     exchange = state.get("exchange", "binance").upper()
 
-    modifier = state.get("position_modifier", 0.6)
+    modifier   = state.get("position_modifier", 0.6)
     size_label = "FULL" if modifier >= 1.0 else "HALF" if modifier >= 0.6 else "QUARTER"
 
-    arima_conf = state.get("arima_confluence", "")
+    arima_conf    = state.get("arima_confluence", "")
     arima_display = (
-        "⚡ CONFLUENCE" if arima_conf == "HIGH_CONFLUENCE" else
-        "⚠️ CONFLICT"  if arima_conf == "BIAS_CONFLICT"   else
-        "—"
+        "CONFLUENCE" if arima_conf == "HIGH_CONFLUENCE" else
+        "CONFLICT"   if arima_conf == "BIAS_CONFLICT"   else
+        "NO SIGNAL"
     )
 
     rr    = state.get("rr_ratio", 0)
     price = state.get("kalman_price", state.get("raw_price", 0))
     trend = state.get("trend_label", "N/A")
+    vel   = state.get("kalman_velocity_pct", 0)
+    vprt  = state.get("vprt_score", 0)
 
-    # Smart price formatting
-    fmt = ",.2f" if price >= 100 else ",.4f"
+    # Format price — 2 decimals for large coins, 4 for small
+    if price >= 100:
+        price_fmt  = "${:,.2f}".format(price)
+        entry_fmt  = "${:,.2f}".format(state.get("entry", 0))
+        stop_fmt   = "${:,.2f}".format(state.get("stop", 0))
+        target_fmt = "${:,.2f}".format(state.get("target", 0))
+    else:
+        price_fmt  = "${:,.4f}".format(price)
+        entry_fmt  = "${:,.4f}".format(state.get("entry", 0))
+        stop_fmt   = "${:,.4f}".format(state.get("stop", 0))
+        target_fmt = "${:,.4f}".format(state.get("target", 0))
 
-    def esc(s: str) -> str:
-        """MarkdownV2 escape."""
-        special = r'_*[]()~`>#+-=|{}.!'
-        return "".join(("\\" + c if c in special else c) for c in str(s))
+    vel_fmt    = "{:+.2f}".format(vel)
+    rr_fmt     = "{:.1f}".format(rr)
+    vol_fmt    = "{:d}".format(int(vol_pct))
+    arima_flag = "⚡" if arima_conf == "HIGH_CONFLUENCE" else "⚠️" if arima_conf == "BIAS_CONFLICT" else "—"
 
-    # Pre-compute all values that need escaping — backslashes not allowed inside f-strings
-    price_str   = esc("${:{}}".format(price, fmt))
-    entry_str   = esc("${:{}}".format(state.get('entry', 0), fmt))
-    stop_str    = esc("${:{}}".format(state.get('stop', 0), fmt))
-    target_str  = esc("${:{}}".format(state.get('target', 0), fmt))
-    vel_str     = esc("{:+.2f}".format(state.get('kalman_velocity_pct', 0)))
-    rr_str      = esc("{:.1f}".format(rr))
-    vol_pct_str = esc("{:d}".format(int(vol_pct)))
-    vprt_str    = str(state.get('vprt_score', 0))
-
-    lines = [
-        f"{emoji} *CRYPTO SNIPER SIGNAL*",
-        f"━━━━━━━━━━━━━━━━━━━━━━━━",
-        f"*{esc(asset)}/USDT*  \\|  *{direction}*  \\|  Conviction: *{conviction}/100*",
-        f"Exchange: {esc(exchange)}  \\|  ARIMA: {esc(arima_display)}",
-        f"",
-        f"📊 *Signal Stack*",
-        f"├ Price \\(Kalman\\): {price_str}",
-        f"├ Momentum \\(V/P/R/T\\): {vprt_str}/13",
-        f"├ Vol Regime \\(GARCH\\): {esc(regime)} {vol_emoji} \\({vol_pct_str}% ann\\)",
-        f"├ Velocity: {vel_str}%/bar",
-        f"└ Trend: {esc(trend)}",
-        f"",
-        f"⚙️ *Trade Setup*",
-        f"├ Entry:  {entry_str}",
-        f"├ Stop:   {stop_str}  \\(1\\.5× ATR\\)",
-        f"├ Target: {target_str}",
-        f"├ R:R:    {rr_str}:1",
-        f"└ Size:   {esc(size_label)} position",
-        f"",
-        f"━━━━━━━━━━━━━━━━━━━━━━━━",
-        f"⚠️ Not financial advice\\. Market conditions only\\.",
+    # Build message — all dynamic values pre-escaped
+    parts = [
+        emoji + " *CRYPTO SNIPER SIGNAL*",
+        "━━━━━━━━━━━━━━━━━━━━━━━━",
+        "*" + _esc(asset) + "/USDT*  |  *" + direction + "*  |  Conviction: *" + str(conviction) + "/100*",
+        "Exchange: " + _esc(exchange) + "  |  ARIMA: " + arima_flag + " " + _esc(arima_display),
+        "",
+        "📊 *Signal Stack*",
+        "├ Price (Kalman): " + _esc(price_fmt),
+        "├ Momentum (V/P/R/T): " + str(vprt) + "/13",
+        "├ Vol Regime (GARCH): " + _esc(regime) + " " + vol_emoji + " (" + vol_fmt + "% ann)",
+        "├ Velocity: " + _esc(vel_fmt) + "%/bar",
+        "└ Trend: " + _esc(trend),
+        "",
+        "⚙️ *Trade Setup*",
+        "├ Entry:  " + _esc(entry_fmt),
+        "├ Stop:   " + _esc(stop_fmt) + "  (1\\.5x ATR)",
+        "├ Target: " + _esc(target_fmt),
+        "├ R:R:    " + _esc(rr_fmt) + ":1",
+        "└ Size:   " + _esc(size_label) + " position",
+        "",
+        "━━━━━━━━━━━━━━━━━━━━━━━━",
+        "⚠️ Not financial advice\\. Market conditions only\\.",
     ]
-    return "\n".join(lines)
+    return "\n".join(parts)
 
+
+# ── Inline keyboard ────────────────────────────────────────────────
 
 def _build_inline_keyboard(asset: str) -> dict:
     return {
         "inline_keyboard": [[
             {
-                "text": f"📊 Analyse {asset}",
-                "url":  f"{WEBAPP_URL}/analyse/{asset.lower()}",
+                "text": "📊 Analyse " + asset,
+                "url":  WEBAPP_URL + "/analyse/" + asset.lower(),
             },
             {
                 "text": "💬 Ask AI",
-                "url":  f"https://t.me/Niftysnipabot?start=ask_{asset.lower()}",
+                "url":  "https://t.me/Niftysnipabot?start=ask_" + asset.lower(),
             },
         ]]
     }
@@ -445,15 +408,21 @@ async def _send_telegram(
     reply_markup: Optional[dict] = None,
 ) -> None:
     import aiohttp
-    url     = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    payload = {"chat_id": channel, "text": message, "parse_mode": "MarkdownV2"}
+    url     = "https://api.telegram.org/bot" + TELEGRAM_BOT_TOKEN + "/sendMessage"
+    payload = {
+        "chat_id":    channel,
+        "text":       message,
+        "parse_mode": "MarkdownV2",
+    }
     if reply_markup:
         payload["reply_markup"] = json.dumps(reply_markup)
 
     async with aiohttp.ClientSession() as s:
-        async with s.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=10)) as r:
+        async with s.post(
+            url, json=payload, timeout=aiohttp.ClientTimeout(total=10)
+        ) as r:
             if r.status != 200:
                 body = await r.text()
-                logger.error(f"Telegram send failed {r.status}: {body[:300]}")
+                logger.error("Telegram send failed %s: %s", r.status, body[:300])
             else:
-                logger.info(f"Telegram signal sent → chat {channel}")
+                logger.info("Telegram signal sent → chat %s", channel)
