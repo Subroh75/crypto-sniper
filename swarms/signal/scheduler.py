@@ -13,34 +13,43 @@ UNIVERSE FETCH (every cycle):
   3. Run full pipeline for each survivor (semaphore=5 concurrency)
 
 PIPELINE (per asset):
-  1. KalmanAgent    → OHLCV + Kalman filter (MEXC→Binance→Gate)
-  2. GARCHAgent     → vol regime (skips gracefully if < 20 bars)
+  1. KalmanAgent  → OHLCV + Kalman filter (MEXC→Binance→Gate)
+  2. GARCHAgent   → vol regime (skips gracefully if < 20 bars)
   3. SentimentAgent → Fear & Greed global gate + funding for majors
-  4. SignalAgent    → VPRT + ARIMA AR(1) confluence
-  5. Orchestrator   → conviction >= 72 → fire Telegram signal
+  4. SignalAgent  → VPRT + ARIMA AR(1) confluence
+  5. Orchestrator → conviction >= 72 → fire Telegram signal
+
+DEX SCAN (Option 2 — reuse main branch):
+  Every 30 min, calls the main branch /dex-results endpoint
+  to fetch cached DEX scan results (gems + vol_hits).
+  Formats and fires DEX vol spike alerts to Telegram.
 
 SCHEDULE:
-  Pipeline: every 5 minutes (300s)
-  Health checks: every 15 minutes
+  Pipeline:        every 5 minutes  (300s)
+  Health checks:   every 15 minutes
   Outcome checker: every 30 minutes
+  DEX scan:        every 30 minutes
 
 ENV VARS REQUIRED:
   SUPABASE_URL, SUPABASE_KEY, TELEGRAM_BOT_TOKEN,
   TELEGRAM_TEST_CHANNEL or TELEGRAM_SIGNAL_CHANNEL
 
 ENV VARS OPTIONAL:
-  SWARM_ASSETS     Override universe (default: dynamic top 200)
-  SWARM_THRESHOLD  Conviction threshold (default: 72)
-  SWARM_TOP_N      Max coins to scan per cycle (default: 200)
+  SWARM_ASSETS         Override universe (default: dynamic top 200)
+  SWARM_THRESHOLD      Conviction threshold (default: 72)
+  SWARM_TOP_N          Max coins to scan per cycle (default: 200)
+  MAIN_BRANCH_API_URL  Main branch Render URL (default: https://crypto-sniper.onrender.com)
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import sys
 import time
+from datetime import datetime, timezone
 from typing import Optional
 
 import aiohttp
@@ -60,13 +69,13 @@ logging.basicConfig(
 logger = logging.getLogger("signal.scheduler")
 
 # ── Agent imports ──────────────────────────────────────────────────
-from swarms.signal.agents.kalman_agent    import KalmanAgent
-from swarms.signal.agents.garch_agent     import GARCHAgent
+from swarms.signal.agents.kalman_agent import KalmanAgent
+from swarms.signal.agents.garch_agent  import GARCHAgent
 from swarms.signal.agents.sentiment_agent import SentimentAgent
-from swarms.signal.agents.signal_agent    import SignalAgent
-from swarms.signal.orchestrator           import run_orchestrator
-from swarm.blackboard                     import blackboard as bb
-from swarm.db                             import ping
+from swarms.signal.agents.signal_agent import SignalAgent
+from swarms.signal.orchestrator import run_orchestrator
+from swarm.blackboard import blackboard as bb
+from swarm.db import ping
 
 # ── Config ─────────────────────────────────────────────────────────
 FIRE_THRESHOLD = int(os.environ.get("SWARM_THRESHOLD", "72"))
@@ -92,6 +101,17 @@ STABLECOINS = {
 }
 LEVERAGED_SUFFIXES = {"3L","3S","5L","5S","2L","2S","UP","DOWN","BULL","BEAR"}
 MIN_VOLUME_USD = 500_000
+
+# Main branch API for DEX results (Option 2)
+MAIN_BRANCH_API = os.environ.get(
+    "MAIN_BRANCH_API_URL",
+    "https://crypto-sniper.onrender.com"
+)
+
+# Telegram config (shared with orchestrator but needed for DEX alerts)
+TELEGRAM_BOT_TOKEN   = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_TEST_CHANNEL = os.environ.get("TELEGRAM_TEST_CHANNEL", "")
+TELEGRAM_PROD_CHANNEL = os.environ.get("TELEGRAM_SIGNAL_CHANNEL", "")
 
 # ── Agent singletons ───────────────────────────────────────────────
 AGENTS = {
@@ -129,7 +149,6 @@ async def _fetch_mexc(session: aiohttp.ClientSession) -> list[tuple[str, float, 
         logger.warning(f"[Universe] MEXC ticker failed: {e}")
         return []
 
-
 async def _fetch_binance(session: aiohttp.ClientSession) -> list[tuple[str, float, float, float]]:
     """Returns [(symbol, vol_24h, vol_1h, vol_6h), ...] from Binance."""
     try:
@@ -153,7 +172,6 @@ async def _fetch_binance(session: aiohttp.ClientSession) -> list[tuple[str, floa
     except Exception as e:
         logger.warning(f"[Universe] Binance ticker failed: {e}")
         return []
-
 
 async def _fetch_gate(session: aiohttp.ClientSession) -> list[tuple[str, float, float, float]]:
     """Returns [(symbol, vol_24h, vol_1h, vol_6h), ...] from Gate.io."""
@@ -179,7 +197,6 @@ async def _fetch_gate(session: aiohttp.ClientSession) -> list[tuple[str, float, 
         logger.warning(f"[Universe] Gate.io ticker failed: {e}")
         return []
 
-
 async def fetch_universe(top_n: int = TOP_N) -> list[str]:
     """
     Fetch multi-exchange universe.
@@ -194,9 +211,9 @@ async def fetch_universe(top_n: int = TOP_N) -> list[str]:
             return_exceptions=True,
         )
 
-    mexc    = mexc    if isinstance(mexc,    list) else []
+    mexc    = mexc    if isinstance(mexc, list)    else []
     binance = binance if isinstance(binance, list) else []
-    gate    = gate    if isinstance(gate,    list) else []
+    gate    = gate    if isinstance(gate, list)    else []
 
     # Dedup: highest vol wins
     seen: dict[str, float] = {}
@@ -220,7 +237,6 @@ async def fetch_universe(top_n: int = TOP_N) -> list[str]:
     )
     return symbols
 
-
 # ── Vol pre-filter ─────────────────────────────────────────────────
 
 async def _vol_prefilter(symbols: list[str]) -> list[str]:
@@ -242,7 +258,7 @@ async def _vol_prefilter(symbols: list[str]) -> list[str]:
                     timeout=aiohttp.ClientTimeout(total=8)
                 ) as r:
                     if r.status != 200:
-                        return sym  # keep on fetch failure
+                        return sym   # keep on fetch failure
                     bars = await r.json()
                     if not bars or len(bars) < 7:
                         return sym
@@ -274,23 +290,22 @@ async def _vol_prefilter(symbols: list[str]) -> list[str]:
     )
     return survivors
 
-
 # ── Per-asset pipeline ─────────────────────────────────────────────
 
 async def run_pipeline_for_asset(asset: str) -> dict:
     """Run full agent pipeline for one asset. Returns summary dict."""
     context = {}
     results = {}
-    start   = time.monotonic()
+    start = time.monotonic()
 
     for name in PIPELINE_ORDER:
         agent = AGENTS[name]
         try:
             result = await agent.run(asset, context)
             results[name] = {
-                "success":     result.success,
+                "success": result.success,
                 "duration_ms": result.duration_ms,
-                "error":       result.error,
+                "error": result.error,
             }
             if result.success:
                 bb.write(agent.identity.name, asset, result.data)
@@ -311,7 +326,6 @@ async def run_pipeline_for_asset(asset: str) -> dict:
     logger.debug(f"[{asset}] Pipeline complete in {elapsed}ms")
 
     return {"asset": asset, "elapsed": elapsed, "agents": results}
-
 
 # ── Full pipeline sweep ────────────────────────────────────────────
 
@@ -364,10 +378,208 @@ async def run_full_pipeline() -> None:
             logger.info(
                 f"  FIRED: {sig['asset']} {sig.get('direction','?')} "
                 f"conviction={sig.get('conviction','?')} "
-                f"exchange={sig.get('exchange','?')}"
+                f"exchange={sig.get('exchange','?')} "
+                f"regime={sig.get('market_regime','?')}"
             )
     else:
         logger.info("[Pipeline] No signals fired this cycle")
+
+# ── DEX Scan (Option 2 — reuse main branch) ───────────────────────
+
+# Track last DEX scan results to avoid sending duplicates
+_last_dex_scan_ts: int = 0
+
+async def run_dex_scan() -> None:
+    """
+    Fetch cached DEX scan results from main branch /dex-results endpoint.
+    Format and fire vol spike alerts to Telegram.
+    Runs every 30 minutes.
+    """
+    global _last_dex_scan_ts
+
+    url = f"{MAIN_BRANCH_API}/dex-results"
+    logger.info(f"[DEX Scan] Fetching from {url}")
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                url, timeout=aiohttp.ClientTimeout(total=15)
+            ) as r:
+                if r.status != 200:
+                    logger.warning(f"[DEX Scan] /dex-results returned {r.status}")
+                    return
+                data = await r.json()
+    except Exception as e:
+        logger.error(f"[DEX Scan] Failed to fetch: {e}")
+        return
+
+    scan_ts = data.get("scan_ts", 0)
+    fresh = data.get("fresh", False)
+
+    # Skip if stale or already sent this scan
+    if not fresh:
+        logger.info(f"[DEX Scan] Results stale (age: {data.get('age_h', '?')}h) — skipping")
+        return
+    if scan_ts <= _last_dex_scan_ts:
+        logger.debug("[DEX Scan] Already sent this scan — skipping")
+        return
+
+    gems = data.get("gems", [])
+    vol_hits = data.get("vol_hits", [])
+    scan_time = data.get("scan_time", "Unknown")
+
+    if not gems and not vol_hits:
+        logger.info("[DEX Scan] No DEX hits to report")
+        _last_dex_scan_ts = scan_ts
+        return
+
+    # Format the DEX alert
+    msg = _format_dex_alert(gems, vol_hits, scan_time)
+    buttons = _build_dex_buttons(gems[:3])
+
+    channel = TELEGRAM_TEST_CHANNEL or TELEGRAM_PROD_CHANNEL
+    if channel and TELEGRAM_BOT_TOKEN:
+        await _send_dex_telegram(msg, channel, reply_markup=buttons)
+        _last_dex_scan_ts = scan_ts
+        logger.info(f"[DEX Scan] Alert sent — {len(gems)} gems, {len(vol_hits)} vol hits")
+    else:
+        logger.warning("[DEX Scan] No Telegram channel — DEX alert logged only")
+        logger.info(f"DEX alert:\n{msg}")
+        _last_dex_scan_ts = scan_ts
+
+
+def _format_dex_alert(
+    gems: list[dict],
+    vol_hits: list[dict],
+    scan_time: str,
+) -> str:
+    """
+    Format DEX vol spike alert matching DESIGN.md format.
+    Uses plain text (no MarkdownV2) for cleaner formatting with monospace alignment.
+    """
+    total = len(gems) + len(vol_hits)
+
+    lines = [
+        f"⚡ CRYPTO SNIPER — DEX SCAN",
+        f"{scan_time}",
+        f"Hits: {len(gems)} gems  |  {len(vol_hits)} vol spikes",
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+    ]
+
+    if gems:
+        lines.append("DEX GEMS")
+        for hit in gems[:7]:
+            signal = hit.get("signal", "BUY")
+            sym = hit.get("symbol", "?")[:10]
+            chain = hit.get("chain", "?").upper()[:5]
+            rel_vol = hit.get("rel_vol", 0)
+            pct_1h = hit.get("price_change_1h", hit.get("priceChange_1h", 0))
+            liq = hit.get("liquidity", 0)
+
+            # Signal emoji
+            if signal == "STRONG BUY":
+                sig_emoji = "🟢"
+            elif signal == "BUY":
+                sig_emoji = "🔵"
+            else:
+                sig_emoji = "⚪"
+
+            # Vol label
+            if rel_vol >= 4.0:
+                vol_label = "Extreme"
+            elif rel_vol >= 2.5:
+                vol_label = "High"
+            elif rel_vol >= 1.8:
+                vol_label = "Elevated"
+            else:
+                vol_label = "Normal"
+
+            # Liquidity formatting
+            if liq >= 1_000_000:
+                liq_str = f"${liq / 1_000_000:.1f}M"
+            elif liq >= 1_000:
+                liq_str = f"${liq / 1_000:.0f}K"
+            else:
+                liq_str = f"${liq:.0f}"
+
+            pct_str = f"{pct_1h:+.1f}%" if isinstance(pct_1h, (int, float)) else str(pct_1h)
+
+            lines.append(
+                f"  {sig_emoji} {sym:<10} {chain:<5} "
+                f"{vol_label} {rel_vol:.1f}×  ({pct_str} 1h)  "
+                f"Liq {liq_str}  {signal}"
+            )
+
+    if vol_hits:
+        if gems:
+            lines.append("")
+        lines.append("VOL BUILDING")
+        for hit in vol_hits[:5]:
+            sym = hit.get("symbol", "?")[:10]
+            chain = hit.get("chain", "?").upper()[:5]
+            rel_vol = hit.get("rel_vol", 0)
+            pct_1h = hit.get("price_change_1h", hit.get("priceChange_1h", 0))
+            pct_str = f"{pct_1h:+.1f}%" if isinstance(pct_1h, (int, float)) else str(pct_1h)
+
+            lines.append(
+                f"  ⚪ {sym:<10} {chain:<5} {rel_vol:.1f}×  ({pct_str} 1h)  WATCH"
+            )
+
+    lines.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    lines.append("⚠️ Not financial advice. Market conditions only.")
+
+    return "\n".join(lines)
+
+
+def _build_dex_buttons(top_gems: list[dict]) -> dict:
+    """Build inline keyboard with links to top DEX gems + scanner."""
+    webapp_url = os.environ.get("WEBAPP_URL", "https://crypto-sniper.app")
+    buttons = []
+
+    # Top gem buttons (max 3)
+    row = []
+    for gem in top_gems:
+        sym = gem.get("symbol", "?")
+        address = gem.get("address", "")
+        chain = gem.get("chain", "").lower()
+        if address:
+            url = f"https://dexscreener.com/{chain}/{address}"
+        else:
+            url = f"{webapp_url}/analyse/{sym.lower()}"
+        row.append({"text": f"📊 {sym[:8]}", "url": url})
+    if row:
+        buttons.append(row)
+
+    # Scanner + Ask AI row
+    buttons.append([
+        {"text": "🔍 Open Scanner", "url": f"{webapp_url}/scanner"},
+        {"text": "💬 Ask AI", "url": "https://t.me/CryptoSniperBot?start=ask_dex"},
+    ])
+
+    return {"inline_keyboard": buttons}
+
+
+async def _send_dex_telegram(
+    message: str,
+    channel: str,
+    reply_markup: Optional[dict] = None,
+) -> None:
+    """Send DEX alert — plain text (no MarkdownV2) for cleaner monospace alignment."""
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    payload = {
+        "chat_id": channel,
+        "text": message,
+    }
+    if reply_markup:
+        payload["reply_markup"] = json.dumps(reply_markup)
+
+    async with aiohttp.ClientSession() as s:
+        async with s.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=10)) as r:
+            if r.status != 200:
+                body = await r.text()
+                logger.error(f"[DEX Scan] Telegram send failed {r.status}: {body[:300]}")
+            else:
+                logger.info(f"[DEX Scan] Telegram alert sent to {channel}")
 
 
 # ── Health checks ──────────────────────────────────────────────────
@@ -383,7 +595,6 @@ async def run_health_checks() -> None:
             agent.log_health("FAILED", {"error": str(e)})
             logger.error(f"Health check failed [{name}]: {e}")
 
-
 # ── Outcome checker ────────────────────────────────────────────────
 
 async def run_outcome_checker() -> None:
@@ -395,15 +606,15 @@ async def run_outcome_checker() -> None:
     except Exception as e:
         logger.error(f"Outcome checker failed: {e}")
 
-
 # ── Startup ────────────────────────────────────────────────────────
 
 def startup_check() -> bool:
     logger.info("=" * 60)
     logger.info("CRYPTO SNIPER SIGNAL SWARM")
-    logger.info(f"Mode:      {'FIXED ' + str(FIXED_ASSETS) if FIXED_ASSETS else 'DYNAMIC TOP ' + str(TOP_N)}")
+    logger.info(f"Mode: {'FIXED ' + str(FIXED_ASSETS) if FIXED_ASSETS else 'DYNAMIC TOP ' + str(TOP_N)}")
     logger.info(f"Threshold: {FIRE_THRESHOLD}")
-    logger.info(f"Vol gate:  {VOL_SPIKE_GATE}x")
+    logger.info(f"Vol gate: {VOL_SPIKE_GATE}x")
+    logger.info(f"DEX scan: {MAIN_BRANCH_API}/dex-results (every 30min)")
     logger.info("=" * 60)
 
     logger.info("Checking Supabase...")
@@ -428,7 +639,6 @@ def startup_check() -> bool:
 
     return True
 
-
 # ── Main loop ──────────────────────────────────────────────────────
 
 async def main() -> None:
@@ -442,20 +652,22 @@ async def main() -> None:
     # monotonic() measures elapsed time since process start — immune
     # to system clock skew.
 
-    PIPELINE_INTERVAL = 300    # 5 min
-    HEALTH_INTERVAL   = 900    # 15 min
-    OUTCOME_INTERVAL  = 1800   # 30 min
+    PIPELINE_INTERVAL  = 300   # 5 min
+    HEALTH_INTERVAL    = 900   # 15 min
+    OUTCOME_INTERVAL   = 1800  # 30 min
+    DEX_SCAN_INTERVAL  = 1800  # 30 min
 
     # Initialise to -infinity so first iteration runs immediately
-    last_pipeline = -PIPELINE_INTERVAL
-    last_health   = -HEALTH_INTERVAL
-    last_outcome  = -OUTCOME_INTERVAL
+    last_pipeline  = -PIPELINE_INTERVAL
+    last_health    = -HEALTH_INTERVAL
+    last_outcome   = -OUTCOME_INTERVAL
+    last_dex_scan  = -DEX_SCAN_INTERVAL
 
     logger.info("Swarm scheduler running. First pipeline in 10 seconds.")
     await asyncio.sleep(10)
 
     while True:
-        now = time.monotonic()   # FIX: was time.time()
+        now = time.monotonic()  # FIX: was time.time()
 
         if now - last_pipeline >= PIPELINE_INTERVAL:
             try:
@@ -478,8 +690,14 @@ async def main() -> None:
                 logger.error(f"Outcome checker error: {e}")
             last_outcome = time.monotonic()
 
-        await asyncio.sleep(30)
+        if now - last_dex_scan >= DEX_SCAN_INTERVAL:
+            try:
+                await run_dex_scan()
+            except Exception as e:
+                logger.error(f"DEX scan error: {e}")
+            last_dex_scan = time.monotonic()
 
+        await asyncio.sleep(30)
 
 if __name__ == "__main__":
     import sys
