@@ -206,7 +206,12 @@ async def _fire_signal(
         rr            = state.get("rr_ratio", 0)
         market_regime = _classify_market_regime(state)
 
-        msg     = _format_telegram(asset, state, conviction, direction, breakdown)
+        msg     = _format_telegram(
+            asset, state, conviction, direction, breakdown,
+            entry_price=entry,
+            suggested_stop=suggested_stop,
+            target_price=target_price,
+        )
         buttons = _build_inline_keyboard(asset)
 
         if TELEGRAM_CHANNEL and TELEGRAM_BOT_TOKEN:
@@ -217,16 +222,30 @@ async def _fire_signal(
             )
             logger.info("Signal message:\n%s", msg)
 
-        fired_ts = server_now()
-        entry    = state.get("entry", 0)
-        atr      = state.get("atr", 0)
+        fired_ts     = server_now()
+        entry        = state.get("entry", 0)
+        atr          = state.get("atr", 0)
+        garch_regime = state.get("garch_vol_regime", "MEDIUM")
 
+        # ── Internal stop/target (Supabase tracking) ─────────────────
+        # 2.5x ATR flat — consistent R:R across all signals for track record
+        # 7% floor  — prevents stop being hunted by normal wick noise
+        # 15% ceiling — forces resolution within reasonable window
+        # Target = 2x stop distance → always 2:1 R:R in Supabase
         if atr and atr > 0 and entry > 0:
-            stop_price   = round(max(entry - 1.5 * atr, entry * 0.85), 8)
-            target_price = round(entry + 2.5 * atr, 8)
+            raw_stop      = entry - (2.5 * atr)
+            floor_stop    = entry * 0.93   # 7% floor
+            ceiling_stop  = entry * 0.85   # 15% ceiling
+            stop_price    = round(min(max(raw_stop, ceiling_stop), floor_stop), 8)
+            sl_distance   = entry - stop_price
+            target_price  = round(entry + (2.0 * sl_distance), 8)  # 2:1 R:R
         else:
-            stop_price   = round(entry * 0.97, 8)
-            target_price = round(entry * 1.10, 8)
+            stop_price    = round(entry * 0.93, 8)   # 7% fallback
+            target_price  = round(entry * 1.14, 8)   # 14% fallback -> 2:1 R:R
+
+        # ── Suggested stop shown to user (same level, different label) ───
+        suggested_stop = stop_price
+
 
         signal_row = {
             "fired_at":      fired_ts,
@@ -314,6 +333,9 @@ def _format_telegram(
     conviction: int,
     direction: str,
     breakdown: dict,
+    entry_price: float = 0.0,
+    suggested_stop: float = 0.0,
+    target_price: float = 0.0,
 ) -> str:
     emoji     = "🟢" if direction == "LONG" else "🔴"
     vol_emoji = {"LOW": "✅", "MEDIUM": "⚠️", "HIGH": "🚫"}.get(
@@ -334,22 +356,19 @@ def _format_telegram(
     )
 
     rr    = state.get("rr_ratio", 0)
-    price = state.get("kalman_price", state.get("raw_price", 0))
-    trend = state.get("trend_label", "N/A")
-    vel   = state.get("kalman_velocity_pct", 0)
-    vprt  = state.get("vprt_score", 0)
 
     # Format price — 2 decimals for large coins, 4 for small
+    price = state.get("kalman_price", state.get("raw_price", 0))
     if price >= 100:
         price_fmt  = "${:,.2f}".format(price)
-        entry_fmt  = "${:,.2f}".format(state.get("entry", 0))
-        stop_fmt   = "${:,.2f}".format(state.get("stop", 0))
-        target_fmt = "${:,.2f}".format(state.get("target", 0))
+        entry_fmt  = "${:,.2f}".format(entry_price)
+        stop_fmt   = "${:,.2f}".format(suggested_stop)
+        target_fmt = "${:,.2f}".format(target_price)
     else:
         price_fmt  = "${:,.4f}".format(price)
-        entry_fmt  = "${:,.4f}".format(state.get("entry", 0))
-        stop_fmt   = "${:,.4f}".format(state.get("stop", 0))
-        target_fmt = "${:,.4f}".format(state.get("target", 0))
+        entry_fmt  = "${:,.4f}".format(entry_price)
+        stop_fmt   = "${:,.4f}".format(suggested_stop)
+        target_fmt = "${:,.4f}".format(target_price)
 
     vel_fmt    = "{:+.2f}".format(vel)
     rr_fmt     = "{:.1f}".format(rr)
@@ -371,11 +390,11 @@ def _format_telegram(
         "└ Trend: " + trend,
         "",
         "⚙️ Trade Setup",
-        "├ Entry:  " + entry_fmt,
-        "├ Stop:   " + stop_fmt + "  (1.5x ATR)",
-        "├ Target: " + target_fmt,
-        "├ R:R:    " + rr_fmt + ":1",
-        "└ Size:   " + size_label + " position",
+        "├ Entry:     " + entry_fmt,
+        "├ Sug. Stop: " + stop_fmt + "  (set your own — this is a guide)",
+        "├ Target:    " + target_fmt,
+        "├ R:R guide: 2:1 based on suggested stop",
+        "└ Size:      " + size_label + " position",
         "",
         "━━━━━━━━━━━━━━━━━━━━━━━━",
         "⚠️ Not financial advice. Market conditions only.",
