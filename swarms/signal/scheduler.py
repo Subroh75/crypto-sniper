@@ -595,14 +595,19 @@ async def run_health_checks() -> None:
             agent.log_health("FAILED", {"error": str(e)})
             logger.error(f"Health check failed [{name}]: {e}")
 
-# ── Outcome checker ────────────────────────────────────────────────
+# ── Outcome checker (Supabase-native) ─────────────────────────────
 
 async def run_outcome_checker() -> None:
+    """
+    Resolve pending signals in Supabase.
+    Uses swarms/signal/outcome_checker.py — no SQLite dependency.
+    """
     try:
-        from telegram_bot.signal_tracker import check_outcomes
-        resolved = check_outcomes()
-        if resolved:
-            logger.info(f"Outcome checker: resolved {resolved} signals")
+        from swarms.signal.outcome_checker import check_outcomes
+        resolved = await check_outcomes()
+        logger.info(
+            f"[OutcomeChecker] Cycle complete — {resolved} resolved"
+        )
     except Exception as e:
         logger.error(f"Outcome checker failed: {e}")
 
