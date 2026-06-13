@@ -8,96 +8,12 @@ from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel  
 from data import (
-    build_volume_baseline,
-    get_volume_surge as _get_volume_surge,
-    refresh_vol_radar_cache,
-    read_vol_radar_cache,
+    get_ohlcv, get_quote, get_indicators,
+    get_binance_universe, get_multi_exchange_universe, get_vol_prefilter,
+    health_check, get_coindar_events, get_coinpaprika_meta,
+    get_trending, get_gainers_losers, get_market_overview,
+    get_btc_onchain, get_news, get_macro, get_watchlist_scores,
 )
- 
-_VS_BASELINE_TS: dict = {"ts": 0}
-_VS_BASELINE_TTL = 23 * 3600  # rebuild 20-bar baseline ~once/day
- 
-_VS_RADAR_TS: dict = {"ts": 0}
-_VS_RADAR_TTL = 90  # refresh the served cache every 90s, independent of traffic
- 
- 
-def _maybe_build_baseline():
-    """Trigger baseline build in background if >23h old or missing."""
-    import threading, time as _t
-    now = int(_t.time())
-    if now - _VS_BASELINE_TS.get("ts", 0) < _VS_BASELINE_TTL:
-        return
-    _VS_BASELINE_TS["ts"] = now  # optimistic lock
- 
-    def _run():
-        try:
-            result = build_volume_baseline(max_coins=500, interval="1h")
-            logger.info(f"Volume baseline rebuilt: {result}")
-        except Exception as e:
-            logger.error(f"Volume baseline build error: {e}")
-            _VS_BASELINE_TS["ts"] = 0  # allow retry
- 
-    threading.Thread(target=_run, daemon=True).start()
- 
- 
-def _maybe_refresh_vol_radar():
-    """Trigger vol-radar cache refresh in background if stale or missing."""
-    import threading, time as _t
-    now = int(_t.time())
-    if now - _VS_RADAR_TS.get("ts", 0) < _VS_RADAR_TTL:
-        return
-    _VS_RADAR_TS["ts"] = now  # optimistic lock — prevents overlapping refreshes
- 
-    def _run():
-        try:
-            result = refresh_vol_radar_cache(interval="1h", max_coins=500)
-            logger.info(f"Vol radar cache refreshed: {result}")
-        except Exception as e:
-            logger.error(f"Vol radar refresh error: {e}")
-            _VS_RADAR_TS["ts"] = 0  # allow earlier retry on failure
- 
-    threading.Thread(target=_run, daemon=True).start()
- 
- 
-# Kick off both caches on startup so they're warming before first request
-_maybe_build_baseline()
-_maybe_refresh_vol_radar()
- 
- 
-@app.get("/volume-surge")
-def volume_surge(
-    min_rvol:       float = Query(3.0,  description="Min relative volume (e.g. 3.0 = 3x baseline)"),
-    max_price_chg:  float = Query(5.0,  description="Max abs price change % to include"),
-    min_volume_usd: float = Query(50_000, description="Min 24h volume USD"),
-    top_n:          int   = Query(20,   ge=1, le=100),
-    interval:       str   = Query("1h"),
-):
-    """
-    Return coins surging on volume vs their 20-bar baseline.
-    Always served from vol_radar_cache (SQLite) — no live exchange calls
-    in the request path. Background threads keep the cache warm.
-    """
-    # Non-blocking: just sets a flag and (maybe) spawns a daemon thread
-    _maybe_build_baseline()
-    _maybe_refresh_vol_radar()
- 
-    coins, updated_ts = read_vol_radar_cache(
-        min_rvol=min_rvol,
-        max_price_chg=max_price_chg,
-        min_volume_usd=min_volume_usd,
-        top_n=top_n,
-    )
- 
-    return {
-        "coins":      coins,
-        "count":      len(coins),
-        "min_rvol":   min_rvol,
-        "interval":   interval,
-        "updated_at": updated_ts,
-        "stale":      updated_ts == 0,
-        "cached":     True,
-    }
- 
 from signals import calculate_signals, get_key_levels
 from agents import run_agent_council
 from kronos import run_kronos_forecast
@@ -1473,12 +1389,19 @@ async def push_unsubscribe(endpoint: str):
 
 
 # ── Volume Surge ──────────────────────────────────────────────────────────────
-from data import build_volume_baseline, get_volume_surge as _get_volume_surge
+from data import (
+    build_volume_baseline,
+    get_volume_surge as _get_volume_surge,
+    refresh_vol_radar_cache,
+    read_vol_radar_cache,
+)
 
-_VS_CACHE: dict = {}
-_VS_TTL = 300  # 5 min cache for surge results
 _VS_BASELINE_TS: dict = {"ts": 0}
-_VS_BASELINE_TTL = 23 * 3600  # rebuild baseline once per ~day
+_VS_BASELINE_TTL = 23 * 3600  # rebuild 20-bar baseline ~once/day
+
+_VS_RADAR_TS: dict = {"ts": 0}
+_VS_RADAR_TTL = 90  # refresh the served cache every 90s, independent of traffic
+
 
 def _maybe_build_baseline():
     """Trigger baseline build in background if >23h old or missing."""
@@ -1498,8 +1421,29 @@ def _maybe_build_baseline():
 
     threading.Thread(target=_run, daemon=True).start()
 
-# Kick off baseline build on startup
+
+def _maybe_refresh_vol_radar():
+    """Trigger vol-radar cache refresh in background if stale or missing."""
+    import threading, time as _t
+    now = int(_t.time())
+    if now - _VS_RADAR_TS.get("ts", 0) < _VS_RADAR_TTL:
+        return
+    _VS_RADAR_TS["ts"] = now  # optimistic lock — prevents overlapping refreshes
+
+    def _run():
+        try:
+            result = refresh_vol_radar_cache(interval="1h", max_coins=500)
+            logger.info(f"Vol radar cache refreshed: {result}")
+        except Exception as e:
+            logger.error(f"Vol radar refresh error: {e}")
+            _VS_RADAR_TS["ts"] = 0  # allow earlier retry on failure
+
+    threading.Thread(target=_run, daemon=True).start()
+
+
+# Kick off both caches on startup so they're warming before first request
 _maybe_build_baseline()
+_maybe_refresh_vol_radar()
 
 
 @app.get("/volume-surge")
@@ -1512,36 +1456,29 @@ def volume_surge(
 ):
     """
     Return coins surging on volume vs their 20-bar baseline.
-    Sorted by RVOL descending. PRE-BREAKOUT = high vol, muted price.
+    Always served from vol_radar_cache (SQLite) — no live exchange calls
+    in the request path. Background threads keep the cache warm.
     """
-    import time as _t
-    now = int(_t.time())
-    cache_key = f"{min_rvol}:{max_price_chg}:{min_volume_usd}:{top_n}:{interval}"
-
-    # Maybe trigger background baseline rebuild
+    # Non-blocking: just sets a flag and (maybe) spawns a daemon thread
     _maybe_build_baseline()
+    _maybe_refresh_vol_radar()
 
-    if _VS_CACHE.get("key") == cache_key and now - _VS_CACHE.get("ts", 0) < _VS_TTL:
-        return {**_VS_CACHE["data"], "cached": True}
-
-    results = _get_volume_surge(
+    coins, updated_ts = read_vol_radar_cache(
         min_rvol=min_rvol,
         max_price_chg=max_price_chg,
         min_volume_usd=min_volume_usd,
         top_n=top_n,
-        interval=interval,
     )
 
-    payload = {
-        "coins":      results,
-        "count":      len(results),
+    return {
+        "coins":      coins,
+        "count":      len(coins),
         "min_rvol":   min_rvol,
         "interval":   interval,
-        "timestamp":  now,
-        "cached":     False,
+        "updated_at": updated_ts,
+        "stale":      updated_ts == 0,
+        "cached":     True,
     }
-    _VS_CACHE.update({"key": cache_key, "ts": now, "data": payload})
-    return payload
 
 
 @app.post("/volume-baseline/rebuild")
