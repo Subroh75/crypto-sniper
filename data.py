@@ -2324,3 +2324,112 @@ def get_volume_surge(
 
     results.sort(key=lambda x: x["rvol"], reverse=True)
     return results[:top_n]
+# ============================================================================
+# APPEND THIS BLOCK TO THE END OF data.py
+# (after the existing get_volume_surge / _current_vol functions)
+# Path in repo: data.py
+# ============================================================================
+
+# ── Vol Radar Cache ────────────────────────────────────────────────────────
+def _vs_radar_db_init():
+    """Create vol_radar_cache table if it doesn't exist."""
+    with _vs_sqlite.connect(_VS_DB_PATH) as c:
+        c.executescript("""
+        CREATE TABLE IF NOT EXISTS vol_radar_cache (
+            symbol      TEXT PRIMARY KEY,
+            rel_vol     REAL NOT NULL,
+            price_chg   REAL,
+            volume_usd  REAL,
+            exchange    TEXT,
+            updated_ts  INTEGER NOT NULL
+        );
+        """)
+
+_vs_radar_db_init()
+
+
+def refresh_vol_radar_cache(interval: str = "1h", max_coins: int = 500) -> dict:
+    """
+    Run get_volume_surge with broad params and overwrite vol_radar_cache.
+    Designed to run on a short background cycle (e.g. every 60-120s),
+    never in the request path. Filtering by the caller's actual query
+    params happens at read time in read_vol_radar_cache().
+    """
+    now_ts = int(time.time())
+    try:
+        results = get_volume_surge(
+            min_rvol=1.5,          # broad floor — tighter filters applied at read time
+            max_price_chg=100.0,   # broad — don't pre-exclude on the write side
+            min_volume_usd=50_000,
+            top_n=max_coins,
+            interval=interval,
+        )
+    except Exception as e:
+        logger.error(f"refresh_vol_radar_cache: get_volume_surge failed: {e}")
+        return {"updated": 0, "error": str(e), "timestamp": now_ts}
+
+    try:
+        with _vs_sqlite.connect(_VS_DB_PATH) as c:
+            c.execute("DELETE FROM vol_radar_cache")
+            c.executemany(
+                "INSERT INTO vol_radar_cache "
+                "(symbol, rel_vol, price_chg, volume_usd, exchange, updated_ts) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                [
+                    (
+                        r.get("symbol"),
+                        # NOTE: verify these key names against get_volume_surge's
+                        # actual return dict — adjust .get() fallbacks if needed.
+                        r.get("rel_vol", r.get("rel_vol_pre", 0.0)),
+                        r.get("price_change_pct", r.get("price_chg_pct", 0.0)),
+                        r.get("volume_24h", r.get("volume_usd", 0.0)),
+                        r.get("exchange", ""),
+                        now_ts,
+                    )
+                    for r in results
+                ],
+            )
+    except Exception as e:
+        logger.error(f"refresh_vol_radar_cache: DB write failed: {e}")
+        return {"updated": 0, "error": str(e), "timestamp": now_ts}
+
+    logger.info(f"refresh_vol_radar_cache: cached {len(results)} coins")
+    return {"updated": len(results), "timestamp": now_ts}
+
+
+def read_vol_radar_cache(
+    min_rvol: float = 3.0,
+    max_price_chg: float = 5.0,
+    min_volume_usd: float = 50_000,
+    top_n: int = 20,
+):
+    """
+    Read + filter the cached vol radar table. Pure SQLite read, zero HTTP calls.
+    Returns (coins: list[dict], updated_ts: int). updated_ts == 0 means the
+    cache hasn't been populated yet (cold start).
+    """
+    try:
+        with _vs_sqlite.connect(_VS_DB_PATH) as c:
+            rows = c.execute(
+                "SELECT symbol, rel_vol, price_chg, volume_usd, exchange, updated_ts "
+                "FROM vol_radar_cache "
+                "WHERE rel_vol >= ? AND ABS(price_chg) <= ? AND volume_usd >= ? "
+                "ORDER BY rel_vol DESC LIMIT ?",
+                (min_rvol, max_price_chg, min_volume_usd, top_n),
+            ).fetchall()
+    except Exception as e:
+        logger.warning(f"read_vol_radar_cache: {e}")
+        return [], 0
+
+    updated_ts = rows[0][5] if rows else 0
+    coins = [
+        {
+            "symbol": r[0],
+            "rel_vol": r[1],
+            "price_change_pct": r[2],
+            "volume_24h": r[3],
+            "exchange": r[4],
+        }
+        for r in rows
+    ]
+    return coins, updated_ts
