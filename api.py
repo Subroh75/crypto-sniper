@@ -82,8 +82,25 @@ class WatchlistRequest(BaseModel):
 
 # ── Scan cache ───────────────────────────────────────────────────────────────
 _scan_cache: dict = {}
-_SCAN_TTL  = 300   # 5-min cache — keeps scanner scores close to live analyse results
+_SCAN_TTL  = 300   # 5-min cache - keeps scanner scores close to live analyse results
 
+# --- Per-key lock to coalesce concurrent identical /scan requests ---
+# Without this, multiple simultaneous requests with the same params (e.g. the
+# dashboard's TopSignals, VolRadar, and ScanAlertPoller components all calling
+# /scan on page load) would each independently launch a full scan, overloading
+# the backend. With this lock, only the first request runs the scan; the
+# others wait and then read the freshly-populated cache.
+import threading as _threading
+_scan_locks: dict = {}
+_scan_locks_guard = _threading.Lock()
+
+def _get_scan_lock(key: str):
+    with _scan_locks_guard:
+        lock = _scan_locks.get(key)
+        if lock is None:
+            lock = _threading.Lock()
+            _scan_locks[key] = lock
+        return lock
 # ── SQLite persistence for scan cache (survives Render sleep/restart) ─────────
 _SCAN_DB_PATH = os.path.join(os.path.dirname(__file__), "data.db")
 import sqlite3 as _sqlite3, json as _json
@@ -414,6 +431,36 @@ def scan_top_signals(
             "timestamp":     db_cached["ts"],
         }
 
+    # --- Coalesce concurrent identical scans ---
+    # If another request with the same cache_key is already running the
+    # scan below, wait for it instead of launching a duplicate one.
+    _lock = _get_scan_lock(cache_key)
+    _lock.acquire()
+    # Re-check caches now that we hold the lock - the in-flight request
+    # we waited on may have just populated them.
+    if _scan_cache.get("key") == cache_key and now - _scan_cache.get("ts", 0) < _SCAN_TTL:
+        _lock.release()
+        age_mins = round((now - _scan_cache["ts"]) / 60, 1)
+        return {
+            "signals":         _scan_cache["data"],
+            "cached":          True,
+            "cached_age_mins": age_mins,
+            "universe":        _scan_cache.get("universe", 0),
+            "timestamp":       _scan_cache["ts"],
+        }
+    db_cached = _scan_db_read(cache_key)
+    if db_cached:
+        _lock.release()
+        _scan_cache.update({"key": cache_key, "ts": db_cached["ts"], "data": db_cached["data"], "universe": db_cached["universe"]})
+        age_mins = round((now - db_cached["ts"]) / 60, 1)
+        return {
+            "signals":         db_cached["data"],
+            "cached":          True,
+            "cached_age_mins": age_mins,
+            "universe":        db_cached["universe"],
+            "timestamp":       db_cached["ts"],
+        }
+
     # ── Step 1: Get multi-exchange universe (Binance + MEXC + Gate.io) ─────────
     universe = get_multi_exchange_universe(
         min_volume_usd_binance=min_volume,
@@ -424,6 +471,7 @@ def scan_top_signals(
         # Fallback to Binance-only if multi fetch fails
         universe = get_binance_universe(min_volume_usd=min_volume, max_coins=max_coins)
     if not universe:
+        _lock.release()
         return {"signals": [], "error": "All exchanges unavailable", "timestamp": now}
 
     universe_size = len(universe)
@@ -527,6 +575,7 @@ def scan_top_signals(
     signals.sort(key=lambda s: (s["score"], s["volume_24h"]), reverse=True)
     _scan_cache.update({"key": cache_key, "ts": now, "data": signals, "universe": universe_size})
     _scan_db_write(cache_key, signals, universe_size, now)  # persist across Render sleep
+    _lock.release()
     return {
         "signals":        signals,
         "cached":         False,
