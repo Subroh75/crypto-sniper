@@ -4,20 +4,23 @@
 // No server VAPID needed: the SW receives a postMessage and calls showNotification().
 //
 // Settings are persisted in localStorage:
-//   scan_alert_enabled   "true" | "false"
+//   scan_alert_enabled    "true" | "false"
 //   scan_alert_threshold  "7"
-//   scan_alert_interval   "60"   (minutes)
+//   scan_alert_interval   "60" (minutes)
 //   scan_alert_last_ts    unix seconds of last scan
+//
+// Note: fetches go through the shared scanCache (fetchScanShared), so if
+// TopSignals/VolRadar have just fetched the same params (interval=1d,
+// min_score=threshold), this poller reuses that cached result instead of
+// issuing its own request.
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useEffect, useRef, useCallback } from "react";
+import { fetchScanShared, type ScanResponse } from "@/lib/scanCache";
 
-const API = (import.meta as Record<string, unknown> & { env?: Record<string, string> })
-  .env?.VITE_API_BASE ?? "https://crypto-sniper.onrender.com";
-
-const STORAGE_ENABLED   = "scan_alert_enabled";
+const STORAGE_ENABLED = "scan_alert_enabled";
 const STORAGE_THRESHOLD = "scan_alert_threshold";
-const STORAGE_INTERVAL  = "scan_alert_interval";
-const STORAGE_LAST_TS   = "scan_alert_last_ts";
+const STORAGE_INTERVAL = "scan_alert_interval";
+const STORAGE_LAST_TS = "scan_alert_last_ts";
 const STORAGE_LAST_HITS = "scan_alert_last_hits";
 
 function load(key: string, fallback: string) {
@@ -29,10 +32,10 @@ function save(key: string, val: string) {
 
 interface ScanSignal {
   symbol: string;
-  score:  number;
+  score: number;
   signal: string;
   change: number;
-  rsi:    number;
+  rsi: number;
 }
 
 // ── Shared state — lets PriceAlertCard read/write poller settings ──────────
@@ -40,20 +43,20 @@ type SettingsListener = (s: ScanAlertSettings) => void;
 const _settingsListeners = new Set<SettingsListener>();
 
 export interface ScanAlertSettings {
-  enabled:   boolean;
+  enabled: boolean;
   threshold: number;
-  interval:  number;   // minutes
-  lastTs:    number;   // unix seconds
-  lastHits:  ScanSignal[];
+  interval: number; // minutes
+  lastTs: number; // unix seconds
+  lastHits: ScanSignal[];
 }
 
 function _readSettings(): ScanAlertSettings {
   return {
-    enabled:   load(STORAGE_ENABLED,   "false") === "true",
+    enabled: load(STORAGE_ENABLED, "false") === "true",
     threshold: parseInt(load(STORAGE_THRESHOLD, "7"), 10),
-    interval:  parseInt(load(STORAGE_INTERVAL,  "60"), 10),
-    lastTs:    parseInt(load(STORAGE_LAST_TS,   "0"), 10),
-    lastHits:  JSON.parse(load(STORAGE_LAST_HITS, "[]")),
+    interval: parseInt(load(STORAGE_INTERVAL, "60"), 10),
+    lastTs: parseInt(load(STORAGE_LAST_TS, "0"), 10),
+    lastHits: JSON.parse(load(STORAGE_LAST_HITS, "[]")),
   };
 }
 
@@ -64,9 +67,9 @@ export function subscribeScanSettings(fn: SettingsListener) {
 }
 
 export function updateScanSettings(patch: Partial<Omit<ScanAlertSettings, "lastTs" | "lastHits">>) {
-  if (patch.enabled   !== undefined) save(STORAGE_ENABLED,   String(patch.enabled));
+  if (patch.enabled !== undefined) save(STORAGE_ENABLED, String(patch.enabled));
   if (patch.threshold !== undefined) save(STORAGE_THRESHOLD, String(patch.threshold));
-  if (patch.interval  !== undefined) save(STORAGE_INTERVAL,  String(patch.interval));
+  if (patch.interval !== undefined) save(STORAGE_INTERVAL, String(patch.interval));
   _settingsListeners.forEach(fn => fn(_readSettings()));
 }
 
@@ -79,14 +82,14 @@ async function showScanNotification(hits: ScanSignal[], threshold: number) {
       if (reg.active) {
         const top = hits[0];
         const title = `Crypto Sniper — ${hits.length} signal${hits.length > 1 ? "s" : ""} found`;
-        const body  = hits.length === 1
+        const body = hits.length === 1
           ? `${top.symbol} ${top.score}/16 ${top.signal} | RSI ${top.rsi?.toFixed(0)} | ${top.change >= 0 ? "+" : ""}${top.change?.toFixed(1)}%`
           : `Top: ${hits.slice(0,3).map(h => `${h.symbol} ${h.score}/16`).join(", ")}${hits.length > 3 ? ` +${hits.length-3} more` : ""}`;
         reg.active.postMessage({
-          type:  "SHOW_NOTIFICATION",
+          type: "SHOW_NOTIFICATION",
           title,
           body,
-          url:   "https://crypto-sniper.app",
+          url: "https://crypto-sniper.app",
         });
         return;
       }
@@ -94,9 +97,9 @@ async function showScanNotification(hits: ScanSignal[], threshold: number) {
   }
   // Fallback: direct Notification API (only works when app is in foreground)
   if ("Notification" in window && Notification.permission === "granted") {
-    const top   = hits[0];
+    const top = hits[0];
     const title = `Crypto Sniper — ${hits.length} signal${hits.length > 1 ? "s" : ""} found`;
-    const body  = hits.length === 1
+    const body = hits.length === 1
       ? `${top.symbol} ${top.score}/16 ${top.signal}`
       : hits.slice(0,3).map(h => `${h.symbol} ${h.score}/16`).join(", ");
     new Notification(title, { body, icon: "/pwa-192.png" });
@@ -105,7 +108,7 @@ async function showScanNotification(hits: ScanSignal[], threshold: number) {
 
 // ── The poller (rendered once at app root) ────────────────────────────────────
 export function ScanAlertPoller() {
-  const timerRef  = useRef<ReturnType<typeof setInterval> | null>(null);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const runningRef = useRef(false);
 
   const runScan = useCallback(async () => {
@@ -116,19 +119,22 @@ export function ScanAlertPoller() {
 
     runningRef.current = true;
     try {
-      const r = await fetch(
-        `${API}/scan?min_score=${s.threshold}&interval=1d&max_coins=200&min_volume=500000`,
-        { signal: AbortSignal.timeout(60_000) }
-      );
-      if (!r.ok) return;
-      const data = await r.json();
-      const signals: ScanSignal[] = (data.signals ?? []).filter(
-        (s: ScanSignal) => s.score >= _readSettings().threshold
+      // Goes through the shared cache: if TopSignals/VolRadar have already
+      // fetched interval=1d at this min_score recently, this resolves
+      // instantly with no network call instead of duplicating the request.
+      const data: ScanResponse = await fetchScanShared({
+        interval: "1d",
+        min_score: s.threshold,
+        max_coins: 200,
+        min_volume: 500000,
+      });
+      const signals: ScanSignal[] = ((data.signals ?? []) as unknown as ScanSignal[]).filter(
+        (sig) => sig.score >= _readSettings().threshold
       );
 
       // Save last scan results
       const now = Math.floor(Date.now() / 1000);
-      save(STORAGE_LAST_TS,   String(now));
+      save(STORAGE_LAST_TS, String(now));
       save(STORAGE_LAST_HITS, JSON.stringify(signals.slice(0, 10)));
       _settingsListeners.forEach(fn => fn(_readSettings()));
 
