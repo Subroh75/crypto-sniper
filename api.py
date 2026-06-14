@@ -246,11 +246,15 @@ async def warmup():
 
 @app.post("/analyse")
 async def analyse(req: AnalyseRequest):
+    import asyncio
     symbol = req.symbol.upper().strip()
     t_start = time.time()
     try:
-        ohlcv      = get_ohlcv(symbol, req.interval)
-        quote      = get_quote(symbol)
+        # OHLCV + quote are independent network calls — run concurrently
+        ohlcv, quote = await asyncio.gather(
+            asyncio.to_thread(get_ohlcv, symbol, req.interval),
+            asyncio.to_thread(get_quote, symbol),
+        )
         indicators = get_indicators(symbol, req.interval, bars=ohlcv)
         # S score removed — social/sentiment calls skipped for speed
         fear_greed     = {}
@@ -269,8 +273,15 @@ async def analyse(req: AnalyseRequest):
         coindar_events=coindar_events,
     )
     levels = get_key_levels(sig)
+    # Derivatives + microstructure are independent external calls (Bybit/OKX/Binance
+    # mirror) that can each take several seconds on a cold lru_cache bucket — run
+    # them concurrently instead of sequentially (was the main /analyse latency).
+    derivatives, microstructure = await asyncio.gather(
+        asyncio.to_thread(get_derivatives, symbol),
+        asyncio.to_thread(get_market_microstructure, symbol),
+    )
     # Background: record signal + check price alerts + Telegram notify on STRONG BUY
-    import asyncio, threading
+    import threading
     threading.Thread(target=record_signal, args=(symbol, req.interval, sig.total, sig.signal_label, sig.close), daemon=True).start()
     threading.Thread(target=check_and_fire_alerts, args=(symbol, sig.close, sig.total), daemon=True).start()
     if sig.signal_label == "STRONG BUY":
@@ -293,8 +304,8 @@ async def analyse(req: AnalyseRequest):
         "conviction":{"bull_pct":sig.bull_conviction,"bear_pct":sig.bear_conviction,"bull_signals":sig.bull_signals,"bear_signals":sig.bear_signals},
         "fear_greed":fear_greed,"cp_news":cp_news[:3],"key_levels":levels,
         "ohlcv":ohlcv[-220:],
-        "derivatives": get_derivatives(symbol),
-        "microstructure": get_market_microstructure(symbol),
+        "derivatives": derivatives,
+        "microstructure": microstructure,
         "social_delta":    social_delta,
         "santiment":       san_signals,
         "events":          coindar_events[:5] if coindar_events else [],
