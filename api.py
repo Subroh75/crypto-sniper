@@ -62,6 +62,48 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ── Background pre-warm for /analyse derivatives + microstructure ─────────────
+# Keeps derivatives.py's lru_cache hot for whatever's currently in the /scan
+# results, so clicking "Analyse" on a coin the user can actually see hits the
+# warm cache (~1s) instead of a cold Bybit/OKX/binance.vision chain (5-25s).
+async def _signal_prewarm_loop():
+    import asyncio as _asyncio
+    from concurrent.futures import ThreadPoolExecutor
+    from derivatives import get_derivatives, get_market_microstructure
+
+    last_deriv_warm = 0.0
+    while True:
+        try:
+            signals = (_scan_cache.get("data") or [])[:20]  # top signals shown in TopSignals/VolRadar
+            symbols = [s.get("symbol") for s in signals if s.get("symbol")]
+            now = time.time()
+            warm_deriv = (now - last_deriv_warm) > 240  # refresh ~1 min before the 5-min bucket expires
+
+            if symbols:
+                with ThreadPoolExecutor(max_workers=5) as ex:
+                    futures = []
+                    for sym in symbols:
+                        futures.append(ex.submit(get_market_microstructure, sym))
+                        if warm_deriv:
+                            futures.append(ex.submit(get_derivatives, sym))
+                    for f in futures:
+                        try:
+                            f.result()
+                        except Exception:
+                            pass
+            if warm_deriv:
+                last_deriv_warm = now
+        except Exception as e:
+            logger.warning(f"signal prewarm loop error: {e}")
+        await _asyncio.sleep(20)
+
+
+@app.on_event("startup")
+async def _start_signal_prewarm():
+    import asyncio as _asyncio
+    _asyncio.create_task(_signal_prewarm_loop())
+
+
 class AnalyseRequest(BaseModel):
     symbol: str = "BTC"
     interval: str = "1H"
