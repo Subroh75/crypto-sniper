@@ -1,13 +1,15 @@
 /**
  * VolRadar — Volume spike scanner panel
- * Calls /scan once, shows all coins with rel_vol >= 1.8x sorted by vol descending.
+ * Reads from the shared /scan cache (interval=1d, min_score=1) and shows
+ * all coins with rel_vol >= 1.8x sorted by vol descending.
  * Used as the "Vol Radar" tab on both mobile and desktop.
+ *
+ * Uses the same params as TopSignals' default scan, so when both are
+ * mounted they share a single underlying /scan request via scanCache
+ * instead of each firing their own.
  */
-import { useState, useEffect, useCallback, useRef } from "react";
-
-const BASE_URL =
-  (import.meta as Record<string, unknown> & { env?: Record<string, string> })
-    .env?.VITE_API_BASE ?? "https://crypto-sniper.onrender.com";
+import { useState, useEffect } from "react";
+import { useScanData } from "@/lib/useScanData";
 
 interface VolCoin {
   symbol: string;
@@ -25,18 +27,13 @@ interface VolCoin {
   vol_shield_sizing?: number;
 }
 
-interface ScanResult {
-  signals: VolCoin[];
-  universe: number;
-  scanned: number;
-  cached: boolean;
-}
+const POLL_MS = 5 * 60 * 1000;
 
 // Gate colour thresholds
 function gateColor(rv: number): { bg: string; text: string; label: string } {
   if (rv >= 3.5) return { bg: "#16a34a22", text: "#22c55e", label: `${rv.toFixed(1)}x` };
   if (rv >= 2.5) return { bg: "#d9770622", text: "#f59e0b", label: `${rv.toFixed(1)}x` };
-  return         { bg: "#6b21a822", text: "#a78bfa",  label: `${rv.toFixed(1)}x` };
+  return { bg: "#6b21a822", text: "#a78bfa", label: `${rv.toFixed(1)}x` };
 }
 
 function GateBadge({ rv }: { rv: number }) {
@@ -64,8 +61,8 @@ function GateBadge({ rv }: { rv: number }) {
 function ExchangeBadge({ label }: { label: string }) {
   const color =
     label === "BINANCE" ? "#f59e0b" :
-    label === "MEXC"    ? "#22c55e" :
-    label === "GATE"    ? "#60a5fa" : "#94a3b8";
+    label === "MEXC" ? "#22c55e" :
+    label === "GATE" ? "#60a5fa" : "#94a3b8";
   return (
     <span style={{ color, fontSize: 10, fontWeight: 700, fontFamily: "monospace", letterSpacing: "0.08em" }}>
       {label}
@@ -87,7 +84,7 @@ function SignalBadge({ signal, isDex = false }: { signal: string; isDex?: boolea
   const isStrong = signal === "STRONG BUY";
   // Identity system: CEX=green ▲, DEX=purple ◆
   const col = isDex ? "#a855f7" : isStrong ? "#22c55e" : "#f59e0b";
-  const bg  = isDex ? "#a855f722" : isStrong ? "#16a34a22" : "#d9770622";
+  const bg = isDex ? "#a855f722" : isStrong ? "#16a34a22" : "#d9770622";
   const lbl = isDex ? (isStrong ? "◆ STRONG BUY" : "◆ BUY") : (isStrong ? "▲ STRONG BUY" : "▲ BUY");
   return (
     <span style={{
@@ -112,9 +109,9 @@ function SignalBadge({ signal, isDex = false }: { signal: string; isDex?: boolea
 function VolShieldBadge({ regime, sigma, sizing }: { regime: string; sigma: number; sizing: number }) {
   if (!regime) return null;
   const conf: Record<string, { color: string; bg: string; icon: string }> = {
-    CALM:     { color: "#22c55e", bg: "#16a34a22", icon: "🟢" },
+    CALM: { color: "#22c55e", bg: "#16a34a22", icon: "🟢" },
     ELEVATED: { color: "#f59e0b", bg: "#d9770622", icon: "⚠" },
-    STORM:    { color: "#ef4444", bg: "#7f1d1d22", icon: "🔴" },
+    STORM: { color: "#ef4444", bg: "#7f1d1d22", icon: "🔴" },
   };
   const c = conf[regime] ?? conf["ELEVATED"];
   const sizeNote = sizing >= 1.0 ? "full size" : sizing >= 0.6 ? "reduce exposure" : "small size only";
@@ -146,7 +143,7 @@ function fmtVol(n: number): string {
 function fmtPrice(n: number): string {
   if (n === 0) return "0";
   if (n >= 1000) return n.toLocaleString("en-US", { maximumFractionDigits: 2 });
-  if (n >= 1)    return n.toFixed(4);
+  if (n >= 1) return n.toFixed(4);
   return n.toPrecision(4);
 }
 
@@ -157,63 +154,43 @@ interface VolRadarProps {
 }
 
 export default function VolRadar({ onSelect }: VolRadarProps) {
-  const [coins, setCoins]       = useState<VolCoin[]>([]);
-  const [loading, setLoading]   = useState(false);
-  const [error, setError]       = useState<string | null>(null);
-  const [lastRefresh, setLast]  = useState<Date | null>(null);
-  const [sortBy, setSortBy]     = useState<SortKey>("rel_vol");
-  const [universe, setUniverse] = useState(0);
-  const [scanned, setScanned]   = useState(0);
-  const [minRv, setMinRv]       = useState<1.8 | 2.5 | 3.5>(1.8);
-  const intervalRef             = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [sortBy, setSortBy] = useState<SortKey>("rel_vol");
+  const [minRv, setMinRv] = useState<1.8 | 2.5 | 3.5>(1.8);
+  const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
 
-  const fetchData = useCallback(async (silent = false) => {
-    if (!silent) setLoading(true);
-    setError(null);
-    try {
-      const res = await fetch(
-        `${BASE_URL}/scan?interval=1d&min_score=1&max_coins=200&min_volume=500000`,
-        { signal: AbortSignal.timeout(60_000) }
-      );
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data: ScanResult = await res.json();
+  // Same params as TopSignals' default scan — shares one request/response
+  // via scanCache instead of issuing its own.
+  const { data, error, loading, refetch } = useScanData(
+    { interval: "1d", min_score: 1, max_coins: 200, min_volume: 500000 },
+    { pollMs: POLL_MS }
+  );
 
-      // Pull all coins with rel_vol >= 1.8 from the scan (not just score >= 9)
-      // The /scan endpoint only returns signals that pass scoring — but we want
-      // the vol pre-filter list. Fallback: show all returned signals sorted by vol.
-      const all = (data.signals ?? []).filter((c) => (c.rel_vol ?? 0) >= 1.8);
-      all.sort((a, b) => (b.rel_vol ?? 0) - (a.rel_vol ?? 0));
+  const allSignals = (data?.signals ?? []) as unknown as VolCoin[];
+  const coins = allSignals.filter((c) => (c.rel_vol ?? 0) >= 1.8);
+  const universe = data?.universe ?? 0;
+  const scanned = data?.scanned ?? 0;
 
-      setCoins(all);
-      setUniverse(data.universe ?? 0);
-      setScanned(data.scanned ?? 0);
-      setLast(new Date());
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : "Unknown error";
-      if (!silent) setError(msg);
-    } finally {
-      if (!silent) setLoading(false);
-    }
-  }, []);
-
+  // Cosmetic "last refresh" stamp — updates whenever fresh data arrives.
   useEffect(() => {
-    fetchData();
-    intervalRef.current = setInterval(() => fetchData(true), 5 * 60 * 1000);
-    return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
-  }, [fetchData]);
+    if (data) setLastRefresh(new Date());
+  }, [data]);
+
+  const handleRefresh = () => {
+    refetch(true);
+  };
 
   const sorted = [...coins]
     .filter((c) => (c.rel_vol ?? 0) >= minRv)
     .sort((a, b) => {
-      if (sortBy === "rel_vol")    return (b.rel_vol ?? 0)    - (a.rel_vol ?? 0);
-      if (sortBy === "change")     return (b.change ?? 0)     - (a.change ?? 0);
-      if (sortBy === "score")      return (b.score ?? 0)      - (a.score ?? 0);
+      if (sortBy === "rel_vol") return (b.rel_vol ?? 0) - (a.rel_vol ?? 0);
+      if (sortBy === "change") return (b.change ?? 0) - (a.change ?? 0);
+      if (sortBy === "score") return (b.score ?? 0) - (a.score ?? 0);
       if (sortBy === "volume_24h") return (b.volume_24h ?? 0) - (a.volume_24h ?? 0);
       return 0;
     });
 
   const strongBuys = coins.filter(c => c.signal === "STRONG BUY").length;
-  const buys       = coins.filter(c => c.signal === "BUY").length;
+  const buys = coins.filter(c => c.signal === "BUY").length;
 
   // ── Header ─────────────────────────────────────────────────────────────────
   const Header = () => (
@@ -237,7 +214,7 @@ export default function VolRadar({ onSelect }: VolRadarProps) {
           </div>
         </div>
         <button
-          onClick={() => fetchData()}
+          onClick={handleRefresh}
           disabled={loading}
           style={{
             background: "#1e293b", border: "1px solid #334155", borderRadius: 8,
@@ -328,7 +305,7 @@ export default function VolRadar({ onSelect }: VolRadarProps) {
   if (error) return (
     <div style={{ padding: 24, color: "#ef4444", fontFamily: "monospace", fontSize: 13 }}>
       Error: {error}
-      <button onClick={() => fetchData()} style={{ marginLeft: 12, color: "#60a5fa", background: "none", border: "none", cursor: "pointer" }}>Retry</button>
+      <button onClick={handleRefresh} style={{ marginLeft: 12, color: "#60a5fa", background: "none", border: "none", cursor: "pointer" }}>Retry</button>
     </div>
   );
 
