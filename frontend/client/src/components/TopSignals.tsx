@@ -1,11 +1,10 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { DexTopCoins } from "@/components/DexTopCoins";
-
-const API = (import.meta as Record<string, unknown> & { env?: Record<string, string> })
-  .env?.VITE_API_BASE ?? "https://crypto-sniper.onrender.com";
+import { useScanData } from "@/lib/useScanData";
 
 const BUY_THRESHOLD = 5; // gate-based scoring: BUY/STRONG BUY uses signal label check
-const PAGE_SIZE     = 20;
+const PAGE_SIZE = 20;
+const POLL_MS = 60 * 60 * 1000; // hourly
 
 export interface Signal {
   scanned_at?: number;
@@ -20,7 +19,6 @@ export interface Signal {
 interface BuySignal { symbol: string; score: number; change: number; }
 interface Props { onSelect: (symbol: string) => void; interval?: string; listMode?: boolean; onBuySignalsChange?: (signals: BuySignal[]) => void; onAllSignalsChange?: (signals: Signal[]) => void; }
 
-
 const TH: React.CSSProperties = {
   fontSize: 8, fontWeight: 700, letterSpacing: "0.08em",
   color: "#334155", textTransform: "uppercase", padding: "6px 8px",
@@ -28,7 +26,7 @@ const TH: React.CSSProperties = {
 };
 
 type FilterTab = "buy" | "wait" | "all";
-type SortCol   = "score" | "change" | "rsi";
+type SortCol = "score" | "change" | "rsi";
 
 function useIsMobile() {
   const [isMobile, setIsMobile] = useState(() => window.innerWidth < 480);
@@ -40,140 +38,107 @@ function useIsMobile() {
   return isMobile;
 }
 
+function mapSignal(s: Record<string, unknown>): Signal {
+  return {
+    symbol: String(s.symbol ?? ""),
+    score: Number(s.score ?? 0),
+    max_score: Number(s.max_score ?? 13),
+    signal: String(s.signal ?? ""),
+    v: Number(s.v ?? 0),
+    p: Number(s.p ?? 0),
+    r: Number(s.r ?? 0),
+    t: Number(s.t ?? 0),
+    s: Number(s.s ?? 0),
+    z_price: s.z_price != null ? Number(s.z_price) : undefined,
+    z_vol: s.z_vol != null ? Number(s.z_vol) : undefined,
+    z_return: s.z_return != null ? Number(s.z_return) : undefined,
+    z_quality: s.z_quality ? String(s.z_quality) : undefined,
+    price: Number(s.price ?? 0),
+    change: Number(s.change ?? 0),
+    rsi: Number(s.rsi ?? 0),
+    adx: Number(s.adx ?? 0),
+    rel_vol: Number(s.rel_vol ?? 0),
+    exchange: String(s.exchange ?? "binance"),
+    exchange_label: String(s.exchange_label ?? "BINANCE"),
+    binance_listed: Boolean(s.binance_listed ?? true),
+    scanned_at: s.scanned_at ? Number(s.scanned_at) : undefined,
+  };
+}
+
 export function TopSignals({ onSelect, interval = "1h", onBuySignalsChange, onAllSignalsChange }: Props) {
-  const [signals,  setSignals]  = useState<Signal[]>([]);
-  const [loading,  setLoading]  = useState(false);
-  const [lastScan, setLastScan] = useState<string>("");
-  const [elapsed,  setElapsed]  = useState(0);
-  const [universe, setUniverse] = useState(0);
-  const [scanned,  setScanned]  = useState(0);
-  const [error,    setError]    = useState<string | null>(null);
-  const [cacheAge, setCacheAge] = useState<number | null>(null);
-  const [sortBy,   setSortBy]   = useState<SortCol>("score");
-  const [tab,      setTab]      = useState<FilterTab>("buy");
-  const [page,     setPage]     = useState(1);
+  const [sortBy, setSortBy] = useState<SortCol>("score");
+  const [tab, setTab] = useState<FilterTab>("buy");
+  const [page, setPage] = useState(1);
+  const [elapsed, setElapsed] = useState(0);
   const isMobile = useIsMobile();
 
-  const elapsedRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const abortRef   = useRef<AbortController | null>(null);
+  // Single shared /scan call — TopSignals and VolRadar use identical params
+  // by default (interval=1d, min_score=1, max_coins=200, min_volume=500000),
+  // so when both are mounted they share one request/response via scanCache
+  // instead of each firing their own.
+  const { data, error: scanError, loading, refetch } = useScanData(
+    { interval: interval.toLowerCase(), min_score: 1, max_coins: 200, min_volume: 500000 },
+    { pollMs: POLL_MS }
+  );
 
-  const stopElapsed = () => {
-    if (elapsedRef.current) { clearInterval(elapsedRef.current); elapsedRef.current = null; }
-  };
+  const signals: Signal[] = (data?.signals ?? []).map(mapSignal);
+  const universe = data?.universe ?? signals.length;
+  const scanned = data?.scanned ?? data?.universe ?? signals.length;
+  const cacheAge = data?.cached ? (data?.cached_age_mins ?? null) : null;
+  const error = scanError ? `Scan failed: ${scanError}` : null;
+  const lastScan = data ? new Date().toLocaleTimeString() : "";
 
-  const scan = useCallback(async () => {
-    abortRef.current?.abort();
-    const ctrl = new AbortController();
-    abortRef.current = ctrl;
-
-    setLoading(true);
-    setError(null);
-    setElapsed(0);
-    setPage(1);
-
-    stopElapsed();
-    const start = Date.now();
-    elapsedRef.current = setInterval(() => {
-      setElapsed(Math.floor((Date.now() - start) / 1000));
-    }, 1000);
-
-    try {
-      const res = await fetch(
-        // Use same params as the bot's daily scan so the warm SQLite cache is served instantly.
-        // cache_key = "{interval}:{min_score}:{max_coins}:{min_volume}"
-        // Bot: 1d:1:200:500000  — frontend must match exactly.
-        `${API}/scan?min_score=1&interval=${interval.toLowerCase()}&max_coins=200&min_volume=500000`,
-        { signal: ctrl.signal }
-      );
-      if (!res.ok) throw new Error(`/scan returned ${res.status}`);
-      const data = await res.json();
-
-      const all: Signal[] = (data.signals ?? []).map((s: Record<string, unknown>) => ({
-        symbol:    String(s.symbol ?? ""),
-        score:     Number(s.score ?? 0),
-        max_score: Number(s.max_score ?? 13),
-        signal:    String(s.signal ?? ""),
-        v:         Number(s.v ?? 0),
-        p:         Number(s.p ?? 0),
-        r:         Number(s.r ?? 0),
-        t:         Number(s.t ?? 0),
-        s:         Number(s.s ?? 0),
-        z_price:   s.z_price  != null ? Number(s.z_price)  : undefined,
-        z_vol:     s.z_vol    != null ? Number(s.z_vol)    : undefined,
-        z_return:  s.z_return != null ? Number(s.z_return) : undefined,
-        z_quality: s.z_quality ? String(s.z_quality) : undefined,
-        price:     Number(s.price ?? 0),
-        change:    Number(s.change ?? 0),
-        rsi:       Number(s.rsi ?? 0),
-        adx:       Number(s.adx ?? 0),
-        rel_vol:   Number(s.rel_vol ?? 0),
-        exchange:       String(s.exchange ?? "binance"),
-        exchange_label: String(s.exchange_label ?? "BINANCE"),
-        binance_listed: Boolean(s.binance_listed ?? true),
-        scanned_at: s.scanned_at ? Number(s.scanned_at) : undefined,
-      }));
-
-      if (!ctrl.signal.aborted) {
-        setSignals(all);
-        setUniverse(data.universe ?? all.length);
-        setScanned(data.scanned ?? data.universe ?? all.length);
-        setLastScan(new Date().toLocaleTimeString());
-        setCacheAge(data.cached ? (data.cached_age_mins ?? null) : null);
-        setError(null);
-        if (onBuySignalsChange) {
-          const buyList = all
-            .filter(s => s.signal === "STRONG BUY" || s.signal === "BUY")
-            .sort((a, b) => b.score - a.score)
-            .map(s => ({ symbol: s.symbol, score: s.score, change: s.change }));
-          onBuySignalsChange(buyList);
-        }
-        if (onAllSignalsChange) {
-          onAllSignalsChange(all);
-        }
-      }
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : String(e);
-      if (!ctrl.signal.aborted) {
-        setError(msg.includes("abort") || msg.includes("AbortError") ? null : `Scan failed: ${msg}`);
-      }
-    } finally {
-      stopElapsed();
-      setLoading(false);
-    }
-  }, [interval]);
-
-  useEffect(() => { scan(); }, [scan]);
+  // Elapsed-seconds counter for the "Scan" button label while loading.
   useEffect(() => {
-    const t = setInterval(scan, 60 * 60 * 1000);
+    if (!loading) { setElapsed(0); return; }
+    const start = Date.now();
+    const t = setInterval(() => setElapsed(Math.floor((Date.now() - start) / 1000)), 1000);
     return () => clearInterval(t);
-  }, [scan]);
-  useEffect(() => () => { stopElapsed(); abortRef.current?.abort(); }, []);
+  }, [loading]);
 
-  // Reset page when tab or sort changes
-  useEffect(() => { setPage(1); }, [tab, sortBy]);
+  // Reset to page 1 whenever fresh data arrives, or the tab/sort changes.
+  useEffect(() => { setPage(1); }, [data, tab, sortBy]);
 
-  const buyCount  = signals.filter(s => s.signal === "STRONG BUY" || s.signal === "BUY").length;
+  // Surface the latest signals to the parent (used to drive the
+  // "auto-watch" buy-signal list and the volume-coin map elsewhere on the page).
+  useEffect(() => {
+    if (onBuySignalsChange) {
+      const buyList = signals
+        .filter(s => s.signal === "STRONG BUY" || s.signal === "BUY")
+        .sort((a, b) => b.score - a.score)
+        .map(s => ({ symbol: s.symbol, score: s.score, change: s.change }));
+      onBuySignalsChange(buyList);
+    }
+    if (onAllSignalsChange) {
+      onAllSignalsChange(signals);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data]);
+
+  const scan = useCallback(() => refetch(true), [refetch]);
+
+  const buyCount = signals.filter(s => s.signal === "STRONG BUY" || s.signal === "BUY").length;
   const waitCount = signals.length - buyCount;
 
   // Filter by tab
   const filtered = [...signals].filter(s => {
-    if (tab === "buy")  return s.signal === "STRONG BUY" || s.signal === "BUY";
+    if (tab === "buy") return s.signal === "STRONG BUY" || s.signal === "BUY";
     if (tab === "wait") return s.signal !== "STRONG BUY" && s.signal !== "BUY";
     return true;
   });
 
   // Sort
   const sorted = filtered.sort((a, b) => {
-    if (sortBy === "score")  return b.score - a.score;
+    if (sortBy === "score") return b.score - a.score;
     if (sortBy === "change") return (b.change ?? 0) - (a.change ?? 0);
-    if (sortBy === "rsi")    return b.rsi - a.rsi;
+    if (sortBy === "rsi") return b.rsi - a.rsi;
     return 0;
   });
 
   // Paginate
   const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
   const pageClamped = Math.min(page, totalPages);
-  const pageRows   = sorted.slice((pageClamped - 1) * PAGE_SIZE, pageClamped * PAGE_SIZE);
+  const pageRows = sorted.slice((pageClamped - 1) * PAGE_SIZE, pageClamped * PAGE_SIZE);
 
   const SortBtn = ({ col, label }: { col: SortCol; label: string }) => (
     <button
@@ -231,9 +196,9 @@ export function TopSignals({ onSelect, interval = "1h", onBuySignalsChange, onAl
       {/* Filter tabs */}
       {signals.length > 0 && (
         <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
-          <TabBtn id="buy"  label="BUY"  count={buyCount}  activeColor="#22c55e" />
+          <TabBtn id="buy" label="BUY" count={buyCount} activeColor="#22c55e" />
           <TabBtn id="wait" label="WAIT" count={waitCount} activeColor="#f59e0b" />
-          <TabBtn id="all"  label="ALL"  count={signals.length} activeColor="#7c3aed" />
+          <TabBtn id="all" label="ALL" count={signals.length} activeColor="#7c3aed" />
         </div>
       )}
 
@@ -291,12 +256,12 @@ export function TopSignals({ onSelect, interval = "1h", onBuySignalsChange, onAl
           {/* Rows — only current page */}
           {pageRows.map((sig, i) => {
             const globalIndex = (pageClamped - 1) * PAGE_SIZE + i + 1;
-            const chg   = sig.change ?? 0;
+            const chg = sig.change ?? 0;
             const rowBg = i % 2 === 0 ? "#060b17" : "#080e1c";
             // Signal tier drives left-border colour
             const qualBorder = sig.signal === "STRONG BUY" ? "3px solid #22c55e"
-                             : sig.signal === "BUY"        ? "3px solid #22c55e"
-                             : "3px solid #1e293b";
+              : sig.signal === "BUY" ? "3px solid #22c55e"
+              : "3px solid #1e293b";
 
             return (
               <button
@@ -326,10 +291,10 @@ export function TopSignals({ onSelect, interval = "1h", onBuySignalsChange, onAl
                       {sig.symbol}
                     </span>
                     {sig.exchange_label && sig.exchange_label !== "BINANCE" && (() => {
-                      const exchColor = sig.exchange_label === "MEXC"  ? { bg: "rgba(14,165,233,0.12)", border: "rgba(14,165,233,0.3)", text: "#38bdf8" }
-                                      : sig.exchange_label === "GATE"  ? { bg: "rgba(168,85,247,0.12)", border: "rgba(168,85,247,0.3)", text: "#c084fc" }
-                                      : sig.exchange_label === "MULTI" ? { bg: "rgba(251,146,60,0.12)", border: "rgba(251,146,60,0.3)",  text: "#fb923c" }
-                                      : null;
+                      const exchColor = sig.exchange_label === "MEXC" ? { bg: "rgba(14,165,233,0.12)", border: "rgba(14,165,233,0.3)", text: "#38bdf8" }
+                        : sig.exchange_label === "GATE" ? { bg: "rgba(168,85,247,0.12)", border: "rgba(168,85,247,0.3)", text: "#c084fc" }
+                        : sig.exchange_label === "MULTI" ? { bg: "rgba(251,146,60,0.12)", border: "rgba(251,146,60,0.3)", text: "#fb923c" }
+                        : null;
                       if (!exchColor) return null;
                       return (
                         <span style={{
