@@ -520,7 +520,8 @@ export default function Home() {
           </div>
         )}
 
-        {loading && (
+        {/* Full spinner only on the very first analysis — no previous result to keep showing. */}
+        {loading && !sig && !dexSig && (
           <div className="flex items-center justify-center gap-3 py-16 text-text-muted text-[12px] font-mono">
             <div className="flex gap-1">
               {[0,1,2].map(i => (
@@ -531,8 +532,21 @@ export default function Home() {
           </div>
         )}
 
+        {/* Inline "updating" indicator — keeps the previous result visible (dimmed)
+            while a new analysis is in flight, instead of tearing down the panel. */}
+        {loading && (sig || dexSig) && (
+          <div className="flex items-center gap-2 text-[10px] font-mono text-purple mb-2">
+            <div className="flex gap-1">
+              {[0,1,2].map(i => (
+                <div key={i} className="w-1.5 h-1.5 rounded-full bg-purple animate-bounce" style={{ animationDelay: `${i*0.15}s` }} />
+              ))}
+            </div>
+            {activeSource === "dex" ? "Scanning DEX..." : `Updating ${symbol}...`}
+          </div>
+        )}
+
         {/* ── DEX RESULT ─────────────────────────────────────────────────────── */}
-        {dexSig && !loading && activeSource === "dex" && (() => {
+        {dexSig && activeSource === "dex" && (() => {
           const ds = dexSig;
           const RISK_COLOR: Record<string, string> = {
             LOW: "#22c55e", MEDIUM: "#f59e0b", HIGH: "#ef4444", CRITICAL: "#ef4444", UNKNOWN: "#94a3b8"
@@ -753,9 +767,9 @@ export default function Home() {
           );
         })()}
 
-        {sig && !loading && activeSource === "cex" && (
+        {sig && activeSource === "cex" && (
           <div
-            className={isMobile ? "flex flex-col gap-3" : "grid gap-3"}
+            className={`${isMobile ? "flex flex-col gap-3" : "grid gap-3"} ${loading ? "opacity-50 pointer-events-none" : ""} transition-opacity duration-200`}
             style={isMobile ? undefined : { gridTemplateColumns: "1fr 320px" }}
           >
             {/* LEFT COLUMN — full on desktop; hidden on mobile unless tab=analyse */}
