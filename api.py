@@ -82,7 +82,7 @@ class WatchlistRequest(BaseModel):
 
 # ── Scan cache ───────────────────────────────────────────────────────────────
 _scan_cache: dict = {}
-_SCAN_TTL  = 300   # 5-min cache - keeps scanner scores close to live analyse results
+_SCAN_TTL  = 900   # 15-min cache - reduces how often a request hits the cold-scan path
 
 # --- Per-key lock to coalesce concurrent identical /scan requests ---
 # Without this, multiple simultaneous requests with the same params (e.g. the
