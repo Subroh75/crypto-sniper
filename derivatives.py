@@ -6,6 +6,7 @@ No API key required for public endpoints.
 """
 import requests, time, logging
 from functools import lru_cache
+from concurrent.futures import ThreadPoolExecutor
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +37,7 @@ def get_funding_rate(symbol: str) -> dict:
         r = requests.get(
             f"{BYBIT}/v5/market/tickers",
             params={"category": "linear", "symbol": sym},
-            timeout=6,
+            timeout=3,
         )
         r.raise_for_status()
         items = r.json().get("result", {}).get("list", [])
@@ -60,7 +61,7 @@ def get_funding_rate(symbol: str) -> dict:
         r = requests.get(
             f"{OKX}/api/v5/public/funding-rate",
             params={"instId": _okx_sym(symbol)},
-            timeout=6,
+            timeout=3,
         )
         r.raise_for_status()
         data = r.json().get("data", [])
@@ -93,7 +94,7 @@ def get_open_interest(symbol: str) -> dict:
         r = requests.get(
             f"{BYBIT}/v5/market/tickers",
             params={"category": "linear", "symbol": sym},
-            timeout=6,
+            timeout=3,
         )
         r.raise_for_status()
         items = r.json().get("result", {}).get("list", [])
@@ -138,7 +139,7 @@ def _get_oi_history(sym: str) -> float:
             f"{BYBIT}/v5/market/open-interest",
             params={"category": "linear", "symbol": sym, "intervalTime": "1h",
                     "startTime": start_ts, "endTime": end_ts, "limit": 2},
-            timeout=6,
+            timeout=3,
         )
         r.raise_for_status()
         items = r.json().get("result", {}).get("list", [])
@@ -161,7 +162,7 @@ def get_long_short_ratio(symbol: str) -> dict:
         r = requests.get(
             f"{BYBIT}/v5/market/account-ratio",
             params={"category": "linear", "symbol": sym, "period": "1h", "limit": 1},
-            timeout=6,
+            timeout=3,
         )
         r.raise_for_status()
         items = r.json().get("result", {}).get("list", [])
@@ -197,9 +198,14 @@ def get_long_short_ratio(symbol: str) -> dict:
 @lru_cache(maxsize=64)
 def _deriv_cached(symbol: str, ts_bucket: int) -> dict:
     """Cached 5-min derivatives snapshot."""
-    fr  = get_funding_rate(symbol)
-    oi  = get_open_interest(symbol)
-    ls  = get_long_short_ratio(symbol)
+    # funding/OI/long-short are independent Bybit/OKX calls — run concurrently
+    # instead of sequentially (each can take up to the full timeout when a
+    # smaller alt has no perp data on Bybit).
+    with ThreadPoolExecutor(max_workers=3) as ex:
+        f_fr = ex.submit(get_funding_rate, symbol)
+        f_oi = ex.submit(get_open_interest, symbol)
+        f_ls = ex.submit(get_long_short_ratio, symbol)
+        fr, oi, ls = f_fr.result(), f_oi.result(), f_ls.result()
     # Check if symbol has perp data at all
     has_data = fr["source"] != "unavailable"
     return {"funding": fr, "open_interest": oi, "long_short": ls, "has_perp": has_data}
@@ -237,7 +243,7 @@ def get_order_book_pressure(symbol: str) -> dict:
         r = requests.get(
             f"{BINANCE_SPOT}/depth",
             params={"symbol": sym, "limit": 20},
-            timeout=6,
+            timeout=3,
         )
         r.raise_for_status()
         data = r.json()
@@ -301,7 +307,7 @@ def get_book_ticker(symbol: str) -> dict:
         r = requests.get(
             f"{BINANCE_SPOT}/ticker/bookTicker",
             params={"symbol": sym},
-            timeout=6,
+            timeout=3,
         )
         r.raise_for_status()
         d = r.json()
@@ -339,8 +345,11 @@ def get_book_ticker(symbol: str) -> dict:
 @lru_cache(maxsize=128)
 def _micro_cached(symbol: str, ts_bucket: int) -> dict:
     """30-second cached microstructure snapshot."""
-    pressure = get_order_book_pressure(symbol)
-    ticker   = get_book_ticker(symbol)
+    # Both hit the Binance spot mirror independently — run concurrently.
+    with ThreadPoolExecutor(max_workers=2) as ex:
+        f_pressure = ex.submit(get_order_book_pressure, symbol)
+        f_ticker = ex.submit(get_book_ticker, symbol)
+        pressure, ticker = f_pressure.result(), f_ticker.result()
 
     ratio   = pressure["pressure_ratio"]
     quality = ticker["liquidity_quality"]
