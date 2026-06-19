@@ -181,11 +181,20 @@ def _score_convergence(asset: str, state: dict) -> tuple:
     score += vel_pts
     breakdown["kalman"] = round(vel_pts, 1)
 
-    # WhaleAgent conviction is already 0-100, scaled directly by its weight.
-    # Defaults to 0 if WhaleAgent hasn't written to the blackboard for this
-    # asset yet (e.g. not in tracked-wallet list, or agent not yet scheduled).
-    whale_conviction = state.get("whale_conviction", 0)
-    whale_pts = whale_conviction * WEIGHTS["whale"]
+    # WhaleAgent writes a categorical signal (ACCUMULATING/DISTRIBUTING/
+    # NEUTRAL) + confidence 0-100, not a raw conviction number. Only
+    # ACCUMULATING gets full points; DISTRIBUTING actively penalises
+    # (conflicts with a LONG setup); NEUTRAL/missing scores 0.
+    # WhaleAgent only runs for top-20 conviction assets each cycle, so
+    # most assets simply won't have this key — defaults to NEUTRAL/0.
+    whale_signal_val = state.get("whale_signal", "NEUTRAL")
+    whale_confidence  = state.get("whale_confidence", 0)
+    if whale_signal_val == "ACCUMULATING":
+        whale_pts = whale_confidence * WEIGHTS["whale"]
+    elif whale_signal_val == "DISTRIBUTING":
+        whale_pts = -whale_confidence * WEIGHTS["whale"]
+    else:
+        whale_pts = 0.0
     score += whale_pts
     breakdown["whale"] = round(whale_pts, 1)
 
