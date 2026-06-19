@@ -121,10 +121,11 @@ AGENTS = {
     "garch":     GARCHAgent(),
     "sentiment": SentimentAgent(),
     "vprt":      SignalAgent(),
-    "whale":     WhaleAgent(),
 }
+WHALE_AGENT = WhaleAgent()  # separate stage-2 — see run_full_pipeline()
 
-PIPELINE_ORDER = ["kalman", "garch", "sentiment", "vprt", "whale"]
+PIPELINE_ORDER = ["kalman", "garch", "sentiment", "vprt"]
+WHALE_TOP_N = int(os.environ.get("SWARM_WHALE_TOP_N", "20"))
 
 # ── Universe fetch ─────────────────────────────────────────────────
 
@@ -328,7 +329,7 @@ async def run_pipeline_for_asset(asset: str) -> dict:
     elapsed = int((time.monotonic() - start) * 1000)
     logger.debug(f"[{asset}] Pipeline complete in {elapsed}ms")
 
-    return {"asset": asset, "elapsed": elapsed, "agents": results}
+    return {"asset": asset, "elapsed": elapsed, "agents": results, "context": context}
 
 # ── Full pipeline sweep ────────────────────────────────────────────
 
@@ -372,6 +373,35 @@ async def run_full_pipeline() -> None:
     errors = sum(1 for r in results if isinstance(r, Exception))
     if errors:
         logger.warning(f"[Pipeline] {errors} asset pipelines raised exceptions")
+
+    # ── Stage 2: WhaleAgent — top-20 by SignalAgent conviction only ────
+    # Per DESIGN.md: whale flow tracking is expensive (multiple chain
+    # APIs) and only meaningful for the assets already showing the
+    # strongest VPRT conviction — not the full ~200-coin universe.
+    ranked = sorted(
+        (r for r in results if isinstance(r, dict)),
+        key=lambda r: r.get("context", {}).get("conviction", 0),
+        reverse=True,
+    )
+    whale_candidates = ranked[:WHALE_TOP_N]
+
+    for r in whale_candidates:
+        asset = r["asset"]
+        context = r["context"]
+        try:
+            result = await WHALE_AGENT.run(asset, context)
+            if result.success:
+                bb.write(WHALE_AGENT.identity.name, asset, result.data)
+                logger.debug(f"[{asset}] whale OK {result.duration_ms}ms")
+            else:
+                logger.warning(f"[{asset}] whale FAILED: {result.error}")
+                WHALE_AGENT.log_health("FAILED", {"error": result.error, "asset": asset})
+            for w in (result.warnings or []):
+                logger.warning(f"[{asset}] whale WARN: {w}")
+        except Exception as e:
+            logger.error(f"[{asset}] whale EXCEPTION: {e}")
+
+    logger.info(f"[Pipeline] WhaleAgent ran for top {len(whale_candidates)} assets by conviction")
 
     # Orchestrator
     fired = await run_orchestrator(asset_list=symbols, threshold=FIRE_THRESHOLD)
@@ -588,7 +618,7 @@ async def _send_dex_telegram(
 # ── Health checks ──────────────────────────────────────────────────
 
 async def run_health_checks() -> None:
-    for name, agent in AGENTS.items():
+    for name, agent in {**AGENTS, "whale": WHALE_AGENT}.items():
         try:
             ok = await agent.health_check()
             status = "OK" if ok else "DEGRADED"
