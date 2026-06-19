@@ -250,10 +250,16 @@ async def analyse(req: AnalyseRequest):
     symbol = req.symbol.upper().strip()
     t_start = time.time()
     try:
-        # OHLCV + quote are independent network calls — run concurrently
-        ohlcv, quote = await asyncio.gather(
+        # OHLCV, quote, derivatives, and microstructure are all independent —
+        # derivatives/microstructure only need `symbol`, not ohlcv/indicators/sig,
+        # so they run concurrently with ohlcv/quote instead of waiting for them.
+        # (Confirmed: derivatives.py uses its own independent lru_cache, no
+        # shared state with data.py's ohlcv/quote.)
+        ohlcv, quote, derivatives, microstructure = await asyncio.gather(
             asyncio.to_thread(get_ohlcv, symbol, req.interval),
             asyncio.to_thread(get_quote, symbol),
+            asyncio.to_thread(get_derivatives, symbol),
+            asyncio.to_thread(get_market_microstructure, symbol),
         )
         indicators = get_indicators(symbol, req.interval, bars=ohlcv)
         # S score removed — social/sentiment calls skipped for speed
@@ -273,13 +279,8 @@ async def analyse(req: AnalyseRequest):
         coindar_events=coindar_events,
     )
     levels = get_key_levels(sig)
-    # Derivatives + microstructure are independent external calls (Bybit/OKX/Binance
-    # mirror) that can each take several seconds on a cold lru_cache bucket — run
-    # them concurrently instead of sequentially (was the main /analyse latency).
-    derivatives, microstructure = await asyncio.gather(
-        asyncio.to_thread(get_derivatives, symbol),
-        asyncio.to_thread(get_market_microstructure, symbol),
-    )
+    # derivatives + microstructure already fetched above, in parallel with
+    # ohlcv/quote — nothing left to do here.
     # Background: record signal + check price alerts + Telegram notify on STRONG BUY
     import threading
     threading.Thread(target=record_signal, args=(symbol, req.interval, sig.total, sig.signal_label, sig.close), daemon=True).start()
