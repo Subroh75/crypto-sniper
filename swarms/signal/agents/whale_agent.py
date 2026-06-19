@@ -1,229 +1,314 @@
 """
-whale_agent.py — WhaleAgent for Crypto-Swarm
-Tracks large/accumulating wallets across ETH, BSC, and Solana.
-Combines size-based and accumulation-based signals into one conviction score.
+swarms/signal/agents/whale_agent.py
+─────────────────────────────────────────────────────────────
+Agent — Whale Wallet Tracker (Size + Accumulation Conviction)
 
-Env vars needed:
-  MORALIS_API_KEY   — covers ETH + BSC
-  SOLSCAN_API_KEY   — covers Solana
+RESPONSIBILITY:
+  For assets with tracked whale wallets (see TRACKED_WALLETS / tokens.py),
+  fetch recent transfers + current balances, score both a size signal
+  (large single transfers) and an accumulation signal (net balance change
+  over 7d), and combine into one conviction score (0-100).
 
-NOTE: tokens.py / tracked-wallet list is still a placeholder — needs real
-wallet addresses populated before this can run against live data.
+  Assets with no tracked wallets yet return a neutral (success, score=0)
+  result rather than failing — this runs per-asset every cycle alongside
+  Kalman/GARCH/Sentiment/Signal, and most of the ~200-coin universe won't
+  have wallets mapped initially.
+
+DATA SOURCES:
+  ETH + BSC  — Moralis (single key, both chains)
+  Solana     — Solscan
+
+BLACKBOARD WRITES:
+  whale_conviction, whale_size_score, whale_accumulation_score,
+  whale_largest_transfer_usd, whale_net_change_pct_7d, whale_flags,
+  whale_wallets_tracked
+
+NOTE: TRACKED_WALLETS is still a placeholder — needs real wallet
+addresses populated (tokens.py) before this produces non-zero scores
+for any asset. Balance-snapshot job (7d-ago lookup) also not yet built;
+accumulation_score is stubbed at 0 until that lands.
 """
 
+from __future__ import annotations
+
 import os
+import sys
 import time
-import logging
+from typing import Any, Optional
+
+import aiohttp
 import requests
-from typing import Optional
-from dataclasses import dataclass, field
 
-logger = logging.getLogger(__name__)
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(
+    os.path.dirname(os.path.abspath(__file__))
+)))
+if ROOT not in sys.path:
+    sys.path.insert(0, ROOT)
 
-MORALIS_KEY  = os.environ.get("MORALIS_API_KEY", "")
-SOLSCAN_KEY  = os.environ.get("SOLSCAN_API_KEY", "")
+from cs_platform.registry.agent_base import AgentIdentity, AgentResult, BaseAgent
+
+# ── Config ─────────────────────────────────────────────────────────
+MORALIS_KEY = os.environ.get("MORALIS_API_KEY", "")
+SOLSCAN_KEY = os.environ.get("SOLSCAN_API_KEY", "")
 
 MORALIS_BASE = "https://deep-index.moralis.io/api/v2.2"
 SOLSCAN_BASE = "https://pro-api.solscan.io/v2.0"
 
-# ── Tiered size thresholds (USD) — mirrors SNPR's tiered burn pattern ────────
+# Tiered size thresholds (USD) — mirrors SNPR's tiered burn pattern
 SIZE_TIERS = [
-    (1_000_000, 40),   # $1M+ single transfer → 40 pts
-    (500_000,   25),   # $500k+ → 25 pts
-    (100_000,   10),   # $100k+ → 10 pts
+    (1_000_000, 40),
+    (500_000,   25),
+    (100_000,   10),
 ]
 
-# Weighting for combined conviction score
 WEIGHT_ACCUMULATION = 0.6
 WEIGHT_SIZE         = 0.4
-CONVICTION_THRESHOLD = 72   # matches Crypto-Swarm's existing signal threshold
+
+# TODO: populate from tokens.py — symbol -> list of tracked wallet addresses
+# per chain. Placeholder empty until wallet-discovery work is done.
+TRACKED_WALLETS: dict[str, dict[str, list[str]]] = {
+    # "ETH": {"eth": ["0x..."], "bsc": []},
+    # "SOL": {"sol": ["..."]},
+}
 
 
-@dataclass
-class WhaleSignal:
-    wallet: str
-    chain: str
-    symbol: str
-    size_score: float = 0.0
-    accumulation_score: float = 0.0
-    conviction: float = 0.0
-    largest_transfer_usd: float = 0.0
-    net_change_pct_7d: float = 0.0
-    flags: list = field(default_factory=list)
+class WhaleAgent(BaseAgent):
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# EVM adapter (Moralis) — ETH + BSC
-# ─────────────────────────────────────────────────────────────────────────────
-def _moralis_get(path: str, chain: str, params: Optional[dict] = None) -> Optional[dict]:
-    if not MORALIS_KEY:
-        logger.warning("MORALIS_API_KEY not set")
-        return None
-    headers = {"X-API-Key": MORALIS_KEY, "accept": "application/json"}
-    p = {"chain": chain, **(params or {})}
-    try:
-        r = requests.get(f"{MORALIS_BASE}{path}", headers=headers, params=p, timeout=15)
-        r.raise_for_status()
-        return r.json()
-    except Exception as e:
-        logger.warning(f"Moralis error {path}: {e}")
-        return None
-
-
-def get_evm_wallet_transfers(address: str, chain: str = "eth", limit: int = 100) -> list:
-    """Recent ERC20 transfers for a wallet — used for size-signal detection."""
-    data = _moralis_get(f"/{address}/erc20/transfers", chain, {"limit": limit})
-    return (data or {}).get("result", [])
-
-
-def get_evm_wallet_token_balances(address: str, chain: str = "eth") -> list:
-    """Current token holdings — used as accumulation-signal baseline."""
-    data = _moralis_get(f"/{address}/erc20", chain)
-    return data if isinstance(data, list) else []
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Solana adapter (Solscan)
-# ─────────────────────────────────────────────────────────────────────────────
-def _solscan_get(path: str, params: Optional[dict] = None) -> Optional[dict]:
-    if not SOLSCAN_KEY:
-        logger.warning("SOLSCAN_API_KEY not set")
-        return None
-    headers = {"token": SOLSCAN_KEY}
-    try:
-        r = requests.get(f"{SOLSCAN_BASE}{path}", headers=headers, params=params, timeout=15)
-        r.raise_for_status()
-        return r.json()
-    except Exception as e:
-        logger.warning(f"Solscan error {path}: {e}")
-        return None
-
-
-def get_sol_wallet_transfers(address: str, limit: int = 100) -> list:
-    data = _solscan_get("/account/transfer", {"address": address, "limit": limit})
-    return (data or {}).get("data", [])
-
-
-def get_sol_wallet_balance(address: str) -> list:
-    data = _solscan_get("/account/token-accounts", {"address": address, "type": "token"})
-    return (data or {}).get("data", [])
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Scoring — combines size + accumulation into one conviction number
-# ─────────────────────────────────────────────────────────────────────────────
-def _score_size(transfers: list, usd_field: str = "value_usd") -> tuple[float, float, list]:
-    """
-    Score the largest single transfer in the lookback window against tiers.
-    Returns (score_0_100, largest_usd, flags).
-    """
-    if not transfers:
-        return 0.0, 0.0, []
-
-    largest = max((t.get(usd_field, 0) or 0 for t in transfers), default=0.0)
-    score = 0.0
-    flags = []
-    for threshold, pts in SIZE_TIERS:
-        if largest >= threshold:
-            score = pts
-            flags.append(f"Single transfer ${largest:,.0f}+ (tier ${threshold:,.0f}+)")
-            break
-    # Normalise to 0-100 (max tier is 40 pts -> scale up)
-    return min(100.0, score * 2.5), largest, flags
-
-
-def _score_accumulation(balance_now: float, balance_7d_ago: float) -> tuple[float, float, list]:
-    """
-    Score net wallet balance change over a window.
-    Sustained accumulation (positive, consistent growth) scores higher
-    than a single large in-and-out transfer.
-    Returns (score_0_100, pct_change, flags).
-    """
-    if balance_7d_ago <= 0:
-        return 0.0, 0.0, []
-
-    pct_change = ((balance_now - balance_7d_ago) / balance_7d_ago) * 100
-    flags = []
-
-    if pct_change >= 50:
-        score = 100.0
-        flags.append(f"Strong accumulation +{pct_change:.0f}% (7d)")
-    elif pct_change >= 20:
-        score = 70.0
-        flags.append(f"Moderate accumulation +{pct_change:.0f}% (7d)")
-    elif pct_change >= 5:
-        score = 40.0
-        flags.append(f"Mild accumulation +{pct_change:.0f}% (7d)")
-    elif pct_change <= -20:
-        score = 0.0
-        flags.append(f"Distribution {pct_change:.0f}% (7d) — bearish")
-    else:
-        score = 20.0  # roughly flat — neutral baseline
-
-    return score, pct_change, flags
-
-
-def score_whale_wallet(
-    wallet: str,
-    chain: str,
-    symbol: str,
-    transfers: list,
-    balance_now: float,
-    balance_7d_ago: float,
-) -> WhaleSignal:
-    """
-    Unified conviction score combining size + accumulation signals.
-    Weighted 60% accumulation / 40% size — sustained accumulation is
-    treated as a stronger signal than a single large transfer.
-    """
-    size_score, largest_usd, size_flags = _score_size(transfers)
-    accum_score, pct_change, accum_flags = _score_accumulation(balance_now, balance_7d_ago)
-
-    conviction = (accum_score * WEIGHT_ACCUMULATION) + (size_score * WEIGHT_SIZE)
-
-    return WhaleSignal(
-        wallet=wallet,
-        chain=chain,
-        symbol=symbol,
-        size_score=round(size_score, 1),
-        accumulation_score=round(accum_score, 1),
-        conviction=round(conviction, 1),
-        largest_transfer_usd=largest_usd,
-        net_change_pct_7d=round(pct_change, 2),
-        flags=size_flags + accum_flags,
+    identity = AgentIdentity(
+        department="signal",
+        name="whale",
+        version="1.0.0",
+        description=(
+            "Tracks large transfers + net accumulation across tracked "
+            "whale wallets (ETH/BSC via Moralis, Solana via Solscan) — "
+            "combined size + accumulation conviction score"
+        ),
+        reads=[],
+        writes=[
+            "whale_conviction", "whale_size_score", "whale_accumulation_score",
+            "whale_largest_transfer_usd", "whale_net_change_pct_7d",
+            "whale_flags", "whale_wallets_tracked",
+        ],
+        schedule_seconds=300,
     )
 
+    async def run(self, asset: str, context: dict[str, Any]) -> AgentResult:
+        t0 = time.monotonic()
+        try:
+            wallets_by_chain = TRACKED_WALLETS.get(asset.upper(), {})
+            all_wallets = [
+                (chain, w)
+                for chain, ws in wallets_by_chain.items()
+                for w in ws
+            ]
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Orchestrator — placeholder, needs tracked-wallet list (tokens.py) populated
-# ─────────────────────────────────────────────────────────────────────────────
-def scan_whale_wallet(wallet: str, chain: str, symbol: str) -> Optional[WhaleSignal]:
-    """
-    Single-wallet scan entry point. Dispatches to the right adapter
-    based on chain, then runs the unified scoring.
-    NOTE: balance_7d_ago currently has no historical source wired up —
-    needs a small local cache/DB to snapshot balances daily before this
-    produces real accumulation scores. Stubbed at 0 for now.
-    """
-    if chain in ("eth", "bsc"):
-        transfers = get_evm_wallet_transfers(wallet, chain=chain)
-        balances  = get_evm_wallet_token_balances(wallet, chain=chain)
-    elif chain == "sol":
-        transfers = get_sol_wallet_transfers(wallet)
-        balances  = get_sol_wallet_balance(wallet)
-    else:
-        logger.warning(f"Unsupported chain: {chain}")
-        return None
+            if not all_wallets:
+                # Neutral result — not a failure. Most assets won't have
+                # tracked wallets until wallet-discovery work lands.
+                return self._ok({
+                    "whale_conviction":           0,
+                    "whale_size_score":           0,
+                    "whale_accumulation_score":   0,
+                    "whale_largest_transfer_usd": 0.0,
+                    "whale_net_change_pct_7d":    0.0,
+                    "whale_flags":                [],
+                    "whale_wallets_tracked":       0,
+                }, t0)
 
-    # TODO: resolve actual USD value for current balance + 7d-ago snapshot.
-    # Needs a small local snapshot table (wallet, symbol, balance, ts) —
-    # not yet built. Placeholder values below.
-    balance_now    = 0.0
-    balance_7d_ago = 0.0
+            best_signal = {"conviction": -1}
+            for chain, wallet in all_wallets:
+                sig = await self._score_wallet(wallet, chain, asset)
+                if sig is None:
+                    continue
+                if sig["conviction"] > best_signal["conviction"]:
+                    best_signal = sig
 
-    signal = score_whale_wallet(wallet, chain, symbol, transfers, balance_now, balance_7d_ago)
+            if best_signal["conviction"] < 0:
+                return self._fail(
+                    f"All {len(all_wallets)} tracked wallet(s) for {asset} "
+                    f"failed to fetch data", t0
+                )
 
-    if signal.conviction >= CONVICTION_THRESHOLD:
-        logger.info(f"WHALE SIGNAL: {symbol} ({chain}) wallet={wallet[:10]}... conviction={signal.conviction}")
+            return self._ok({
+                "whale_conviction":           best_signal["conviction"],
+                "whale_size_score":           best_signal["size_score"],
+                "whale_accumulation_score":   best_signal["accumulation_score"],
+                "whale_largest_transfer_usd": best_signal["largest_transfer_usd"],
+                "whale_net_change_pct_7d":    best_signal["net_change_pct_7d"],
+                "whale_flags":                best_signal["flags"],
+                "whale_wallets_tracked":      len(all_wallets),
+            }, t0)
 
-    return signal
+        except Exception as e:
+            return self._fail(str(e), t0)
+
+    async def health_check(self) -> bool:
+        """Ping Moralis (EVM coverage). Solscan checked best-effort."""
+        if not MORALIS_KEY:
+            return False
+        try:
+            async with aiohttp.ClientSession() as s:
+                async with s.get(
+                    f"{MORALIS_BASE}/dateToBlock",
+                    headers={"X-API-Key": MORALIS_KEY},
+                    params={"chain": "eth", "date": "2024-01-01"},
+                    timeout=aiohttp.ClientTimeout(total=5),
+                ) as r:
+                    return r.status == 200
+        except Exception:
+            return False
+
+    # ── Per-wallet scoring ──────────────────────────────────────────
+
+    async def _score_wallet(
+        self, wallet: str, chain: str, symbol: str
+    ) -> Optional[dict]:
+        try:
+            if chain in ("eth", "bsc"):
+                transfers = self._get_evm_transfers(wallet, chain)
+                balance_now = self._get_evm_balance_usd(wallet, chain)
+            elif chain == "sol":
+                transfers = self._get_sol_transfers(wallet)
+                balance_now = self._get_sol_balance_usd(wallet)
+            else:
+                self._warn(f"Unsupported chain for whale tracking: {chain}")
+                return None
+
+            # TODO: balance-snapshot job not yet built — needs a daily
+            # (wallet, symbol, balance_usd, ts) table in Supabase to
+            # compare against. Stubbed at 0 until that lands, which
+            # means accumulation_score is always 0 for now.
+            balance_7d_ago = 0.0
+
+            size_score, largest_usd, size_flags = self._score_size(transfers)
+            accum_score, pct_change, accum_flags = self._score_accumulation(
+                balance_now, balance_7d_ago
+            )
+
+            conviction = (
+                accum_score * WEIGHT_ACCUMULATION
+                + size_score * WEIGHT_SIZE
+            )
+
+            return {
+                "conviction":           round(conviction, 1),
+                "size_score":           round(size_score, 1),
+                "accumulation_score":   round(accum_score, 1),
+                "largest_transfer_usd": largest_usd,
+                "net_change_pct_7d":    round(pct_change, 2),
+                "flags":                size_flags + accum_flags,
+            }
+
+        except Exception as e:
+            self._warn(f"Wallet scan failed ({wallet[:10]}... on {chain}): {e}")
+            return None
+
+    # ── Moralis (ETH + BSC) ───────────────────────────────────────────
+
+    def _get_evm_transfers(self, address: str, chain: str, limit: int = 100) -> list:
+        if not MORALIS_KEY:
+            return []
+        try:
+            r = requests.get(
+                f"{MORALIS_BASE}/{address}/erc20/transfers",
+                headers={"X-API-Key": MORALIS_KEY},
+                params={"chain": chain, "limit": limit},
+                timeout=15,
+            )
+            r.raise_for_status()
+            return r.json().get("result", [])
+        except Exception as e:
+            self._warn(f"Moralis transfers fetch failed ({chain}): {e}")
+            return []
+
+    def _get_evm_balance_usd(self, address: str, chain: str) -> float:
+        if not MORALIS_KEY:
+            return 0.0
+        try:
+            r = requests.get(
+                f"{MORALIS_BASE}/{address}/erc20",
+                headers={"X-API-Key": MORALIS_KEY},
+                params={"chain": chain},
+                timeout=15,
+            )
+            r.raise_for_status()
+            tokens = r.json()
+            if not isinstance(tokens, list):
+                return 0.0
+            # NOTE: Moralis's plain /erc20 balance endpoint doesn't include
+            # USD value directly — would need a follow-up price lookup per
+            # token (or Moralis's /erc20/{address}/price-batch endpoint) to
+            # get real USD totals. Returning 0 for now; flagged as a gap.
+            return 0.0
+        except Exception as e:
+            self._warn(f"Moralis balance fetch failed ({chain}): {e}")
+            return 0.0
+
+    # ── Solscan (Solana) ──────────────────────────────────────────────
+
+    def _get_sol_transfers(self, address: str, limit: int = 100) -> list:
+        if not SOLSCAN_KEY:
+            return []
+        try:
+            r = requests.get(
+                f"{SOLSCAN_BASE}/account/transfer",
+                headers={"token": SOLSCAN_KEY},
+                params={"address": address, "limit": limit},
+                timeout=15,
+            )
+            r.raise_for_status()
+            return r.json().get("data", [])
+        except Exception as e:
+            self._warn(f"Solscan transfers fetch failed: {e}")
+            return []
+
+    def _get_sol_balance_usd(self, address: str) -> float:
+        # NOTE: same gap as EVM — needs a price lookup per token to get
+        # a real USD total. Returning 0 for now.
+        return 0.0
+
+    # ── Scoring helpers ─────────────────────────────────────────────
+
+    def _score_size(self, transfers: list) -> tuple[float, float, list]:
+        if not transfers:
+            return 0.0, 0.0, []
+
+        largest = max(
+            (float(t.get("value_usd", 0) or 0) for t in transfers),
+            default=0.0,
+        )
+        score = 0.0
+        flags = []
+        for threshold, pts in SIZE_TIERS:
+            if largest >= threshold:
+                score = pts
+                flags.append(f"Single transfer ${largest:,.0f}+ (tier ${threshold:,.0f}+)")
+                break
+
+        return min(100.0, score * 2.5), largest, flags
+
+    def _score_accumulation(
+        self, balance_now: float, balance_7d_ago: float
+    ) -> tuple[float, float, list]:
+        if balance_7d_ago <= 0:
+            return 0.0, 0.0, []
+
+        pct_change = ((balance_now - balance_7d_ago) / balance_7d_ago) * 100
+        flags = []
+
+        if pct_change >= 50:
+            score = 100.0
+            flags.append(f"Strong accumulation +{pct_change:.0f}% (7d)")
+        elif pct_change >= 20:
+            score = 70.0
+            flags.append(f"Moderate accumulation +{pct_change:.0f}% (7d)")
+        elif pct_change >= 5:
+            score = 40.0
+            flags.append(f"Mild accumulation +{pct_change:.0f}% (7d)")
+        elif pct_change <= -20:
+            score = 0.0
+            flags.append(f"Distribution {pct_change:.0f}% (7d) — bearish")
+        else:
+            score = 20.0
+
+        return score, pct_change, flags
