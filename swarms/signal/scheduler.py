@@ -17,7 +17,8 @@ PIPELINE (per asset):
   2. GARCHAgent   → vol regime (skips gracefully if < 20 bars)
   3. SentimentAgent → Fear & Greed global gate + funding for majors
   4. SignalAgent  → VPRT + ARIMA AR(1) confluence
-  5. Orchestrator → conviction >= 72 → fire Telegram signal
+  5. WhaleAgent   → tracked-wallet size + accumulation conviction
+  6. Orchestrator → conviction >= 72 → fire Telegram signal
 
 DEX SCAN (Option 2 — reuse main branch):
   Every 30 min, calls the main branch /dex-results endpoint
@@ -73,6 +74,7 @@ from swarms.signal.agents.kalman_agent import KalmanAgent
 from swarms.signal.agents.garch_agent  import GARCHAgent
 from swarms.signal.agents.sentiment_agent import SentimentAgent
 from swarms.signal.agents.signal_agent import SignalAgent
+from swarms.signal.agents.whale_agent import WhaleAgent
 from swarms.signal.orchestrator import run_orchestrator
 from swarm.blackboard import blackboard as bb
 from swarm.db import ping
@@ -119,9 +121,10 @@ AGENTS = {
     "garch":     GARCHAgent(),
     "sentiment": SentimentAgent(),
     "vprt":      SignalAgent(),
+    "whale":     WhaleAgent(),
 }
 
-PIPELINE_ORDER = ["kalman", "garch", "sentiment", "vprt"]
+PIPELINE_ORDER = ["kalman", "garch", "sentiment", "vprt", "whale"]
 
 # ── Universe fetch ─────────────────────────────────────────────────
 
