@@ -58,11 +58,12 @@ WEBAPP_URL = os.environ.get("WEBAPP_URL", "https://crypto-sniper.app")
 
 # ── Scoring weights ────────────────────────────────────────────────
 WEIGHTS = {
-    "vprt":      0.30,
-    "garch":     0.25,
-    "sentiment": 0.20,
+    "vprt":      0.25,
+    "garch":     0.20,
+    "sentiment": 0.15,
     "kalman":    0.15,
     "rr":        0.10,
+    "whale":     0.15,
 }
 
 ARIMA_BONUS = {
@@ -179,6 +180,14 @@ def _score_convergence(asset: str, state: dict) -> tuple:
         vel_pts = 0
     score += vel_pts
     breakdown["kalman"] = round(vel_pts, 1)
+
+    # WhaleAgent conviction is already 0-100, scaled directly by its weight.
+    # Defaults to 0 if WhaleAgent hasn't written to the blackboard for this
+    # asset yet (e.g. not in tracked-wallet list, or agent not yet scheduled).
+    whale_conviction = state.get("whale_conviction", 0)
+    whale_pts = whale_conviction * WEIGHTS["whale"]
+    score += whale_pts
+    breakdown["whale"] = round(whale_pts, 1)
 
     rr_pts = (100 if rr >= 3.0 else 70 if rr >= 2.0 else 40) * WEIGHTS["rr"]
     score += rr_pts
