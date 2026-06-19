@@ -24,8 +24,8 @@ WRITES:
 whale_signal values: ACCUMULATING | DISTRIBUTING | NEUTRAL
 
 DATA SOURCES:
-  Etherscan API  — ETH/ERC20 large txns (key already in use elsewhere)
-  BSCScan API    — BNB chain (free tier)
+  Etherscan API V2 (unified) — ETH (chainid=1) + BSC (chainid=56),
+                                 single key covers both chains
   Solscan        — Solana (free tier)
   Whale Alert    — cross-chain $500K+ txns (free tier)
   Nansen         — labelled wallets (future, $150/mo, gated on revenue)
@@ -58,13 +58,15 @@ if ROOT not in sys.path:
 from cs_platform.registry.agent_base import AgentIdentity, AgentResult, BaseAgent
 
 # ── Config ─────────────────────────────────────────────────────────
-ETHERSCAN_KEY  = os.environ.get("ETHERSCAN_API_KEY", "")
-BSCSCAN_KEY    = os.environ.get("BSCSCAN_API_KEY", "")
-SOLSCAN_KEY    = os.environ.get("SOLSCAN_API_KEY", "")
+ETHERSCAN_KEY   = os.environ.get("ETHERSCAN_API_KEY", "")
+SOLSCAN_KEY     = os.environ.get("SOLSCAN_API_KEY", "")
 WHALE_ALERT_KEY = os.environ.get("WHALE_ALERT_API_KEY", "")
 
-ETHERSCAN_BASE   = "https://api.etherscan.io/api"
-BSCSCAN_BASE     = "https://api.bscscan.com/api"
+# Etherscan V2 unified API — one key, multi-chain via chainid param.
+# chainid=1 (ETH), chainid=56 (BSC). No separate BSCScan key needed.
+ETHERSCAN_V2_BASE = "https://api.etherscan.io/v2/api"
+CHAIN_IDS = {"eth": 1, "bsc": 56}
+
 SOLSCAN_BASE     = "https://pro-api.solscan.io/v2.0"
 WHALE_ALERT_BASE = "https://api.whale-alert.io/v1"
 
@@ -175,8 +177,8 @@ class WhaleAgent(BaseAgent):
         try:
             async with aiohttp.ClientSession() as s:
                 async with s.get(
-                    ETHERSCAN_BASE,
-                    params={"module": "stats", "action": "ethsupply", "apikey": ETHERSCAN_KEY},
+                    ETHERSCAN_V2_BASE,
+                    params={"chainid": 1, "module": "stats", "action": "ethsupply", "apikey": ETHERSCAN_KEY},
                     timeout=aiohttp.ClientTimeout(total=5),
                 ) as r:
                     return r.status == 200
@@ -224,30 +226,29 @@ class WhaleAgent(BaseAgent):
     def _get_large_transfers(
         self, chain: str, contract: str, raw_price: float
     ) -> list[dict]:
-        if chain == "eth":
-            return self._get_evm_transfers(ETHERSCAN_BASE, ETHERSCAN_KEY, contract, raw_price)
-        elif chain == "bsc":
-            return self._get_evm_transfers(BSCSCAN_BASE, BSCSCAN_KEY, contract, raw_price)
+        if chain in ("eth", "bsc"):
+            return self._get_evm_transfers(CHAIN_IDS[chain], contract, raw_price)
         elif chain == "sol":
             return self._get_sol_transfers(contract, raw_price)
         return []
 
     def _get_evm_transfers(
-        self, base_url: str, api_key: str, contract: str, raw_price: float
+        self, chainid: int, contract: str, raw_price: float
     ) -> list[dict]:
-        if not api_key:
+        if not ETHERSCAN_KEY:
             return []
         try:
             r = requests.get(
-                base_url,
+                ETHERSCAN_V2_BASE,
                 params={
+                    "chainid": chainid,
                     "module": "account",
                     "action": "tokentx",
                     "contractaddress": contract,
                     "page": 1,
                     "offset": 100,
                     "sort": "desc",
-                    "apikey": api_key,
+                    "apikey": ETHERSCAN_KEY,
                 },
                 timeout=15,
             )
@@ -272,7 +273,7 @@ class WhaleAgent(BaseAgent):
                     continue
             return out
         except Exception as e:
-            self._warn(f"EVM transfer fetch failed ({base_url}): {e}")
+            self._warn(f"Etherscan V2 transfer fetch failed (chainid={chainid}): {e}")
             return []
 
     def _get_sol_transfers(self, token_address: str, raw_price: float) -> list[dict]:
