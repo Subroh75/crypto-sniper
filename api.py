@@ -524,7 +524,10 @@ def scan_top_signals(
             }
             # Reuse already-fetched bars — eliminates second OHLCV HTTP call per coin
             indicators = get_indicators(sym, interval, bars=ohlcv)
-            sig = calculate_signals(ohlcv, quote, indicators)
+            # skip_models=True: bulk scan doesn't need per-coin GARCH/ARIMA —
+            # the model-fitting (not the network fetch) was the real
+            # 3-minute bottleneck. Full stats still run in /analyse.
+            sig = calculate_signals(ohlcv, quote, indicators, skip_models=True)
             if sig.total < min_score:
                 return None
             exch      = coin.get("exchange", "binance")
