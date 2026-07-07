@@ -249,6 +249,7 @@ def calculate_signals(
     cp_news: list = None,
     social_delta: float = 0.0,
     coindar_events: list = None,
+    skip_models: bool = False,
 ) -> SignalResult:
     """
     Gate-based signal engine.
@@ -258,6 +259,9 @@ def calculate_signals(
         quote:        {price, change_24h, volume_24h, high_24h, low_24h, ...}
         indicators:   {rsi, adx, atr, ema20, ema50, ema200, bb_upper, bb_lower, macd_hist}
         social_delta: % change in social engagement score over 6H
+        skip_models:  if True, skip GARCH/ARIMA fitting (CPU-bound, slow when
+                      scoring many coins in bulk — e.g. /scan). Full stats
+                      still run for single-coin calls (e.g. /analyse).
 
     Returns:
         SignalResult with all fields populated
@@ -564,19 +568,30 @@ def calculate_signals(
     result.z_return  = round(z_return,  2)
     result.z_quality = z_quality
 
-    # ── Vol Shield — GARCH(1,1) on closes
-    shield = _garch_vol_shield(closes_list)
-    result.vol_shield        = shield["vol_shield"]
-    result.vol_shield_sigma  = shield["sigma"]
-    result.vol_shield_sizing = shield["sizing"]
+    # ── Vol Shield (GARCH) + ARIMA direction bias ───────────────────────
+    # Skipped when skip_models=True (bulk /scan calls) — GARCH/ARIMA fitting
+    # is CPU-bound and serializes across threads regardless of thread-pool
+    # size, which was the real cause of "Green Coins Today" taking ~3 min.
+    # Full fit still runs for single-coin /analyse deep dives.
+    if skip_models:
+        result.vol_shield        = ""
+        result.vol_shield_sigma  = 0.0
+        result.vol_shield_sizing = 1.0
+        result.arima_bias        = ""
+        result.arima_phi1        = 0.0
+        result.arima_forecast    = 0.0
+        result.arima_confluence  = ""
+    else:
+        shield = _garch_vol_shield(closes_list)
+        result.vol_shield        = shield["vol_shield"]
+        result.vol_shield_sigma  = shield["sigma"]
+        result.vol_shield_sizing = shield["sizing"]
 
-    # ── ARIMA direction bias — use z_return as Kalman velocity proxy
-    # z_return > 0 = recent returns above mean (momentum up), < 0 = below (fading)
-    arima = _arima_direction(closes_list, kalman_vel=result.z_return)
-    result.arima_bias        = arima["arima_bias"]
-    result.arima_phi1        = arima["arima_phi1"]
-    result.arima_forecast    = arima["arima_forecast"]
-    result.arima_confluence  = arima["arima_confluence"]
+        arima = _arima_direction(closes_list, kalman_vel=result.z_return)
+        result.arima_bias        = arima["arima_bias"]
+        result.arima_phi1        = arima["arima_phi1"]
+        result.arima_forecast    = arima["arima_forecast"]
+        result.arima_confluence  = arima["arima_confluence"]
 
     return result
 
