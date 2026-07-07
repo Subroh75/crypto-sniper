@@ -403,16 +403,20 @@ def scan_top_signals(
     min_volume: float = Query(1_000_000, description="Min 24h volume USD to include"),
 ):
     """
-    Vol-first scan: only coins with unusual volume (>= 1.8x 20-bar avg) are scored.
+    Trend-first scan: BUY only requires trend + ADX strength; STRONG BUY
+    additionally requires confirmed volume, momentum, and range position.
+    Volume is no longer a hard gate on which coins get scored — a coin can
+    surface as BUY on trend alone (e.g. a steady multi-day move with no
+    single-bar volume spike), and volume instead upgrades a BUY into a
+    STRONG BUY inside calculate_signals().
 
     Pipeline:
       1. Fetch full Binance USDT universe (~400 coins, sorted by 24h vol)
-      2. Vol pre-filter — drop any coin with rel_vol < 1.8x (zero extra API calls)
+      2. Compute rel_vol_pre for every coin (display/ranking only — no
+         longer used to drop coins before scoring)
       3. Score remaining coins in parallel (OHLCV + VPRT gates)
       4. Return coins >= min_score, sorted by score then volume
 
-    This ensures every signal that surfaces has UNUSUAL VOLUME as its foundation.
-    Scan is also faster: typically 20-60 coins reach scoring vs 300+ previously.
     Falls back to full universe on cold start (no vol baseline in DB yet).
     """
     from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -489,18 +493,17 @@ def scan_top_signals(
     universe_size = len(universe)
     logger.info(f"/scan: universe={universe_size} coins (multi-exchange), interval={interval}, min_score={min_score}")
 
-    # ── Step 1b: Vol pre-filter — only score coins with unusual volume ─────────
-    # Drops low-vol noise before the expensive per-coin OHLCV calls.
-    # Falls back to full universe on cold start (no baselines yet).
-    vol_universe = get_vol_prefilter(universe, interval=interval, min_rvol=1.8)
-    if vol_universe:
-        logger.info(f"/scan: vol gate reduced universe {universe_size} -> {len(vol_universe)} coins (>= 1.8x rel_vol)")
-        scan_universe = vol_universe
-        scanned_size  = len(vol_universe)
-    else:
-        logger.info(f"/scan: vol gate returned 0 — scanning full universe (cold start or flat market)")
-        scan_universe = universe
-        scanned_size  = universe_size
+    # ── Step 1b: Compute rel_vol_pre for every coin — no longer a hard filter ──
+    # Volume used to gate which coins got scored at all (min_rvol=1.8 dropped
+    # everything below that before scoring). Now that volume only upgrades a
+    # BUY to a STRONG BUY inside calculate_signals(), gating on it here would
+    # still hide trend-only movers (e.g. WPAY: 0.50 -> 1.00 over 5 days with
+    # no single-bar volume spike) before they ever reach scoring. min_rvol=0.0
+    # means this call effectively never excludes a coin, just tags rel_vol_pre.
+    vol_universe = get_vol_prefilter(universe, interval=interval, min_rvol=0.0)
+    scan_universe = vol_universe if vol_universe else universe
+    scanned_size  = len(scan_universe)
+    logger.info(f"/scan: scoring {scanned_size} coins (volume no longer a pre-scoring filter)")
 
     # ── Step 2: Score every coin in parallel ───────────────────────────────────
     def score_coin(coin: dict):
@@ -595,7 +598,7 @@ def scan_top_signals(
         "signals":        signals,
         "cached":         False,
         "universe":       universe_size,   # full multi-exchange universe count
-        "scanned":        scanned_size,    # vol-gated subset actually scored
+        "scanned":        scanned_size,    # coins actually scored (volume no longer excludes coins here)
         "timestamp":      now,
     }
 
