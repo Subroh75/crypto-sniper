@@ -202,21 +202,32 @@ export function TradeSetupCard({ setup, close, csoGo = true }: { setup: TradeSet
 // ════════════════════════════════════════════════════════════════════════════
 // 2. CONVICTION METER
 // ════════════════════════════════════════════════════════════════════════════
-export function ConvictionMeter({ conviction }: { conviction: Conviction | null }) {
+export function ConvictionMeter({ conviction, csoGo = true }: { conviction: Conviction | null; csoGo?: boolean }) {
   if (!conviction) return null;
 
   const { bull_pct, bear_pct, bull_signals, bear_signals } = conviction;
 
-  const actionColor =
-    bull_pct >= 60 ? "text-teal" :
-    bear_pct >= 60 ? "text-red"  : "text-text-muted";
+  // When CSO hasn't cleared the trade, this meter must not use actionable
+  // language ("trade with confidence", "avoid longs") or actionable colors —
+  // it previously ignored csoGo entirely, directly contradicting the Trade
+  // Setup card's "NO TRADE / CSO says WAIT" shown right above it. Sentiment
+  // is still shown (bull/bear bars above), just not framed as a verdict.
+  const actionColor = !csoGo
+    ? "text-text-muted"
+    : bull_pct >= 60 ? "text-teal" :
+      bear_pct >= 60 ? "text-red"  : "text-text-muted";
 
-  const actionText =
-    bull_pct >= 70 ? "STRONG BULL — trade with confidence" :
-    bull_pct >= 55 ? "LEAN BULL — proceed with caution" :
-    bear_pct >= 70 ? "STRONG BEAR — avoid longs" :
-    bear_pct >= 55 ? "LEAN BEAR — risk is elevated" :
-    "MIXED SIGNALS — wait for clarity";
+  const actionText = !csoGo
+    ? (bull_pct >= 60
+        ? "Bullish lean — CSO says WAIT, not a trade signal"
+        : bear_pct >= 60
+          ? "Bearish lean — CSO says WAIT, not a trade signal"
+          : "Mixed sentiment — CSO says WAIT, not a trade signal")
+    : bull_pct >= 70 ? "STRONG BULL — trade with confidence" :
+      bull_pct >= 55 ? "LEAN BULL — proceed with caution" :
+      bear_pct >= 70 ? "STRONG BEAR — avoid longs" :
+      bear_pct >= 55 ? "LEAN BEAR — risk is elevated" :
+      "MIXED SIGNALS — wait for clarity";
 
   return (
     <SideCard>
@@ -285,16 +296,21 @@ export function ConvictionMeter({ conviction }: { conviction: Conviction | null 
           </div>
         </div>
 
-        {/* Action verdict */}
+        {/* Action verdict — gated on csoGo so this can never contradict the
+            Trade Setup card's "NO TRADE / CSO says WAIT" shown elsewhere on
+            the same screen. Only shows actionable green/red styling and
+            checkmark/skull icons once CSO has actually cleared the trade. */}
         <div className={`flex items-center gap-2 px-3 py-2.5 rounded-lg border text-[10px] font-mono font-bold ${
-          bear_pct >= 60
-            ? "bg-red/5 border-red/15 text-red"
-            : bull_pct >= 60
-              ? "bg-teal/5 border-teal/15 text-teal"
-              : "bg-surface-2 border-border/40 text-text-muted"
+          !csoGo
+            ? "bg-surface-2 border-border/40 text-text-muted"
+            : bear_pct >= 60
+              ? "bg-red/5 border-red/15 text-red"
+              : bull_pct >= 60
+                ? "bg-teal/5 border-teal/15 text-teal"
+                : "bg-surface-2 border-border/40 text-text-muted"
         }`}>
           <span className="text-sm flex-shrink-0">
-            {bear_pct >= 60 ? "⛔" : bull_pct >= 60 ? "✅" : "⏳"}
+            {!csoGo ? "⏳" : bear_pct >= 60 ? "⛔" : bull_pct >= 60 ? "✅" : "⏳"}
           </span>
           <span>{actionText}</span>
         </div>
