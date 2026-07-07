@@ -104,20 +104,18 @@ async def dex_scan_job(context) -> None:
     _last_sweep_board = board
     _last_sweep_time  = scan_time
 
-    # Persist results to shared JSON for the API /dex-results endpoint
+    # Persist results to Supabase so the web API (a separate Render service,
+    # with its own separate filesystem) can read them. A local JSON file here
+    # was written successfully every day but never visible to api.py — Render
+    # services don't share ephemeral disk with each other, so /dex-results
+    # always saw "file doesn't exist" regardless of how many sweeps succeeded.
     try:
-        hits_all  = board.all_hits(top_n=25)
-        vol_hits  = board.all_vol_hits(top_n=20)
-        dex_cache = {
-            "scan_time":  scan_time,
-            "scan_ts":    int(datetime.now(timezone.utc).timestamp()),
-            "gems":       hits_all,
-            "vol_hits":   vol_hits,
-        }
-        dex_cache_path = os.environ.get("DEX_CACHE_PATH", "/tmp/dex_last_scan.json")
-        with open(dex_cache_path, "w") as _f:
-            json.dump(dex_cache, _f)
-        logger.info(f"[DEX Scanner] Persisted {len(hits_all)} gems + {len(vol_hits)} vol_hits to {dex_cache_path}")
+        hits_all = board.all_hits(top_n=25)
+        vol_hits = board.all_vol_hits(top_n=20)
+        scan_ts  = int(datetime.now(timezone.utc).timestamp())
+        ok = await _persist_dex_cache(scan_time, scan_ts, hits_all, vol_hits)
+        if ok:
+            logger.info(f"[DEX Scanner] Persisted {len(hits_all)} gems + {len(vol_hits)} vol_hits to Supabase")
     except Exception as _e:
         logger.warning(f"[DEX Scanner] Failed to persist DEX cache: {_e}")
 
@@ -309,6 +307,55 @@ async def gem_lookup(
                 await bot.send_message(chat_id=chat_id, text=chunk)
     except Exception as e:
         logger.error(f"[DEX Scanner] gem_lookup send failed: {e}")
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# Supabase persistence — dex_scan_cache table (single row, id=1)
+# ────────────────────────────────────────────────────────────────────────────
+
+async def _persist_dex_cache(scan_time: str, scan_ts: int, gems: list, vol_hits: list) -> bool:
+    """
+    Upsert the latest sweep results into Supabase (table: dex_scan_cache).
+
+    Written here (the Telegram bot worker service) and read by api.py's
+    /dex-results endpoint, which runs as a separate Render service with its
+    own separate filesystem — a local file was never a valid way to share
+    this between the two. Requires SUPABASE_URL and SUPABASE_SERVICE_KEY
+    to be set as environment variables on this service.
+    """
+    supabase_url = os.environ.get("SUPABASE_URL", "")
+    supabase_key = os.environ.get("SUPABASE_SERVICE_KEY", "")
+    if not supabase_url or not supabase_key:
+        logger.warning("[DEX Scanner] SUPABASE_URL/SUPABASE_SERVICE_KEY not set — cache not persisted")
+        return False
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                f"{supabase_url}/rest/v1/dex_scan_cache",
+                headers={
+                    "apikey":        supabase_key,
+                    "Authorization": f"Bearer {supabase_key}",
+                    "Content-Type":  "application/json",
+                    "Prefer":        "resolution=merge-duplicates",
+                },
+                json={
+                    "id":         1,
+                    "scan_time":  scan_time,
+                    "scan_ts":    scan_ts,
+                    "gems":       gems,
+                    "vol_hits":   vol_hits,
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                },
+                timeout=aiohttp.ClientTimeout(total=10),
+            ) as r:
+                if r.status not in (200, 201):
+                    body = await r.text()
+                    logger.warning(f"[DEX Scanner] Supabase upsert failed ({r.status}): {body}")
+                    return False
+                return True
+    except Exception as e:
+        logger.warning(f"[DEX Scanner] Supabase upsert error: {e}")
+        return False
 
 
 # ────────────────────────────────────────────────────────────────────────────
