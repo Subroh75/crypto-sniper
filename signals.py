@@ -7,8 +7,9 @@ Signal Logic:
   ADX gate         : ADX >= 25 → trending
 
 Signal Tiers:
-  BUY         = V confirmed + T confirmed + ADX >= 25
-  STRONG BUY  = BUY + P confirmed + R confirmed
+  BUY         = T confirmed + ADX >= 25 (trend + strength; volume not required)
+  STRONG BUY  = BUY + V confirmed + P confirmed + R confirmed
+                  V = rel_vol >= 1.8x (unusual volume)
                   P = change_24h > 0 AND atr_move > 0
                   R = close in upper 50% of bar range
   NO SIGNAL   = any gate fails
@@ -393,9 +394,13 @@ def calculate_signals(
     # ══════════════════════════════════════════════════════════════════════
     # SIGNAL TIER
     # ══════════════════════════════════════════════════════════════════════
-    buy_gates_met = v_confirmed and t_confirmed and adx_confirmed
+    # BUY only needs trend + strength — a coin can run on trend alone with
+    # no single-bar volume spike (e.g. a steady multi-day move) and still
+    # surface here. Volume is no longer a hard gate on visibility; instead
+    # it's one of the extra confirmations required to upgrade to STRONG BUY.
+    buy_gates_met = t_confirmed and adx_confirmed
 
-    if buy_gates_met and p_confirmed and r_confirmed:
+    if buy_gates_met and v_confirmed and p_confirmed and r_confirmed:
         signal = "STRONG BUY"
     elif buy_gates_met:
         signal = "BUY"
