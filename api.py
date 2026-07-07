@@ -1992,23 +1992,42 @@ class DexAnalyseRequest(BaseModel):
 def dex_results():
     """
     Returns the last DEX scan results (gems + vol_hits) from the Telegram bot sweep.
-    Written by dex_scan_job on every daily scan.
+
+    Read from Supabase (table: dex_scan_cache, single row id=1) rather than a
+    local file — dex_scan_job runs in a separate Render service (the Telegram
+    bot worker), which has its own separate filesystem. A local /tmp file
+    written there was never visible to this API process.
     """
-    import json as _json, os as _os
-    cache_path = _os.environ.get("DEX_CACHE_PATH", "/tmp/dex_last_scan.json")
-    if not _os.path.exists(cache_path):
-        return {"gems": [], "vol_hits": [], "scan_time": None, "scan_ts": None, "fresh": False}
+    import requests as _req
+    supabase_url = os.environ.get("SUPABASE_URL", "")
+    supabase_key = os.environ.get("SUPABASE_SERVICE_KEY", "")
+    empty = {"gems": [], "vol_hits": [], "scan_time": None, "scan_ts": None, "fresh": False}
+    if not supabase_url or not supabase_key:
+        logger.warning("/dex-results: SUPABASE_URL/SUPABASE_SERVICE_KEY not set")
+        return empty
     try:
-        with open(cache_path) as _f:
-            data = _json.load(_f)
+        r = _req.get(
+            f"{supabase_url}/rest/v1/dex_scan_cache",
+            headers={
+                "apikey": supabase_key,
+                "Authorization": f"Bearer {supabase_key}",
+            },
+            params={"id": "eq.1", "select": "scan_time,scan_ts,gems,vol_hits"},
+            timeout=10,
+        )
+        r.raise_for_status()
+        rows = r.json()
+        if not rows:
+            return empty
+        data = rows[0]
         # Mark stale if older than 26h (daily scan, allow buffer)
         age_h = (time.time() - (data.get("scan_ts") or 0)) / 3600
         data["fresh"] = age_h < 26
         data["age_h"] = round(age_h, 1)
         return data
     except Exception as e:
-        logger.warning(f"/dex-results read error: {e}")
-        return {"gems": [], "vol_hits": [], "scan_time": None, "scan_ts": None, "fresh": False}
+        logger.warning(f"/dex-results Supabase read error: {e}")
+        return empty
 
 @app.post("/dex-analyse")
 async def dex_analyse(req: DexAnalyseRequest):
