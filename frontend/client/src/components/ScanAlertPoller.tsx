@@ -5,20 +5,29 @@
 //
 // Settings are persisted in localStorage:
 //   scan_alert_enabled    "true" | "false"
-//   scan_alert_threshold  "7"
+//   scan_alert_tier       "buy" | "strong_buy"
 //   scan_alert_interval   "60" (minutes)
 //   scan_alert_last_ts    unix seconds of last scan
 //
+// Filtering by signal.label instead of a raw score threshold — under the
+// current tier system (signals.py) a plain BUY only needs Trend+ADX
+// confirmed and can legitimately score as low as 3/13, while STRONG BUY's
+// minimum possible score is 6 (one point on each of V/P/R/T). A raw score
+// cutoff can no longer reliably distinguish the two tiers, and a 5+ floor
+// was silently excluding real BUY signals entirely — see CSOVerdict.tsx
+// for the same underlying bug, fixed the same way.
+//
 // Note: fetches go through the shared scanCache (fetchScanShared), so if
-// TopSignals/VolRadar have just fetched the same params (interval=1d,
-// min_score=threshold), this poller reuses that cached result instead of
-// issuing its own request.
+// TopSignals/VolRadar have just fetched the same params, this poller
+// reuses that cached result instead of issuing its own request. We always
+// request min_score: 1 from the backend so a plain BUY scoring 3-5 isn't
+// excluded server-side before this component's own tier filter runs.
 
 import { useEffect, useRef, useCallback } from "react";
 import { fetchScanShared, type ScanResponse } from "@/lib/scanCache";
 
 const STORAGE_ENABLED = "scan_alert_enabled";
-const STORAGE_THRESHOLD = "scan_alert_threshold";
+const STORAGE_TIER = "scan_alert_tier";
 const STORAGE_INTERVAL = "scan_alert_interval";
 const STORAGE_LAST_TS = "scan_alert_last_ts";
 const STORAGE_LAST_HITS = "scan_alert_last_hits";
@@ -30,6 +39,8 @@ function save(key: string, val: string) {
   try { localStorage.setItem(key, val); } catch {}
 }
 
+export type SignalTier = "buy" | "strong_buy";
+
 interface ScanSignal {
   symbol: string;
   score: number;
@@ -38,22 +49,28 @@ interface ScanSignal {
   rsi: number;
 }
 
+function _tierMatches(signal: string, tier: SignalTier): boolean {
+  if (tier === "strong_buy") return signal === "STRONG BUY";
+  return signal === "BUY" || signal === "STRONG BUY";
+}
+
 // ── Shared state — lets PriceAlertCard read/write poller settings ──────────
 type SettingsListener = (s: ScanAlertSettings) => void;
 const _settingsListeners = new Set<SettingsListener>();
 
 export interface ScanAlertSettings {
   enabled: boolean;
-  threshold: number;
-  interval: number; // minutes
-  lastTs: number; // unix seconds
+  tier: SignalTier;
+  interval: number;    // minutes
+  lastTs: number;      // unix seconds
   lastHits: ScanSignal[];
 }
 
 function _readSettings(): ScanAlertSettings {
+  const rawTier = load(STORAGE_TIER, "buy");
   return {
     enabled: load(STORAGE_ENABLED, "false") === "true",
-    threshold: parseInt(load(STORAGE_THRESHOLD, "7"), 10),
+    tier: (rawTier === "strong_buy" ? "strong_buy" : "buy") as SignalTier,
     interval: parseInt(load(STORAGE_INTERVAL, "60"), 10),
     lastTs: parseInt(load(STORAGE_LAST_TS, "0"), 10),
     lastHits: JSON.parse(load(STORAGE_LAST_HITS, "[]")),
@@ -68,13 +85,13 @@ export function subscribeScanSettings(fn: SettingsListener) {
 
 export function updateScanSettings(patch: Partial<Omit<ScanAlertSettings, "lastTs" | "lastHits">>) {
   if (patch.enabled !== undefined) save(STORAGE_ENABLED, String(patch.enabled));
-  if (patch.threshold !== undefined) save(STORAGE_THRESHOLD, String(patch.threshold));
+  if (patch.tier !== undefined) save(STORAGE_TIER, patch.tier);
   if (patch.interval !== undefined) save(STORAGE_INTERVAL, String(patch.interval));
   _settingsListeners.forEach(fn => fn(_readSettings()));
 }
 
 // ── Notification helper ───────────────────────────────────────────────────────
-async function showScanNotification(hits: ScanSignal[], threshold: number) {
+async function showScanNotification(hits: ScanSignal[], tier: SignalTier) {
   // First try SW postMessage (works when app is backgrounded/locked screen)
   if ("serviceWorker" in navigator) {
     try {
@@ -119,17 +136,18 @@ export function ScanAlertPoller() {
 
     runningRef.current = true;
     try {
-      // Goes through the shared cache: if TopSignals/VolRadar have already
-      // fetched interval=1d at this min_score recently, this resolves
-      // instantly with no network call instead of duplicating the request.
+      // min_score: 1 — do NOT pre-filter server-side by raw score. A plain
+      // BUY can legitimately score as low as 3/13; filtering here happens
+      // by signal.label below instead, which is what actually reflects the
+      // current BUY/STRONG BUY tier logic.
       const data: ScanResponse = await fetchScanShared({
         interval: "1d",
-        min_score: s.threshold,
+        min_score: 1,
         max_coins: 200,
         min_volume: 500000,
       });
       const signals: ScanSignal[] = ((data.signals ?? []) as unknown as ScanSignal[]).filter(
-        (sig) => sig.score >= _readSettings().threshold
+        (sig) => _tierMatches(sig.signal, _readSettings().tier)
       );
 
       // Save last scan results
@@ -139,7 +157,7 @@ export function ScanAlertPoller() {
       _settingsListeners.forEach(fn => fn(_readSettings()));
 
       if (signals.length > 0) {
-        await showScanNotification(signals, s.threshold);
+        await showScanNotification(signals, s.tier);
       }
     } catch (e) {
       console.warn("[ScanAlertPoller] scan failed:", e);
