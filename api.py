@@ -2213,8 +2213,8 @@ async def pdf_basket_report(payload: dict):
             _text_x = MARGIN
     pdf.set_font("Helvetica","B",15); pdf.set_text_color(255,255,255)
     pdf.set_xy(_text_x,8); pdf.cell(80,8,"CRYPTO SNIPER")
-    pdf.set_font("Helvetica","",7); pdf.set_text_color(*PUR)
-    pdf.set_xy(_text_x,17); pdf.cell(80,5,"BASKET SCANNER REPORT")
+    pdf.set_font("Helvetica","",7); pdf.set_text_color(255,255,255)
+    pdf.set_xy(_text_x,17); pdf.cell(80,5,"DETECT EARLY. ACT SMART.")
     pdf.set_font("Helvetica","",7.5); pdf.set_text_color(180,180,190)
     pdf.set_xy(PW-100,10); pdf.cell(86,5,_p(f"{basket_label}  |  {interval}"),align="R")
     pdf.set_xy(PW-100,16); pdf.cell(86,5,_p(now_str),align="R")
