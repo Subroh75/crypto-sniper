@@ -9,3 +9,19 @@ itsdangerous>=2.1.0
 fpdf2>=2.7.0
 arch>=6.0.0
 statsmodels>=0.14.0
+
+# ─────────────────────────────────────────────────────────────────────────────
+# KRONOS-MINI — real time-series forecasting model (kronos_real.py)
+# ─────────────────────────────────────────────────────────────────────────────
+# NeoQuasar/Kronos-mini, 4.1M params, MIT licensed. torch is the main size
+# cost here (~500MB+ install, unrelated to the model weights themselves,
+# which are only a few MB) — worth watching build time and deploy size on
+# the Standard instance. The model + tokenizer weights download from the
+# Hugging Face Hub on first request after each deploy (cold-start cost),
+# then stay cached in memory for the life of the process.
+numpy>=1.24.0
+pandas>=2.0.0
+torch>=2.0.0
+huggingface_hub>=0.20.0
+einops>=0.7.0
+tqdm>=4.65.0
