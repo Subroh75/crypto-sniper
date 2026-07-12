@@ -1555,7 +1555,7 @@ from fastapi.responses import Response as _FResponse
 
 @app.post("/pdf-report")
 async def pdf_report(payload: dict):
-    """Dark-theme Crypto Sniper PDF — single/multi page, no blank pages."""
+    """Crypto Sniper PDF — clean white-background layout, print-friendly, single/multi page, no blank pages."""
     import io
     from fpdf import FPDF
     from datetime import datetime, timezone
@@ -1658,12 +1658,22 @@ async def pdf_report(payload: dict):
     v_sc,v_mx,v_det = _comp("V"); p_sc,p_mx,p_det = _comp("P")
     r_sc,r_mx,r_det = _comp("R"); t_sc,t_mx,t_det = _comp("T")
 
-    # Colours
-    BG=(6,9,18); SRF=(12,18,37); SRF2=(20,30,60); BDR=(30,45,80)
-    TXT=(226,232,240); MUT=(100,116,139)
-    GRN=(34,197,94); RED=(239,68,68); AMB=(245,158,11); PUR=(124,58,237); WHT=(241,245,249)
+    # Colours — clean white-background palette, print-friendly.
+    # WHT is kept as the name for minimal downstream diff, but on this light
+    # theme it holds dark "ink" for headings on light card backgrounds — the
+    # one place that needs actual white (the coloured header band) is handled
+    # with an explicit (255,255,255) inline instead of this constant.
+    BG=(255,255,255); SRF=(250,250,252); SRF2=(243,244,248); BDR=(221,224,232)
+    TXT=(30,41,59); MUT=(100,116,139)
+    GRN=(21,128,61); RED=(185,28,28); AMB=(180,83,9); PUR=(91,33,182); WHT=(15,23,42)
     SIG = GRN if score>=9 else AMB if score>=5 else MUT
     def pc(p,r): return GRN if p>r else RED
+    def _tint(c):
+        """Light pastel tint of an accent colour — used for card fills on a
+        white page. The old dark theme darkened accent colours toward black
+        for card backgrounds; that reads as a near-black block on white, so
+        this instead blends toward white at low opacity."""
+        return tuple(255 - (255 - v) // 10 for v in c)
 
     # ── PDF ──────────────────────────────────────────────────────────────────────
     pdf = FPDF()
@@ -1689,8 +1699,9 @@ async def pdf_report(payload: dict):
     PW = pdf.w
 
     # ── HEADER ───────────────────────────────────────────────────────────────────
-    pdf.set_fill_color(20,5,45);  pdf.rect(0,0,PW,32,"F")
-    pdf.set_fill_color(12,18,37); pdf.rect(0,22,PW,10,"F")
+    # Solid brand-purple band — the one deliberate spot of colour on an
+    # otherwise white, print-friendly page (like a letterhead strip).
+    pdf.set_fill_color(*PUR); pdf.rect(0,0,PW,28,"F")
     # Logo mark — embedded PNG (frontend/client/public/logo-mark.png, same asset
     # used for the web header). Falls back to text-only if the file is missing
     # so a deploy/path issue never breaks PDF generation.
@@ -1702,15 +1713,14 @@ async def pdf_report(payload: dict):
             _text_x = MARGIN + 13
         except Exception:
             _text_x = MARGIN
-    pdf.set_font("Helvetica","B",15); pdf.set_text_color(*WHT)
-    pdf.set_xy(_text_x,8);  pdf.cell(80,8,"CRYPTO SNIPER")
-    pdf.set_font("Helvetica","",7); pdf.set_text_color(*PUR)
-    pdf.set_xy(_text_x,17); pdf.cell(80,5,"DETECT EARLY. ACT SMART.")
-    pdf.set_font("Helvetica","",7.5); pdf.set_text_color(*MUT)
-    pdf.set_xy(PW-100,10); pdf.cell(86,5,_p(f"{symbol}/USDT  |  {interval}"),align="R")
-    pdf.set_xy(PW-100,16); pdf.cell(86,5,_p(now_str),align="R")
-    pdf.set_fill_color(*PUR); pdf.rect(0,32,PW,1.5,"F")
-    pdf.set_y(38)
+    pdf.set_font("Helvetica","B",15); pdf.set_text_color(255,255,255)
+    pdf.set_xy(_text_x,7);  pdf.cell(80,8,"CRYPTO SNIPER")
+    pdf.set_font("Helvetica","",7); pdf.set_text_color(224,213,248)
+    pdf.set_xy(_text_x,16); pdf.cell(80,5,"DETECT EARLY. ACT SMART.")
+    pdf.set_font("Helvetica","",7.5); pdf.set_text_color(224,213,248)
+    pdf.set_xy(PW-100,9);  pdf.cell(86,5,_p(f"{symbol}/USDT  |  {interval}"),align="R")
+    pdf.set_xy(PW-100,15); pdf.cell(86,5,_p(now_str),align="R")
+    pdf.set_y(35)
 
     # ── SIGNAL VERDICT ───────────────────────────────────────────────────────────
     need(38)
@@ -1800,7 +1810,7 @@ async def pdf_report(payload: dict):
         ratio=sc/mx if mx else 0
         pc2=MUT if sc==0 else GRN if ratio>=0.67 else AMB if ratio>=0.34 else RED
         px=px0+i*(pw2+gap)
-        pdf.set_fill_color(pc2[0]//6,pc2[1]//6,pc2[2]//6); pdf.set_draw_color(*pc2); pdf.set_line_width(0.4)
+        pdf.set_fill_color(*_tint(pc2)); pdf.set_draw_color(*pc2); pdf.set_line_width(0.4)
         pdf.rect(px,py0,pw2,ph,"FD")
         pdf.set_font("Helvetica","B",13); pdf.set_text_color(*pc2)
         pdf.set_xy(px+2,py0+1); pdf.cell(16,7,_p(lbl))
@@ -1890,9 +1900,124 @@ async def pdf_report(payload: dict):
             pdf.cell(0,4,_p(f"Stop distance: {abs(ts_stop_pct):.2f}% from entry"),ln=True,align="C")
         pdf.ln(2)
 
+    # ── MULTI-TIMEFRAME CONFLUENCE ─────────────────────────────────────────────
+    # Fetched server-side (not from the frontend payload) so the PDF always
+    # reflects a fresh cross-timeframe read regardless of what the frontend
+    # currently has in state. skip_models=True — this is 3x calculate_signals
+    # calls per PDF export, and GARCH/ARIMA fitting here would be the same
+    # per-coin latency trap that made /scan slow (see signals.py). Trend/ADX
+    # gates don't need it; only /analyse's single-coin deep dive does.
+    _conf_results = []
+    if symbol and symbol != "?":
+        try:
+            from concurrent.futures import ThreadPoolExecutor as _TPE
+            def _conf_tf(tf):
+                try:
+                    _oh = get_ohlcv(symbol, tf)
+                    if not _oh:
+                        return {"interval": tf, "error": True}
+                    _qt = get_quote(symbol)
+                    _in = get_indicators(symbol, tf, bars=_oh)
+                    _s  = calculate_signals(_oh, _qt, _in, skip_models=True)
+                    return {"interval": tf, "score": _s.total, "max": _s.max_score,
+                            "signal": _s.signal_label, "direction": _s.direction}
+                except Exception:
+                    return {"interval": tf, "error": True}
+            with _TPE(max_workers=3) as _ex:
+                _conf_results = list(_ex.map(_conf_tf, ["1H", "4H", "1D"]))
+        except Exception as _e:
+            logger.warning(f"pdf-report confluence fetch failed for {symbol}: {_e}")
+
+    _conf_valid = [r for r in _conf_results if not r.get("error")]
+    if _conf_valid:
+        sec("Multi-Timeframe Confluence")
+        def _conf_color(r):
+            if r["signal"] in ("STRONG BUY", "BUY"): return GRN
+            if r["direction"] == "SHORT":            return RED
+            return MUT
+        card_4col(
+            [r["interval"] for r in _conf_valid],
+            [f"{r['signal']}  {r['score']}/{r['max']}" for r in _conf_valid],
+            [_conf_color(r) for r in _conf_valid],
+            card_h=20,
+        )
+        _all_long   = all(r.get("direction") == "LONG" for r in _conf_valid)
+        _any_strong = any(r.get("signal") == "STRONG BUY" for r in _conf_valid)
+        _conf_note = ("All timeframes aligned LONG" if _all_long
+                 else "STRONG BUY confirmed on at least one timeframe" if _any_strong
+                 else "Timeframes not aligned — mixed signals, size down or wait")
+        pdf.set_font("Helvetica","",7); pdf.set_text_color(*MUT)
+        pdf.cell(0,4,_p(_conf_note),ln=True,align="C")
+        pdf.ln(2)
+
+    # ── ORDER BOOK & LIQUIDITY ───────────────────────────────────────────────────
+    # Also fetched server-side via derivatives.get_market_microstructure() —
+    # 30s-cached Binance top-20 depth snapshot, not dependent on frontend state.
+    _micro = {}
+    if symbol and symbol != "?":
+        try:
+            _micro = get_market_microstructure(symbol)
+        except Exception as _e:
+            logger.warning(f"pdf-report microstructure fetch failed for {symbol}: {_e}")
+
+    if _micro and _micro.get("bid"):
+        sec("Order Book & Liquidity")
+        _mic_sig = _micro.get("signal", "")
+        _sig_lbl = {"bullish":"BUY-SIDE PRESSURE","bearish":"SELL-SIDE PRESSURE",
+                    "thin_book":"THIN BOOK - CAUTION","neutral":"BALANCED"}.get(_mic_sig, "-")
+        _sig_col = (GRN if _mic_sig=="bullish" else
+                    RED if _mic_sig=="bearish" else
+                    AMB if _mic_sig=="thin_book" else MUT)
+        _spread = _micro.get('spread_pct', 0)
+        _liq    = _micro.get('liquidity_quality', '-')
+        card_4col(
+            ["BID","ASK","SPREAD","LIQUIDITY"],
+            [f"${_micro.get('bid',0):.6g}", f"${_micro.get('ask',0):.6g}",
+             f"{_spread:.3f}%", str(_liq).upper()],
+            [TXT, TXT,
+             RED if _spread>0.15 else GRN if _spread<0.05 else AMB,
+             GRN if _liq=='tight' else RED if _liq=='wide' else AMB],
+        )
+        card_4col(
+            ["BID VOL (1%)","ASK VOL (1%)","IMBALANCE","SIGNAL"],
+            [f"${_micro.get('bid_vol_usd',0):,.0f}", f"${_micro.get('ask_vol_usd',0):,.0f}",
+             f"{_micro.get('imbalance_pct',0):+.1f}%", _sig_lbl],
+            [TXT, TXT,
+             GRN if _micro.get('imbalance_pct',0)>0 else RED,
+             _sig_col],
+        )
+        pdf.ln(2)
+
     # ── AI FORECAST ──────────────────────────────────────────────────────────────
     if fc_dir:
         sec("AI Forecast  (Kronos)")
+
+        # Kronos bias candle — a single glyph for an at-a-glance directional
+        # read, matching the candlestick motif in the brand mark. Body height
+        # scales with |expected move|; wick length fills the remainder.
+        _is_bull   = "Rising" in fc_dir or fc_move >= 0
+        _candle_c  = GRN if _is_bull else RED
+        need(24)
+        _cy        = pdf.get_y()
+        _cx        = MARGIN + 12
+        _move_mag  = max(0.0, min(abs(fc_move), 10.0)) / 10.0
+        _total_h   = 20
+        _body_h    = 6 + 10 * (0.4 + 0.6 * _move_mag)
+        _wick_h    = max(1.5, (_total_h - _body_h) / 2)
+        _body_top  = _cy + _wick_h
+        pdf.set_draw_color(*_candle_c); pdf.set_line_width(0.6)
+        pdf.line(_cx, _cy, _cx, _cy + _total_h)
+        pdf.set_fill_color(*_candle_c)
+        pdf.rect(_cx - 3.5, _body_top, 7, _body_h, "F")
+        pdf.set_font("Helvetica","B",9); pdf.set_text_color(*_candle_c)
+        pdf.set_xy(_cx + 10, _cy + 2)
+        pdf.cell(60, 5, _p("BULLISH BIAS" if _is_bull else "BEARISH BIAS"))
+        if fc_green:
+            pdf.set_font("Helvetica","",7); pdf.set_text_color(*MUT)
+            pdf.set_xy(_cx + 10, _cy + 9)
+            pdf.cell(60, 5, _p(f"{fc_green:.0f}% of recent candles closed green"))
+        pdf.set_y(_cy + _total_h + 4)
+
         card_4col(
             ["DIRECTION","EXPECTED MOVE","TRADE QUALITY"],
             [fc_dir, f"{'+' if fc_move>=0 else ''}{fc_move:.2f}%", fc_quality],
@@ -1945,7 +2070,7 @@ async def pdf_report(payload: dict):
             # Agent header — check fits
             need(10)
             y_ah = pdf.get_y()
-            pdf.set_fill_color(ac[0]//8,ac[1]//8,ac[2]//8); pdf.set_draw_color(*ac); pdf.set_line_width(0.3)
+            pdf.set_fill_color(*_tint(ac)); pdf.set_draw_color(*ac); pdf.set_line_width(0.3)
             pdf.rect(MARGIN,y_ah,PW-2*MARGIN,7,"FD")
             pdf.set_fill_color(*ac); pdf.rect(MARGIN,y_ah,3,7,"F")
             pdf.set_font("Helvetica","B",8); pdf.set_text_color(*ac)
@@ -1959,7 +2084,7 @@ async def pdf_report(payload: dict):
                 # insert page breaks between them rather than mid-sentence.
                 paragraphs = [p.strip() for p in body.split("\n\n") if p.strip()] or [body]
                 pdf.set_font("Helvetica","",7.5)
-                pdf.set_text_color(180,195,215)
+                pdf.set_text_color(71,85,105)
                 pdf.set_left_margin(MARGIN+4); pdf.set_right_margin(MARGIN+4)
                 for para in paragraphs:
                     # Strip markdown bold markers (**text**) for cleaner PDF output
@@ -1974,7 +2099,8 @@ async def pdf_report(payload: dict):
     # ── FOOTER — pinned to bottom of last page, never creates a blank page ─────
     # Do NOT call need() here — it would push footer onto a new empty page.
     fy = PAGE_H - 12
-    pdf.set_fill_color(*SRF2); pdf.rect(0,fy,PW,12,"F")
+    pdf.set_fill_color(*SRF2); pdf.set_draw_color(*BDR); pdf.set_line_width(0.2)
+    pdf.rect(0,fy,PW,12,"FD")
     pdf.set_font("Helvetica","",6.5); pdf.set_text_color(*MUT)
     pdf.set_xy(MARGIN,fy+4)
     pdf.cell(0,4,_p(f"Generated by Crypto Sniper  |  crypto-sniper.app  |  {now_str}  |  Not financial advice."),align="C")
