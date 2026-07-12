@@ -334,13 +334,19 @@ async def kronos(req: KronosRequest):
     symbol = req.symbol.upper().strip()
     try:
         if req.signal_data:
-            signal_ctx = req.signal_data
+            signal_ctx = dict(req.signal_data)
         else:
             ohlcv = get_ohlcv(symbol, req.interval)
             quote = get_quote(symbol)
             indicators = get_indicators(symbol, req.interval, bars=ohlcv)
             sig = calculate_signals(ohlcv, quote, indicators)
             signal_ctx = {"symbol":symbol,"interval":req.interval,"close":sig.close,"rsi":sig.rsi,"adx":sig.adx,"ema_stack":sig.ema_stack,"signal":sig.signal_label,"total":sig.total,"direction":sig.direction,"change_24h":quote.get("change_24h",0)}
+
+        # Always set interval from the request explicitly — signal_data sent
+        # by the frontend doesn't include it, which was silently defaulting
+        # the agent debate's context (agents.py's ctx.get("interval","1H"))
+        # to 1H regardless of the timeframe actually selected/analysed.
+        signal_ctx["interval"] = req.interval
 
         # Run Kronos forecast and agent council in parallel (both are async)
         try:
