@@ -2250,6 +2250,79 @@ async def pdf_basket_report(payload: dict):
         pdf.set_xy(x,y0+7); pdf.cell(cw-1,6,_p(val),align="C")
     pdf.set_y(y0+19)
 
+    # ── Allocation donut ─────────────────────────────────────────────────────
+    # fpdf2 has no built-in pie/donut chart primitive, so this draws one
+    # manually as filled polygon wedges — same technique used for any vector
+    # pie chart, and matches the palette + layout of the web app's own donut
+    # (BasketScanner's Recharts <Pie>). Wrapped in try/except so an older
+    # fpdf2 version without polygon() support degrades to "no chart" rather
+    # than breaking PDF generation entirely.
+    if results:
+        import math
+        SLOT_COLORS = [
+            (124,58,237), (34,197,94), (245,158,11), (59,130,246), (239,68,68),
+            (236,72,153), (6,182,212), (163,230,53), (249,115,22), (139,92,246),
+        ]
+        weights = [max(r.get("score",0),1) for r in results]
+        total_w = sum(weights) or 1
+
+        need_h = 44
+        if pdf.get_y() + need_h > 270:
+            pdf.add_page()
+            pdf.set_fill_color(*BG); pdf.rect(0,0,PW,297,"F")
+            pdf.set_y(16)
+
+        pdf.set_font("Helvetica","B",10); pdf.set_text_color(*WHT)
+        pdf.cell(0,7,_p("ALLOCATION BY SIGNAL STRENGTH"),ln=True)
+        chart_y = pdf.get_y()
+
+        try:
+            cx = MARGIN + 20
+            cy = chart_y + 20
+            r_outer = 18
+            r_inner = 9
+            start_angle = -90.0
+            for i, w in enumerate(weights):
+                sweep = 360.0 * (w / total_w)
+                end_angle = start_angle + sweep
+                color = SLOT_COLORS[i % len(SLOT_COLORS)]
+                steps = max(2, int(sweep / 4) + 1)
+                points = []
+                for s in range(steps + 1):
+                    a = math.radians(start_angle + sweep * s / steps)
+                    points.append((cx + r_outer * math.cos(a), cy + r_outer * math.sin(a)))
+                for s in range(steps + 1):
+                    a = math.radians(end_angle - sweep * s / steps)
+                    points.append((cx + r_inner * math.cos(a), cy + r_inner * math.sin(a)))
+                pdf.set_fill_color(*color)
+                pdf.set_draw_color(255,255,255)
+                pdf.set_line_width(0.4)
+                pdf.polygon(points, style="FD")
+                start_angle = end_angle
+
+            # Legend — two columns, to the right of the donut
+            leg_x = cx + r_outer + 14
+            leg_y = chart_y + 2
+            col_w = (PW - MARGIN - leg_x) / 2
+            for i, (r, w) in enumerate(zip(results, weights)):
+                col = i % 2
+                row = i // 2
+                lx = leg_x + col * col_w
+                ly = leg_y + row * 6
+                color = SLOT_COLORS[i % len(SLOT_COLORS)]
+                pdf.set_fill_color(*color)
+                pdf.rect(lx, ly + 1, 3, 3, "F")
+                pdf.set_font("Helvetica","",7.5); pdf.set_text_color(*TXT)
+                pct = round(w / total_w * 100)
+                pdf.set_xy(lx + 5, ly)
+                pdf.cell(col_w - 6, 5, _p(f"{r.get('symbol','?')}  {pct}%"))
+
+            pdf.set_y(chart_y + max(44, ((len(results) + 1) // 2) * 6 + 6))
+        except Exception as _e:
+            logger.warning(f"pdf-basket-report chart draw failed: {_e}")
+            pdf.set_y(chart_y)
+        pdf.ln(4)
+
     # ── Constituent table ────────────────────────────────────────────────────
     pdf.set_font("Helvetica","B",8); pdf.set_text_color(*WHT)
     y = pdf.get_y()
