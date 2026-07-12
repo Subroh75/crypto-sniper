@@ -1691,10 +1691,21 @@ async def pdf_report(payload: dict):
     # ── HEADER ───────────────────────────────────────────────────────────────────
     pdf.set_fill_color(20,5,45);  pdf.rect(0,0,PW,32,"F")
     pdf.set_fill_color(12,18,37); pdf.rect(0,22,PW,10,"F")
+    # Logo mark — embedded PNG (frontend/client/public/logo-mark.png, same asset
+    # used for the web header). Falls back to text-only if the file is missing
+    # so a deploy/path issue never breaks PDF generation.
+    _logo_path = os.path.join(os.path.dirname(__file__), "frontend", "client", "public", "logo-mark.png")
+    _text_x = MARGIN
+    if os.path.exists(_logo_path):
+        try:
+            pdf.image(_logo_path, x=MARGIN, y=6, w=11, h=11)
+            _text_x = MARGIN + 13
+        except Exception:
+            _text_x = MARGIN
     pdf.set_font("Helvetica","B",15); pdf.set_text_color(*WHT)
-    pdf.set_xy(MARGIN,8);  pdf.cell(80,8,"CRYPTO SNIPER")
+    pdf.set_xy(_text_x,8);  pdf.cell(80,8,"CRYPTO SNIPER")
     pdf.set_font("Helvetica","",7); pdf.set_text_color(*PUR)
-    pdf.set_xy(MARGIN,17); pdf.cell(80,5,"DETECT EARLY. ACT SMART.")
+    pdf.set_xy(_text_x,17); pdf.cell(80,5,"DETECT EARLY. ACT SMART.")
     pdf.set_font("Helvetica","",7.5); pdf.set_text_color(*MUT)
     pdf.set_xy(PW-100,10); pdf.cell(86,5,_p(f"{symbol}/USDT  |  {interval}"),align="R")
     pdf.set_xy(PW-100,16); pdf.cell(86,5,_p(now_str),align="R")
