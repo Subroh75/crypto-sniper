@@ -945,6 +945,9 @@ export function BasketScanner({
   const [calcLoading, setCalcLoading] = useState(false);
   const calcAbortRef = useRef<AbortController | null>(null);
 
+  // PDF export state
+  const [exportingPdf, setExportingPdf] = useState(false);
+
   const basket = BASKETS.find(b => b.id === activeBasket) ?? null;
 
   const runScan = useCallback(async (b: typeof BASKETS[0]) => {
@@ -1052,6 +1055,44 @@ export function BasketScanner({
   const top        = sorted.find(r => r.done && !r.error);
   const doneAll    = sorted.filter(r => r.done && !r.error);
   const strongBuys = doneAll.filter(r => r.signal === "STRONG BUY" || r.signal === "BUY").length;
+
+  const downloadPdf = useCallback(async () => {
+    if (!basket || doneAll.length === 0) return;
+    setExportingPdf(true);
+    try {
+      const res = await fetch(`${RENDER_BASE}/pdf-basket-report`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          basket_label: basket.label,
+          basket_desc: basket.desc,
+          interval,
+          results: doneAll.map(r => ({
+            symbol: r.symbol, price: r.price, change: r.change,
+            score: r.score, max: r.max, signal: r.signal,
+          })),
+          calc: calcResult
+            ? { period: calcPeriod, amount: parseFloat(calcAmount) || 100, value: calcResult.value, pct: calcResult.pct }
+            : null,
+        }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `crypto-sniper-basket-${basket.id}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      console.error("Basket PDF export failed:", e);
+    } finally {
+      setExportingPdf(false);
+    }
+  }, [basket, doneAll, interval, calcResult, calcPeriod, calcAmount]);
+
 
   // Donut data — use score as weight, min 1 for visibility
   // Colour by slot index so every wedge is vivid and distinct
@@ -1356,16 +1397,31 @@ export function BasketScanner({
           </div>
         )}
 
+        {/* Download PDF — full basket report: constituents, allocation, returns calc */}
+        {done && doneAll.length > 0 && (
+          <button
+            onClick={downloadPdf}
+            disabled={exportingPdf}
+            className="w-full mt-1 mb-1.5 py-2.5 rounded-lg font-mono font-bold text-[11px] text-white flex items-center justify-center gap-1.5 disabled:opacity-60 transition-all"
+            style={{
+              background: exportingPdf ? "#3a2a8a" : "linear-gradient(135deg, #7c5cfc, #5b3fd4)",
+              boxShadow: exportingPdf ? "none" : "0 2px 12px rgba(124,92,252,0.3)",
+            }}
+          >
+            {exportingPdf ? "⏳ Generating…" : "⬇ Download PDF"}
+          </button>
+        )}
+
         {/* Top scorer CTA */}
         {done && top && top.score >= 5 && (
           <button
             onClick={() => onSelect(top.symbol)}
             className="w-full mt-1 py-2 rounded-lg text-[10px] font-mono font-bold text-white flex items-center justify-center gap-1.5 transition-all hover:opacity-90"
             style={{
-              background: top.score >= 9
+              background: top.signal === "STRONG BUY"
                 ? "linear-gradient(135deg, #22c55e, #16a34a)"
                 : "linear-gradient(135deg, #f59e0b, #d97706)",
-              boxShadow: top.score >= 9
+              boxShadow: top.signal === "STRONG BUY"
                 ? "0 2px 12px rgba(34,197,94,0.25)"
                 : "0 2px 12px rgba(245,158,11,0.20)",
             }}
