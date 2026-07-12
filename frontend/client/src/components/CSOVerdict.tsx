@@ -8,23 +8,28 @@ interface Props { sig: any; kron: any; fearGreed?: any; }
 function calcConfidence(sig: any, kron: any, fg: any): number {
   if (!sig) return 0;
 
-  const score    = sig.signal?.total ?? 0;
-  const maxScore = sig.signal?.max   ?? 16;
-  const label    = (sig.signal?.label ?? "").toUpperCase();
-  const dir      = (sig.signal?.direction ?? "NEUTRAL").toUpperCase();
+  const score = sig.signal?.total ?? 0;
+  const maxScore = sig.signal?.max ?? 16;
+  const label = (sig.signal?.label ?? "").toUpperCase();
+  const dir = (sig.signal?.direction ?? "NEUTRAL").toUpperCase();
 
-  // Score component (0–50)
+  // Score component (0–50) — intentionally left as a raw score/max ratio.
+  // A plain BUY (Trend+ADX only) legitimately scores lower here than a
+  // STRONG BUY (all four VPRT components) — that's correct and desired,
+  // it's what differentiates their confidence numbers. The bug was never
+  // here; it was buildVerdict() below using score to decide whether the
+  // signal counted as actionable at all.
   const scoreComp = (score / maxScore) * 50;
 
   // Kronos alignment (0–25)
   // If direction is NEUTRAL we check if Kronos forecast is positive for score-based signals
-  const kronDir  = (kron?.forecast?.direction ?? "NEUTRAL").toUpperCase();
+  const kronDir = (kron?.forecast?.direction ?? "NEUTRAL").toUpperCase();
   const kronMove = kron?.forecast?.expected_move_pct ?? 0;
   let kronComp = 12; // neutral baseline
-  if (dir === "LONG"  && (kronDir === "LONG"  || kronMove > 0.5)) kronComp = 25;
+  if (dir === "LONG" && (kronDir === "LONG" || kronMove > 0.5)) kronComp = 25;
   else if (dir === "SHORT" && (kronDir === "SHORT" || kronMove < -0.5)) kronComp = 25;
-  else if (dir === "NEUTRAL" && label.includes("BUY")  && (kronDir !== "SHORT" && kronMove >= 0)) kronComp = 18;
-  else if (dir === "NEUTRAL" && label.includes("SELL") && (kronDir !== "LONG"  && kronMove <= 0)) kronComp = 18;
+  else if (dir === "NEUTRAL" && label.includes("BUY") && (kronDir !== "SHORT" && kronMove >= 0)) kronComp = 18;
+  else if (dir === "NEUTRAL" && label.includes("SELL") && (kronDir !== "LONG" && kronMove <= 0)) kronComp = 18;
   else if ((dir === "LONG" && kronDir === "SHORT") || (dir === "SHORT" && kronDir === "LONG")) kronComp = 3;
 
   // Fear & Greed (0–15)
@@ -51,40 +56,49 @@ function calcConfidence(sig: any, kron: any, fg: any): number {
 export function buildVerdict(sig: any, kron: any, fg: any) {
   if (!sig?.signal) return { verdict: "WAIT", go: false, goLabel: "NO GO", color: "#f59e0b", reason: "Run an analysis first.", note: null };
 
-  const label    = (sig.signal?.label ?? "").toUpperCase();
-  const dir      = (sig.signal?.direction ?? "NEUTRAL").toUpperCase();
-  const score    = sig.signal?.total ?? 0;
-  const maxScore = sig.signal?.max   ?? 16;
-  const fgVal    = fg?.value ?? 50;
-  const fgLabel  = fg?.label ?? "Neutral";
-  const kronDir  = (kron?.forecast?.direction ?? "NEUTRAL").toUpperCase();
+  const label = (sig.signal?.label ?? "").toUpperCase();
+  const dir = (sig.signal?.direction ?? "NEUTRAL").toUpperCase();
+  const score = sig.signal?.total ?? 0;
+  const maxScore = sig.signal?.max ?? 16;
+  const fgVal = fg?.value ?? 50;
+  const fgLabel = fg?.label ?? "Neutral";
+  const kronDir = (kron?.forecast?.direction ?? "NEUTRAL").toUpperCase();
   const kronMove = kron?.forecast?.expected_move_pct ?? 0;
-  const entry    = sig.trade_setup?.entry;
-  const stop     = sig.trade_setup?.stop;
-  const target   = sig.trade_setup?.target;
-  const bullPct  = sig.conviction?.bull_pct ?? 50;
+  const entry = sig.trade_setup?.entry;
+  const stop = sig.trade_setup?.stop;
+  const target = sig.trade_setup?.target;
+  const bullPct = sig.conviction?.bull_pct ?? 50;
 
-  // ── Primary verdict from signal label + score ────────────────────────────
+  // ── Primary verdict from signal label ─────────────────────────────────────
+  // Trusts signal.label directly instead of re-deriving score thresholds.
+  // Previously this checked `score >= 9` / `score >= 6` to decide whether a
+  // BUY counted as GO/CAUTION/WAIT — those thresholds were calibrated for
+  // the old system where BUY required Volume+Trend+ADX, so a real BUY
+  // reliably scored high. Under the current system BUY only requires
+  // Trend+ADX (signals.py), and can legitimately score as low as 3/13 —
+  // so a real, actionable BUY was almost always falling through to
+  // "LEAN BUY / WAIT" here despite the backend already calling it BUY.
+  // signal.label is the single source of truth for the tier; this no
+  // longer re-derives it from score at all.
   let verdict: string;
   let go: boolean;
   let goLabel: string;
   let color: string;
   let note: string | null = null;
 
-  if (label === "STRONG BUY" || (label.includes("BUY") && score >= 9)) {
-    verdict = "BUY";   go = true;  goLabel = "GO";    color = "#22c55e";
-  } else if (label === "STRONG SELL" || (label.includes("SELL") && score >= 9)) {
-    verdict = "SELL";  go = true;  goLabel = "GO";    color = "#ef4444";
-  } else if (label.includes("BUY") && score >= 6) {
-    verdict = "BUY";   go = true;  goLabel = "CAUTION"; color = "#22c55e";
-  } else if (label.includes("SELL") && score >= 6) {
-    verdict = "SELL";  go = true;  goLabel = "CAUTION"; color = "#ef4444";
-  } else if (label.includes("BUY")) {
-    verdict = "LEAN BUY";  go = false; goLabel = "WAIT"; color = "#f59e0b";
-  } else if (label.includes("SELL")) {
-    verdict = "LEAN SELL"; go = false; goLabel = "WAIT"; color = "#ef4444";
+  if (label === "STRONG BUY") {
+    verdict = "STRONG BUY"; go = true; goLabel = "GO"; color = "#22c55e";
+  } else if (label === "BUY") {
+    // A real, actionable signal (Trend+ADX confirmed) — but lighter
+    // confirmation than STRONG BUY by design, so it's flagged CAUTION
+    // rather than a full GO, without blocking the trade setup entirely.
+    verdict = "BUY"; go = true; goLabel = "CAUTION"; color = "#22c55e";
+  } else if (label === "STRONG SELL") {
+    verdict = "STRONG SELL"; go = true; goLabel = "GO"; color = "#ef4444";
+  } else if (label === "SELL") {
+    verdict = "SELL"; go = true; goLabel = "CAUTION"; color = "#ef4444";
   } else {
-    verdict = "WAIT";  go = false; goLabel = "WAIT";  color = "#f59e0b";
+    verdict = "WAIT"; go = false; goLabel = "WAIT"; color = "#f59e0b";
   }
 
   // ── Direction note (explain NEUTRAL without overriding the verdict) ───────
@@ -97,12 +111,12 @@ export function buildVerdict(sig: any, kron: any, fg: any) {
 
   // ── Kronos conflict flag ──────────────────────────────────────────────────
   const kronConflict =
-    (verdict === "BUY"  && kronDir === "SHORT" && kronMove < -0.5) ||
-    (verdict === "SELL" && kronDir === "LONG"  && kronMove > 0.5);
+    ((verdict === "BUY" || verdict === "STRONG BUY") && kronDir === "SHORT" && kronMove < -0.5) ||
+    ((verdict === "SELL" || verdict === "STRONG SELL") && kronDir === "LONG" && kronMove > 0.5);
 
   if (kronConflict) {
     goLabel = "CAUTION";
-    note = `Kronos AI forecasts ${Math.abs(kronMove).toFixed(1)}% ${kronMove < 0 ? "downside" : "upside"} — conflicts with the BUY score. Consider waiting for Kronos alignment before entering.`;
+    note = `Kronos AI forecasts ${Math.abs(kronMove).toFixed(1)}% ${kronMove < 0 ? "downside" : "upside"} — conflicts with the ${verdict} score. Consider waiting for Kronos alignment before entering.`;
   }
 
   // ── Reason sentence ───────────────────────────────────────────────────────
@@ -120,9 +134,9 @@ export function buildVerdict(sig: any, kron: any, fg: any) {
     parts.push(`Kronos direction: ${kronDir}`);
   }
 
-  if (fgVal <= 25)      parts.push(`Fear & Greed ${fgVal} — extreme fear, historically a buy zone`);
+  if (fgVal <= 25) parts.push(`Fear & Greed ${fgVal} — extreme fear, historically a buy zone`);
   else if (fgVal >= 75) parts.push(`Fear & Greed ${fgVal} — extreme greed, caution advised`);
-  else                  parts.push(`Fear & Greed ${fgVal} (${fgLabel})`);
+  else parts.push(`Fear & Greed ${fgVal} (${fgLabel})`);
 
   if (entry && stop && target) {
     parts.push(`Entry ${fmtPrice(entry)} · Stop ${fmtPrice(stop)} · Target ${fmtPrice(target)}`);
@@ -141,9 +155,9 @@ export function CSOVerdict({ sig, kron, fearGreed }: Props) {
   const { verdict, go, goLabel, color, reason, note } = buildVerdict(sig, kron, fg);
 
   const goColors: Record<string, { bg: string; text: string; border: string }> = {
-    "GO":      { bg: color,      text: "#fff",     border: "transparent" },
-    "CAUTION": { bg: "#f59e0b22", text: "#f59e0b",  border: "#f59e0b55" },
-    "WAIT":    { bg: "#1e293b",   text: "#64748b",  border: "#334155" },
+    "GO": { bg: color, text: "#fff", border: "transparent" },
+    "CAUTION": { bg: "#f59e0b22", text: "#f59e0b", border: "#f59e0b55" },
+    "WAIT": { bg: "#1e293b", text: "#64748b", border: "#334155" },
   };
   const gc = goColors[goLabel] ?? goColors["WAIT"];
   const cardBg = color + "10";
