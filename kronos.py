@@ -1,6 +1,16 @@
 """
 kronos.py — Kronos AI Forecast for Crypto Sniper
-Uses Claude Haiku to generate 24H price forecasts with OHLCV predictions.
+
+Three-tier fallback, each only used if the previous tier is unavailable
+or fails:
+  1. Real Kronos-mini model (kronos_real.py) — genuine time-series
+     forecast against actual OHLCV history. Used whenever real bars are
+     available and the model loads successfully.
+  2. Claude Haiku prompt — asked to produce a forecast-shaped JSON from
+     a handful of scalar signal-context numbers. No real price series
+     grounding; kept as a fallback, not the primary path.
+  3. Deterministic heuristic — used when neither of the above works
+     (no ANTHROPIC_API_KEY, or both prior tiers failed/errored).
 """
 
 import os, json, logging
@@ -33,16 +43,32 @@ You MUST respond with valid JSON only, no other text. Format:
 }"""
 
 
-async def run_kronos_forecast(symbol: str, ctx: dict) -> dict:
-    """Generate Kronos AI forecast. Falls back to heuristic model if no API key."""
+async def run_kronos_forecast(symbol: str, ctx: dict, ohlcv: list | None = None) -> dict:
+    """
+    Generate Kronos AI forecast.
+
+    ohlcv: optional [[timestamp, open, high, low, close, volume], ...] real
+    historical bars (data.py's get_ohlcv() shape). When provided, the real
+    Kronos-mini model is tried first — see module docstring for the full
+    fallback order.
+    """
+    if ohlcv:
+        try:
+            from kronos_real import get_real_forecast
+            real = get_real_forecast(symbol, ohlcv)
+            if real is not None:
+                return real
+        except Exception as e:
+            logger.warning(f"Real Kronos-mini path errored for {symbol}, falling back: {e}")
+
     if not ANTHROPIC_KEY:
         return _heuristic_forecast(symbol, ctx)
 
-    close  = ctx.get("close", 0)
-    rsi    = ctx.get("rsi", 50)
-    adx    = ctx.get("adx", 25)
+    close = ctx.get("close", 0)
+    rsi = ctx.get("rsi", 50)
+    adx = ctx.get("adx", 25)
     change = ctx.get("change_24h", 0)
-    score  = ctx.get("total", 0)
+    score = ctx.get("total", 0)
 
     prompt = f"""Market data for {symbol}:
 - Price: ${close:,.2f}
@@ -66,7 +92,7 @@ Generate a 24-hour forecast. Current price is ${close:,.2f}."""
                 messages=[{"role": "user", "content": prompt}]
             )
         loop = asyncio.get_event_loop()
-        msg  = await loop.run_in_executor(None, _call)
+        msg = await loop.run_in_executor(None, _call)
         text = msg.content[0].text.strip()
         # Strip any markdown code fences
         if "```" in text:
@@ -102,93 +128,105 @@ def _validate_forecast(data: dict, close: float) -> dict:
                 "low": price * 0.998, "close": price
             })
             last_close = price
-    data["predicted_ohlcv"] = ohlcv[:24]
+        data["predicted_ohlcv"] = ohlcv[:24]
     return data
 
 
 def _heuristic_forecast(symbol: str, ctx: dict) -> dict:
     """
-    Deterministic heuristic forecast when no API key is set.
-    Based on RSI, ADX, signal score, and actual recent OHLCV green candle ratio.
+    Deterministic heuristic forecast — used when no API key is set, or
+    when both the real model and the LLM path are unavailable/failed.
+    Based on RSI, ADX, signal score, and actual 24h change.
+
+    Direction is now driven primarily by the actual measured `change`
+    (real recent price movement), with RSI/score as secondary modifiers
+    on the *magnitude* of the expected forward move rather than able to
+    flip the direction label outright. Previously, `rsi >= 70` forced
+    direction="Falling" unconditionally — regardless of `change` — which
+    meant a coin that had genuinely been rising (and consequently had
+    RSI push into overbought territory, a normal symptom of a real
+    uptrend, not a reversal signal) would get labelled "Falling" while
+    visibly moving up. Fixed here.
     """
-    close  = ctx.get("close", 0) or 100
-    rsi    = ctx.get("rsi", 50)
-    adx    = ctx.get("adx", 20)
+    close = ctx.get("close", 0) or 100
+    rsi = ctx.get("rsi", 50)
+    adx = ctx.get("adx", 20)
     change = ctx.get("change_24h", 0)
-    score  = ctx.get("total", 0)
+    score = ctx.get("total", 0)
     ema_stack = ctx.get("ema_stack", False)
 
     # Compute green_pct from actual signal context instead of hardcoded buckets.
-    # Uses RSI, ADX, score and 24h change to estimate momentum — unique per coin.
     base_green = 50.0
-    # RSI contribution: RSI 70 = +15, RSI 30 = -15, linear between
     base_green += (rsi - 50) * 0.3
-    # Score contribution: max score = 16, score 9 = +8, score 0 = -8
     base_green += (score - 6.5) * 1.0
-    # 24h change contribution
     base_green += min(max(change * 1.5, -10), 10)
-    # EMA stack bonus
     if ema_stack:
         base_green += 5
-    # ADX: trending strongly amplifies the directional bias
     if adx >= 25:
         base_green += (base_green - 50) * 0.2
     green_pct = round(min(max(base_green, 15), 85), 1)
 
-    # Direction based on signals
-    if score >= 6 and change > 0:
+    # Direction grounded in actual price change first — RSI/ADX only temper
+    # the magnitude of the expected move, never flip Rising<->Falling on
+    # their own. See docstring above for the bug this replaces.
+    if change > 0.3:
         direction = "Rising"
-        expected_move = abs(change) * 0.5
-    elif rsi >= 70 or score < 3:
+        move_mult = 0.35 if rsi >= 70 else 0.5
+        expected_move = abs(change) * move_mult
+    elif change < -0.3:
         direction = "Falling"
-        expected_move = -(abs(change) * 0.8)
+        move_mult = 0.35 if rsi <= 30 else 0.8
+        expected_move = -(abs(change) * move_mult)
     else:
         direction = "Sideways"
         expected_move = change * 0.2
 
     target = round(close * (1 + expected_move / 100), 2)
-    high   = round(close * 1.025, 2)
-    low    = round(close * 0.975, 2)
+    high = round(close * 1.025, 2)
+    low = round(close * 0.975, 2)
 
     # Build 24 mock OHLCV candles
     candles = []
     price = close
-    step  = (target - close) / 24
+    step = (target - close) / 24
     atr = close * 0.005  # ~0.5% ATR per candle - realistic for crypto
     for h in range(1, 25):
         open_ = round(price, 4)
         noise = atr * (0.3 - (h % 5) * 0.12)  # oscillate around trend
         price = price + step + noise
         body_size = abs(price - open_)
-        # Wicks are 20-50% of body size - realistic candlestick proportions
         wick_extra = max(body_size * 0.3, atr * 0.1)
         high_c = max(open_, price) + wick_extra
-        low_c  = min(open_, price) - wick_extra
+        low_c = min(open_, price) - wick_extra
         candles.append({
             "h": h, "open": round(open_, 2), "high": round(high_c, 2),
             "low": round(low_c, 2), "close": round(price, 2)
         })
 
-    # Conviction driven by forecast direction + score, not RSI
-    is_bearish = direction == "DOWN"
-    is_bullish = direction == "UP"
+    # Conviction driven by forecast direction + score. Fixed: previously
+    # compared direction against "UP"/"DOWN", but direction is only ever
+    # "Rising"/"Falling"/"Sideways" — meaning is_bullish/is_bearish were
+    # always False and bull_case/bear_case/bull_conviction/bear_conviction
+    # silently defaulted to PASS/LOW regardless of the actual forecast.
+    is_bearish = direction == "Falling"
+    is_bullish = direction == "Rising"
     bull_conv = "HIGH" if (is_bullish and score >= 7) else "MEDIUM" if (is_bullish and score >= 4) else "LOW"
     bear_conv = "HIGH" if (is_bearish and score < 4) else "MEDIUM" if (is_bearish and score < 7) else "LOW"
 
     return {
-        "direction":        direction,
+        "direction": direction,
         "expected_move_pct": round(expected_move, 2),
-        "target_price":     target,
-        "high_24h":         high,
-        "low_24h":          low,
-        "momentum":         "Mostly bullish" if green_pct > 55 else "Mostly bearish" if green_pct < 45 else "Mixed",
+        "target_price": target,
+        "high_24h": high,
+        "low_24h": low,
+        "momentum": "Mostly bullish" if green_pct > 55 else "Mostly bearish" if green_pct < 45 else "Mixed",
         "green_candle_pct": green_pct,
-        "trade_quality":    "Strong setup" if score >= 9 else "Avoid — bad odds" if score < 5 else "Moderate setup",
-        "bull_case":        "TAKE" if (is_bullish and score >= 7) else "PASS",
-        "bear_case":        "SHORT" if (is_bearish and score < 5) else "PASS",
-        "bull_conviction":  bull_conv,
-        "bear_conviction":  bear_conv,
-        "predicted_ohlcv":  candles,
+        "trade_quality": "Strong setup" if score >= 9 else "Avoid — bad odds" if score < 5 else "Moderate setup",
+        "bull_case": "TAKE" if (is_bullish and score >= 7) else "PASS",
+        "bear_case": "SHORT" if (is_bearish and score < 5) else "PASS",
+        "bull_conviction": bull_conv,
+        "bear_conviction": bear_conv,
+        "predicted_ohlcv": candles,
     }
 
 
