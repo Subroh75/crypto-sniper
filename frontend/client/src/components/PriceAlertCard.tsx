@@ -3,7 +3,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { subscribeScanSettings, updateScanSettings } from "./ScanAlertPoller";
-import type { ScanAlertSettings } from "./ScanAlertPoller";
+import type { ScanAlertSettings, SignalTier } from "./ScanAlertPoller";
 
 const API = (import.meta as Record<string, unknown> & { env?: Record<string, string> })
   .env?.VITE_API_BASE ?? "https://crypto-sniper.onrender.com";
@@ -11,30 +11,30 @@ const API = (import.meta as Record<string, unknown> & { env?: Record<string, str
 const USER_EMAIL = "subroh.iyer@gmail.com";
 
 export interface AlertHistoryEntry {
-  id:         number;
-  alert_id:   number;
-  email:      string;
-  symbol:     string;
+  id: number;
+  alert_id: number;
+  email: string;
+  symbol: string;
   alert_type: string;
-  threshold:  number;
-  direction:  string;
-  price:      number;
-  score:      number;
-  fired_ts:   number;
+  threshold: number;
+  direction: string;
+  price: number;
+  score: number;
+  fired_ts: number;
 }
 
 export interface Alert {
-  id:                   number;
-  symbol:               string;
-  alert_type:           string;
-  threshold:            number;
-  direction:            string;
-  active:               number;
-  repeat:               number;
-  cooldown_minutes:     number;
-  fired_ts:             number | null;
-  last_fired_ts:        number | null;
-  fire_count:           number;
+  id: number;
+  symbol: string;
+  alert_type: string;
+  threshold: number;
+  direction: string;
+  active: number;
+  repeat: number;
+  cooldown_minutes: number;
+  fired_ts: number | null;
+  last_fired_ts: number | null;
+  fire_count: number;
   cooldown_remaining_secs?: number;
 }
 
@@ -109,12 +109,23 @@ const inputStyle = {
 } as const;
 
 const COOLDOWN_OPTIONS = [
-  { label: "15m",  value: 15 },
-  { label: "30m",  value: 30 },
-  { label: "1h",   value: 60 },
-  { label: "4h",   value: 240 },
-  { label: "8h",   value: 480 },
-  { label: "24h",  value: 1440 },
+  { label: "15m", value: 15 },
+  { label: "30m", value: 30 },
+  { label: "1h", value: 60 },
+  { label: "4h", value: 240 },
+  { label: "8h", value: 480 },
+  { label: "24h", value: 1440 },
+];
+
+// Signal-tier options for the Live Scanner — replaces the old raw-score
+// chips (5/7/9/11). Under the current tier system (signals.py) a raw score
+// can't reliably distinguish BUY from STRONG BUY — a plain BUY can score
+// as low as 3, and STRONG BUY's own minimum possible score is 6, so the
+// two ranges overlap. Filtering by the actual signal label is the only
+// mechanism that matches what the backend really computed.
+const TIER_OPTIONS: { label: string; value: SignalTier }[] = [
+  { label: "BUY+", value: "buy" },
+  { label: "STRONG BUY", value: "strong_buy" },
 ];
 
 function fmtCooldownRemaining(secs: number): string {
@@ -132,23 +143,23 @@ function fmtTs(ts: number): string {
 
 // ── Main component ────────────────────────────────────────────────────────
 export function PriceAlertCard({ currentSymbol }: { currentSymbol?: string }) {
-  const [alerts, setAlerts]     = useState<Alert[]>([]);
-  const [loading, setLoading]   = useState(false);
+  const [alerts, setAlerts] = useState<Alert[]>([]);
+  const [loading, setLoading] = useState(false);
   const [creating, setCreating] = useState(false);
   const [pushEnabled, setPushEnabled] = useState(false);
   const [pushLoading, setPushLoading] = useState(false);
-  const [tab, setTab]           = useState<"active" | "history">("active");
-  const [history, setHistory]   = useState<AlertHistoryEntry[]>([]);
-  const [scanSettings, setScanSettings] = useState<ScanAlertSettings>({ enabled: false, threshold: 7, interval: 60, lastTs: 0, lastHits: [] });
+  const [tab, setTab] = useState<"active" | "history">("active");
+  const [history, setHistory] = useState<AlertHistoryEntry[]>([]);
+  const [scanSettings, setScanSettings] = useState<ScanAlertSettings>({ enabled: false, tier: "buy", interval: 60, lastTs: 0, lastHits: [] });
 
   // Form state
-  const [symbol,    setSymbol]    = useState(currentSymbol ?? "BTC");
+  const [symbol, setSymbol] = useState(currentSymbol ?? "BTC");
   const [alertType, setAlertType] = useState<"score" | "price">("score");
   const [threshold, setThreshold] = useState("9");
   const [direction, setDirection] = useState<"above" | "below">("above");
-  const [repeat,    setRepeat]    = useState(false);
-  const [cooldown,  setCooldown]  = useState(60);
-  const [formError,   setFormError]   = useState("");
+  const [repeat, setRepeat] = useState(false);
+  const [cooldown, setCooldown] = useState(60);
+  const [formError, setFormError] = useState("");
   const [formSuccess, setFormSuccess] = useState("");
 
   useEffect(() => { if (currentSymbol) setSymbol(currentSymbol); }, [currentSymbol]);
@@ -221,10 +232,10 @@ export function PriceAlertCard({ currentSymbol }: { currentSymbol?: string }) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          email:            USER_EMAIL,
-          symbol:           symbol.toUpperCase().trim(),
-          alert_type:       alertType,
-          threshold:        thr,
+          email: USER_EMAIL,
+          symbol: symbol.toUpperCase().trim(),
+          alert_type: alertType,
+          threshold: thr,
           direction,
           repeat,
           cooldown_minutes: repeat ? cooldown : 60,
@@ -279,7 +290,7 @@ export function PriceAlertCard({ currentSymbol }: { currentSymbol?: string }) {
             </div>
             <div style={{ fontSize: 9, color: "#334155", marginTop: 2 }}>
               {scanSettings.enabled
-                ? `Scanning top 200 every ${scanSettings.interval}m — score ${scanSettings.threshold}+`
+                ? `Scanning top 200 every ${scanSettings.interval}m — ${scanSettings.tier === "strong_buy" ? "STRONG BUY only" : "BUY or better"}`
                 : "Off — enable to get push alerts when signals fire"}
             </div>
           </div>
@@ -304,18 +315,18 @@ export function PriceAlertCard({ currentSymbol }: { currentSymbol?: string }) {
 
         {/* Expanded settings (only when enabled) */}
         {scanSettings.enabled && (<>
-          {/* Threshold chips */}
+          {/* Signal tier chips — replaces raw Min Score chips */}
           <div style={{ marginBottom: 8 }}>
-            <div style={{ fontSize: 9, color: "#475569", marginBottom: 5, letterSpacing: "0.06em", textTransform: "uppercase" }}>Min Score</div>
+            <div style={{ fontSize: 9, color: "#475569", marginBottom: 5, letterSpacing: "0.06em", textTransform: "uppercase" }}>Signal Tier</div>
             <div style={{ display: "flex", gap: 4 }}>
-              {[5, 7, 9, 11].map(v => (
-                <button key={v} type="button"
-                  onClick={() => updateScanSettings({ threshold: v })}
+              {TIER_OPTIONS.map(opt => (
+                <button key={opt.value} type="button"
+                  onClick={() => updateScanSettings({ tier: opt.value })}
                   style={{ fontSize: 10, fontWeight: 700, padding: "4px 10px", borderRadius: 5, cursor: "pointer",
-                    background: scanSettings.threshold === v ? "#7c3aed22" : "transparent",
-                    color: scanSettings.threshold === v ? "#a78bfa" : "#475569",
-                    border: scanSettings.threshold === v ? "1px solid #7c3aed" : "1px solid #1e293b",
-                  }}>{v}+</button>
+                    background: scanSettings.tier === opt.value ? "#7c3aed22" : "transparent",
+                    color: scanSettings.tier === opt.value ? "#a78bfa" : "#475569",
+                    border: scanSettings.tier === opt.value ? "1px solid #7c3aed" : "1px solid #1e293b",
+                  }}>{opt.label}</button>
               ))}
             </div>
           </div>
@@ -345,19 +356,27 @@ export function PriceAlertCard({ currentSymbol }: { currentSymbol?: string }) {
             </div>
             {scanSettings.lastHits.length > 0 && (
               <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
-                {scanSettings.lastHits.map(h => (
-                  <span key={h.symbol} style={{ fontSize: 9, fontWeight: 700, fontFamily: "monospace",
-                    padding: "2px 7px", borderRadius: 4,
-                    background: h.score >= 9 ? "#0d2212" : "#1a1004",
-                    color: h.score >= 9 ? "#22c55e" : "#f59e0b",
-                    border: `1px solid ${h.score >= 9 ? "#14532d" : "#78350f"}` }}>
-                    {h.symbol} {h.score}/16
-                  </span>
-                ))}
+                {scanSettings.lastHits.map(h => {
+                  // Color by actual signal label, not a raw score cutoff —
+                  // score alone can't distinguish BUY from STRONG BUY (see
+                  // module docstring above).
+                  const isStrong = h.signal === "STRONG BUY";
+                  return (
+                    <span key={h.symbol} style={{ fontSize: 9, fontWeight: 700, fontFamily: "monospace",
+                      padding: "2px 7px", borderRadius: 4,
+                      background: isStrong ? "#0d2212" : "#1a1004",
+                      color: isStrong ? "#22c55e" : "#f59e0b",
+                      border: `1px solid ${isStrong ? "#14532d" : "#78350f"}` }}>
+                      {h.symbol} {h.signal}
+                    </span>
+                  );
+                })}
               </div>
             )}
             {scanSettings.lastHits.length === 0 && scanSettings.lastTs > 0 && (
-              <div style={{ fontSize: 9, color: "#22c55e" }}>No signals above {scanSettings.threshold}+ at last scan</div>
+              <div style={{ fontSize: 9, color: "#22c55e" }}>
+                No {scanSettings.tier === "strong_buy" ? "STRONG BUY" : "BUY-tier"} signals at last scan
+              </div>
             )}
           </div>
         </>)}
@@ -423,6 +442,15 @@ export function PriceAlertCard({ currentSymbol }: { currentSymbol?: string }) {
               placeholder={alertType === "score" ? "9" : "50000"}
               min={0} step={alertType === "score" ? 1 : "any"}
               style={{ ...inputStyle, width: "calc(100% - 20px)" }} />
+            {alertType === "score" && (
+              <div style={{ fontSize: 8, color: "#334155", marginTop: 4, lineHeight: 1.5 }}>
+                This is a raw score alert (fires whenever total score crosses the
+                number you set) — a plain BUY signal can score as low as 3, and
+                STRONG BUY as low as 6, so a specific number here doesn't map
+                cleanly to either tier. Use the Live Scanner above if you want
+                alerts tied to the actual BUY / STRONG BUY verdict instead.
+              </div>
+            )}
           </div>
 
           {/* Repeat toggle */}
@@ -458,7 +486,7 @@ export function PriceAlertCard({ currentSymbol }: { currentSymbol?: string }) {
             </div>
           )}
 
-          {formError   && <div style={{ fontSize: 10, color: "#ef4444", marginBottom: 6 }}>{formError}</div>}
+          {formError && <div style={{ fontSize: 10, color: "#ef4444", marginBottom: 6 }}>{formError}</div>}
           {formSuccess && <div style={{ fontSize: 10, color: "#22c55e", marginBottom: 6 }}>{formSuccess}</div>}
 
           <button type="submit" disabled={creating}
