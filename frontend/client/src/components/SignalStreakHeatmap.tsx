@@ -1,32 +1,45 @@
 // SignalStreakHeatmap.tsx
-// Calendar heatmap: which coins had repeated strong signals over the last N days.
-// Colours: grey = no signal, amber = 7-8, green = 9-11, purple = 12+
+// Calendar heatmap: which coins had repeated signals over the last N days.
+// Colours: grey = no signal, teal = BUY, purple = STRONG BUY.
+//
+// Filters and colors by signal tier (min_tier: "buy" | "strong_buy"), not a
+// raw score cutoff. Under the current tier system (signals.py) a plain BUY
+// only needs Trend+ADX confirmed and can legitimately score as low as 3/13,
+// while STRONG BUY's own minimum possible score is 6 — so a fixed score
+// threshold or gradient can no longer reliably tell the two apart. Same
+// underlying bug as CSOVerdict.tsx and ScanAlertPoller.tsx, fixed the same
+// way: trust the signal label the backend actually computed.
 
 import { useState, useEffect } from "react";
 
 const API = (import.meta as Record<string, unknown> & { env?: Record<string, string> })
   .env?.VITE_API_BASE ?? "https://crypto-sniper.onrender.com";
 
-interface StreakData {
-  dates:    string[];       // ISO date strings, oldest → newest
-  symbols:  Record<string, (number | null)[]>;
-  min_score: number;
-  days:     number;
+type SignalTier = "buy" | "strong_buy";
+
+interface StreakCell {
+  score: number;
+  signal: string;
 }
 
-function scoreColor(score: number | null): string {
-  if (score == null) return "#0f172a";
-  if (score >= 12)   return "#a78bfa";  // purple — distinct from green 9-11
-  if (score >= 9)    return "#22c55e";
-  if (score >= 7)    return "#f59e0b";
+interface StreakData {
+  dates: string[]; // ISO date strings, oldest → newest
+  symbols: Record<string, (StreakCell | null)[]>;
+  min_tier: SignalTier;
+  days: number;
+}
+
+function cellColor(cell: StreakCell | null): string {
+  if (cell == null) return "#0f172a";
+  if (cell.signal === "STRONG BUY") return "#a78bfa"; // purple
+  if (cell.signal === "BUY") return "#22c55e";         // teal/green
   return "#0f172a";
 }
 
-function scoreBorder(score: number | null): string {
-  if (score == null) return "#1e293b";
-  if (score >= 12)   return "#a78bfa55";
-  if (score >= 9)    return "#22c55e55";
-  if (score >= 7)    return "#f59e0b55";
+function cellBorder(cell: StreakCell | null): string {
+  if (cell == null) return "#1e293b";
+  if (cell.signal === "STRONG BUY") return "#a78bfa55";
+  if (cell.signal === "BUY") return "#22c55e55";
   return "#1e293b";
 }
 
@@ -40,30 +53,35 @@ function labelEvery(dates: string[], n: number): (string | null)[] {
   return dates.map((d, i) => (i % n === 0 ? d : null));
 }
 
+const TIER_OPTIONS: { label: string; value: SignalTier }[] = [
+  { label: "BUY+", value: "buy" },
+  { label: "STRONG BUY", value: "strong_buy" },
+];
+
 export function SignalStreakHeatmap() {
-  const [data, setData]       = useState<StreakData | null>(null);
+  const [data, setData] = useState<StreakData | null>(null);
   const [loading, setLoading] = useState(false);
-  const [minScore, setMinScore] = useState(7);
-  const [days, setDays]       = useState(5);
-  const [tooltip, setTooltip] = useState<{ sym: string; date: string; score: number } | null>(null);
+  const [minTier, setMinTier] = useState<SignalTier>("buy");
+  const [days, setDays] = useState(5);
+  const [tooltip, setTooltip] = useState<{ sym: string; date: string; cell: StreakCell } | null>(null);
 
   async function load() {
     setLoading(true);
     try {
-      const r = await fetch(`${API}/streak?days=${days}&min_score=${minScore}`);
+      const r = await fetch(`${API}/streak?days=${days}&min_tier=${minTier}`);
       const j = await r.json();
       setData(j);
     } catch { setData(null); }
     finally { setLoading(false); }
   }
 
-  useEffect(() => { load(); }, [minScore, days]);
+  useEffect(() => { load(); }, [minTier, days]);
 
   const symbols = data ? Object.keys(data.symbols) : [];
-  const dates   = data?.dates ?? [];
+  const dates = data?.dates ?? [];
   // Show every 5th label on mobile-friendly 30-day view
   const labelEveryN = dates.length > 20 ? 5 : 3;
-  const labelDates  = labelEvery(dates, labelEveryN);
+  const labelDates = labelEvery(dates, labelEveryN);
 
   const btnStyle = {
     fontSize: 9, color: "#64748b", background: "#0f172a",
@@ -89,9 +107,9 @@ export function SignalStreakHeatmap() {
           </span>
         </div>
         <div style={{ display: "flex", gap: 4 }}>
-          {([7, 9, 11] as const).map(s => (
-            <button key={s} onClick={() => setMinScore(s)} style={minScore === s ? activeBtnStyle : btnStyle}>
-              {">="}{s}
+          {TIER_OPTIONS.map(opt => (
+            <button key={opt.value} onClick={() => setMinTier(opt.value)} style={minTier === opt.value ? activeBtnStyle : btnStyle}>
+              {opt.label}
             </button>
           ))}
           <button onClick={load} disabled={loading} style={{ ...btnStyle, color: loading ? "#334155" : "#7c3aed", cursor: loading ? "not-allowed" : "pointer" }}>
@@ -104,9 +122,8 @@ export function SignalStreakHeatmap() {
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8, flexWrap: "wrap" as const }}>
         {[
           { color: "#0f172a", border: "#1e293b", label: "No signal" },
-          { color: "#f59e0b", border: "#f59e0b55", label: "7–8" },
-          { color: "#22c55e", border: "#22c55e55", label: "9–11" },
-          { color: "#a78bfa", border: "#a78bfa55", label: "12+" },
+          { color: "#22c55e", border: "#22c55e55", label: "BUY" },
+          { color: "#a78bfa", border: "#a78bfa55", label: "STRONG BUY" },
         ].map(l => (
           <div key={l.label} style={{ display: "flex", alignItems: "center", gap: 4 }}>
             <div style={{ width: 10, height: 10, borderRadius: 2, background: l.color, border: `1px solid ${l.border}` }} />
@@ -150,9 +167,17 @@ export function SignalStreakHeatmap() {
 
             {/* Symbol rows */}
             {symbols.slice(0, 40).map(sym => {
-              const scores = data.symbols[sym];
-              const streakDays = scores.filter(s => s != null && s >= minScore).length;
-              const maxScore   = Math.max(...scores.filter((s): s is number => s != null));
+              const cells = data.symbols[sym];
+              const streakDays = cells.filter(c => c != null).length;
+              const strongDays = cells.filter(c => c != null && c.signal === "STRONG BUY").length;
+              const bestCell = cells.reduce<StreakCell | null>((best, c) => {
+                if (!c) return best;
+                if (!best) return c;
+                const rank = (s: string) => s === "STRONG BUY" ? 2 : s === "BUY" ? 1 : 0;
+                if (rank(c.signal) > rank(best.signal)) return c;
+                if (rank(c.signal) === rank(best.signal) && c.score > best.score) return c;
+                return best;
+              }, null);
               return (
                 <div key={sym} style={{ display: "flex", alignItems: "center", marginBottom: 2 }}>
                   {/* Symbol label */}
@@ -160,32 +185,37 @@ export function SignalStreakHeatmap() {
                     <span style={{ fontSize: 9, fontWeight: 700, color: "#94a3b8", fontFamily: "monospace", letterSpacing: "0.04em" }}>
                       {sym}
                     </span>
-                    <span style={{ fontSize: 8, color: streakDays >= 5 ? "#22c55e" : streakDays >= 3 ? "#f59e0b" : "#334155" }}>
+                    <span style={{ fontSize: 8, color: strongDays >= 3 ? "#a78bfa" : streakDays >= 3 ? "#22c55e" : "#334155" }}>
                       {streakDays}d
                     </span>
                   </div>
 
                   {/* Day cells */}
-                  {scores.map((score, di) => (
+                  {cells.map((cell, di) => (
                     <div
                       key={di}
-                      onMouseEnter={() => score != null ? setTooltip({ sym, date: dates[di], score }) : undefined}
+                      onMouseEnter={() => cell != null ? setTooltip({ sym, date: dates[di], cell }) : undefined}
                       onMouseLeave={() => setTooltip(null)}
                       style={{
                         width: 12, height: 12, borderRadius: 2,
                         marginRight: 2, flexShrink: 0,
-                        background: scoreColor(score),
-                        border: `1px solid ${scoreBorder(score)}`,
-                        cursor: score != null ? "default" : "default",
+                        background: cellColor(cell),
+                        border: `1px solid ${cellBorder(cell)}`,
                         transition: "transform 0.1s",
                       }}
                     />
                   ))}
 
-                  {/* Max score badge */}
-                  <span style={{ fontSize: 8, color: maxScore >= 12 ? "#a78bfa" : maxScore >= 9 ? "#22c55e" : "#f59e0b", marginLeft: 4, fontFamily: "monospace", fontWeight: 700 }}>
-                    {maxScore}
-                  </span>
+                  {/* Best signal badge for this symbol in the window */}
+                  {bestCell && (
+                    <span style={{
+                      fontSize: 8,
+                      color: bestCell.signal === "STRONG BUY" ? "#a78bfa" : "#22c55e",
+                      marginLeft: 4, fontFamily: "monospace", fontWeight: 700,
+                    }}>
+                      {bestCell.signal === "STRONG BUY" ? "SB" : "B"} {bestCell.score}
+                    </span>
+                  )}
                 </div>
               );
             })}
@@ -205,8 +235,8 @@ export function SignalStreakHeatmap() {
           {" "}&mdash;{" "}
           {fmtDate(tooltip.date)}
           {": "}
-          <strong style={{ color: tooltip.score >= 12 ? "#a78bfa" : tooltip.score >= 9 ? "#22c55e" : "#f59e0b" }}>
-            {tooltip.score}/13
+          <strong style={{ color: tooltip.cell.signal === "STRONG BUY" ? "#a78bfa" : "#22c55e" }}>
+            {tooltip.cell.signal} · {tooltip.cell.score}/13
           </strong>
         </div>
       )}
