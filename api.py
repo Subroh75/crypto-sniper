@@ -1353,29 +1353,59 @@ async def confluence(symbol: str, intervals: str = "1H,4H,1D"):
 
 # ── Signal Streak Heatmap ─────────────────────────────────────────────────────
 @app.get("/streak")
-async def signal_streak(days: int = 30, min_score: int = 7):
+async def signal_streak(days: int = 30, min_tier: str = "buy"):
     """
-    Return per-symbol, per-day max score for the last N days.
+    Return per-symbol, per-day best signal (score + tier) for the last N days.
     Used to render the streak heatmap on the frontend.
-    Response: { dates: [...], symbols: { SYM: [score_or_null, ...] } }
+    Response: { dates: [...], symbols: { SYM: [{score, signal} | null, ...] } }
+
+    Filters by signal tier (min_tier: "buy" | "strong_buy") rather than a raw
+    score cutoff — under the current tier system (signals.py) a plain BUY can
+    legitimately score as low as 3/13 (Trend+ADX only), and STRONG BUY's own
+    minimum possible score is 6 (one point on each of V/P/R/T), so a fixed
+    score threshold can no longer reliably separate "no real signal" from
+    "a real BUY that happens to score modestly." The old default (min_score=7)
+    was silently excluding most legitimate BUY-tier history from ever
+    appearing in the heatmap — same underlying bug as CSOVerdict.tsx,
+    ScanAlertPoller.tsx, and agents.py, fixed the same way: trust
+    signal_label, not a number that no longer maps cleanly to either tier.
     """
     import sqlite3 as _sq
     from datetime import datetime, timezone, timedelta
     DB = os.path.join(os.path.dirname(__file__), "data.db")
     cutoff = int((datetime.now(timezone.utc) - timedelta(days=days)).timestamp())
+    tier_rank = 2 if min_tier == "strong_buy" else 1
 
     try:
         conn = _sq.connect(DB)
         conn.row_factory = _sq.Row
         rows = conn.execute(
-            """SELECT symbol,
-                      date(ts, 'unixepoch') as day,
-                      MAX(score) as max_score
-               FROM signals
-               WHERE ts >= ? AND score >= ?
-               GROUP BY symbol, day
-               ORDER BY day ASC""",
-            (cutoff, min_score),
+            """
+            WITH ranked AS (
+                SELECT symbol,
+                       date(ts, 'unixepoch') as day,
+                       score,
+                       signal_label,
+                       CASE signal_label
+                         WHEN 'STRONG BUY' THEN 2
+                         WHEN 'BUY' THEN 1
+                         ELSE 0
+                       END as tier_rank,
+                       ROW_NUMBER() OVER (
+                         PARTITION BY symbol, date(ts, 'unixepoch')
+                         ORDER BY
+                           CASE signal_label WHEN 'STRONG BUY' THEN 2 WHEN 'BUY' THEN 1 ELSE 0 END DESC,
+                           score DESC
+                       ) as rn
+                FROM signals
+                WHERE ts >= ?
+            )
+            SELECT symbol, day, score, signal_label
+            FROM ranked
+            WHERE rn = 1 AND tier_rank >= ?
+            ORDER BY day ASC
+            """,
+            (cutoff, tier_rank),
         ).fetchall()
         conn.close()
     except Exception as e:
@@ -1385,30 +1415,31 @@ async def signal_streak(days: int = 30, min_score: int = 7):
     today = datetime.now(timezone.utc).date()
     date_list = [(today - timedelta(days=i)).isoformat() for i in range(days - 1, -1, -1)]
 
-    # Aggregate by symbol
-    sym_map: dict[str, dict[str, int]] = {}
+    # Aggregate by symbol — each cell now carries score + signal_label
+    sym_map: dict[str, dict[str, dict]] = {}
     for r in rows:
         sym = r["symbol"]
         if sym not in sym_map:
             sym_map[sym] = {}
-        sym_map[sym][r["day"]] = int(r["max_score"])
+        sym_map[sym][r["day"]] = {"score": int(r["score"]), "signal": r["signal_label"]}
 
     # Only include symbols with at least 2 signal days (filter noise)
     result: dict[str, list] = {}
-    for sym, day_scores in sym_map.items():
-        if len(day_scores) >= 2:
-            result[sym] = [day_scores.get(d) for d in date_list]
+    for sym, day_data in sym_map.items():
+        if len(day_data) >= 2:
+            result[sym] = [day_data.get(d) for d in date_list]
 
     # Sort by total signal days desc
     result = dict(sorted(result.items(), key=lambda x: sum(1 for v in x[1] if v), reverse=True))
 
     return {
-        "dates":   date_list,
-        "symbols": result,
-        "min_score": min_score,
-        "days":    days,
+        "dates":    date_list,
+        "symbols":  result,
+        "min_tier": min_tier,
+        "days":     days,
         "timestamp": int(time.time()),
     }
+
 
 
 # ── Push Notification Subscriptions ──────────────────────────────────────────
