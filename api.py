@@ -2153,6 +2153,184 @@ async def pdf_report(payload: dict):
     )
 
 
+# ── Basket Scanner PDF ─────────────────────────────────────────────────────────
+@app.post("/pdf-basket-report")
+async def pdf_basket_report(payload: dict):
+    """
+    Basket Scanner PDF — constituent table, signal-strength allocation,
+    and returns calculator result for a single basket scan.
+
+    Separate endpoint from /pdf-report (single-coin deep dive) since the
+    data shape is entirely different: a ranked table of coins, not one
+    asset's VPRT/Kronos/agent-debate breakdown. The frontend sends the
+    already-scanned results (Basket Scanner has them in state) rather
+    than this endpoint re-fetching/re-scoring anything itself.
+    """
+    from fpdf import FPDF
+    from datetime import datetime, timezone
+
+    def _p(text):
+        text = str(text)
+        for ch, rep in {
+            "\u2014":"-","\u2013":"-","\u00d7":"x","\u00b7":".",
+            "\u2019":"'","\u2018":"'","\u201c":'"',"\u201d":'"',
+            "\u2022":"-","\u2026":"...","\u2192":"->",
+            "\u2713":"OK","\u2717":"X","\u25b2":"^","\u25bc":"v",
+            "\u2191":"^","\u2193":"v",
+        }.items():
+            text = text.replace(ch, rep)
+        return text.encode("latin-1", errors="ignore").decode("latin-1")
+
+    basket_label = payload.get("basket_label", "Basket")
+    basket_desc  = payload.get("basket_desc", "")
+    interval     = payload.get("interval", "1D")
+    results      = payload.get("results") or []
+    calc         = payload.get("calc")
+    now_str      = datetime.now(timezone.utc).strftime("%d %b %Y %H:%M UTC")
+
+    # Colours — same clean white-background palette as the single-coin report
+    BG=(255,255,255); SRF=(250,250,252); SRF2=(243,244,248); BDR=(221,224,232)
+    TXT=(30,41,59); MUT=(100,116,139)
+    GRN=(21,128,61); RED=(185,28,28); PUR=(91,33,182); WHT=(15,23,42)
+
+    pdf = FPDF()
+    pdf.set_auto_page_break(auto=True, margin=16)
+    MARGIN = 14
+    pdf.add_page()
+    pdf.set_fill_color(*BG); pdf.rect(0, 0, pdf.w, 297, "F")
+    PW = pdf.w
+
+    # ── Header — same logo + brand bar as the single-coin report ─────────────
+    pdf.set_fill_color(20,5,45); pdf.rect(0,0,PW,32,"F")
+    pdf.set_fill_color(12,18,37); pdf.rect(0,22,PW,10,"F")
+    _logo_path = os.path.join(os.path.dirname(__file__), "frontend", "client", "public", "logo-mark.png")
+    _text_x = MARGIN
+    if os.path.exists(_logo_path):
+        try:
+            pdf.image(_logo_path, x=MARGIN, y=6, w=11, h=11)
+            _text_x = MARGIN + 13
+        except Exception:
+            _text_x = MARGIN
+    pdf.set_font("Helvetica","B",15); pdf.set_text_color(255,255,255)
+    pdf.set_xy(_text_x,8); pdf.cell(80,8,"CRYPTO SNIPER")
+    pdf.set_font("Helvetica","",7); pdf.set_text_color(*PUR)
+    pdf.set_xy(_text_x,17); pdf.cell(80,5,"BASKET SCANNER REPORT")
+    pdf.set_font("Helvetica","",7.5); pdf.set_text_color(180,180,190)
+    pdf.set_xy(PW-100,10); pdf.cell(86,5,_p(f"{basket_label}  |  {interval}"),align="R")
+    pdf.set_xy(PW-100,16); pdf.cell(86,5,_p(now_str),align="R")
+    pdf.set_fill_color(*PUR); pdf.rect(0,32,PW,1.5,"F")
+    pdf.set_y(40)
+
+    # ── Basket title ─────────────────────────────────────────────────────────
+    pdf.set_font("Helvetica","B",20); pdf.set_text_color(*WHT)
+    pdf.cell(0,10,_p(basket_label),ln=True,align="C")
+    if basket_desc:
+        pdf.set_font("Helvetica","",9); pdf.set_text_color(*MUT)
+        pdf.cell(0,6,_p(basket_desc),ln=True,align="C")
+    pdf.ln(4)
+
+    # ── Summary stats ────────────────────────────────────────────────────────
+    strong_buys = sum(1 for r in results if r.get("signal") == "STRONG BUY")
+    buys        = sum(1 for r in results if r.get("signal") == "BUY")
+    stats = [
+        ("CONSTITUENTS", str(len(results)), TXT),
+        ("STRONG BUY",   str(strong_buys),  GRN),
+        ("BUY",          str(buys),         GRN if buys else MUT),
+        ("NO SIGNAL",    str(max(len(results) - strong_buys - buys, 0)), MUT),
+    ]
+    cw = (PW-2*MARGIN)/len(stats)
+    y0 = pdf.get_y()
+    for i,(lbl,val,vc) in enumerate(stats):
+        x = MARGIN+i*cw
+        pdf.set_fill_color(*SRF); pdf.set_draw_color(*BDR); pdf.set_line_width(0.2)
+        pdf.rect(x,y0,cw-1,16,"FD")
+        pdf.set_font("Helvetica","B",6.5); pdf.set_text_color(*MUT)
+        pdf.set_xy(x,y0+2); pdf.cell(cw-1,4,_p(lbl),align="C")
+        pdf.set_font("Helvetica","B",13); pdf.set_text_color(*vc)
+        pdf.set_xy(x,y0+7); pdf.cell(cw-1,6,_p(val),align="C")
+    pdf.set_y(y0+19)
+
+    # ── Constituent table ────────────────────────────────────────────────────
+    pdf.set_font("Helvetica","B",8); pdf.set_text_color(*WHT)
+    y = pdf.get_y()
+    pdf.set_fill_color(*SRF2); pdf.rect(MARGIN,y,PW-2*MARGIN,7,"F")
+    headers = ["#","SYMBOL","PRICE","24H","SCORE","SIGNAL","ALLOC"]
+    widths  = [8,26,32,24,24,34, PW-2*MARGIN-8-26-32-24-24-34]
+    pdf.set_xy(MARGIN, y+1)
+    for h,w in zip(headers,widths):
+        pdf.cell(w,5,_p(h))
+    pdf.set_y(y+8)
+
+    total_weight = sum(max(r.get("score",0),1) for r in results) or 1
+    pdf.set_font("Helvetica","",8)
+    for i, r in enumerate(results, 1):
+        row_y = pdf.get_y()
+        if row_y > 270:
+            pdf.add_page()
+            pdf.set_fill_color(*BG); pdf.rect(0,0,PW,297,"F")
+            pdf.set_y(16)
+            row_y = pdf.get_y()
+        sig = r.get("signal","-")
+        sig_c = GRN if sig in ("STRONG BUY","BUY") else MUT
+        pdf.set_fill_color(*(SRF if i%2 else SRF2))
+        pdf.rect(MARGIN,row_y,PW-2*MARGIN,7,"F")
+        pdf.set_text_color(*TXT)
+        pdf.set_xy(MARGIN,row_y+1)
+        pdf.cell(widths[0],5,_p(str(i)))
+        pdf.set_font("Helvetica","B",8)
+        pdf.cell(widths[1],5,_p(r.get("symbol","?")))
+        pdf.set_font("Helvetica","",8)
+        price = r.get("price",0) or 0
+        pdf.cell(widths[2],5,_p(f"${price:.6g}" if price else "-"))
+        chg = r.get("change",0) or 0
+        pdf.set_text_color(*(GRN if chg>=0 else RED))
+        pdf.cell(widths[3],5,_p(f"{chg:+.1f}%"))
+        pdf.set_text_color(*TXT)
+        pdf.cell(widths[4],5,_p(f"{r.get('score',0)}/{r.get('max',13)}"))
+        pdf.set_text_color(*sig_c)
+        pdf.cell(widths[5],5,_p(sig))
+        alloc = round(max(r.get("score",0),1)/total_weight*100)
+        pdf.set_text_color(*TXT)
+        pdf.cell(widths[6],5,_p(f"{alloc}%"))
+        pdf.ln(7)
+
+    pdf.ln(4)
+
+    # ── Returns calculator (if the frontend had one computed) ────────────────
+    if calc:
+        pdf.set_font("Helvetica","B",10); pdf.set_text_color(*WHT)
+        pdf.cell(0,7,_p("RETURNS CALCULATOR"),ln=True)
+        period = calc.get("period","1M")
+        amount = calc.get("amount",100)
+        value  = calc.get("value",amount)
+        pct    = calc.get("pct",0)
+        y0 = pdf.get_y()
+        pdf.set_fill_color(*SRF); pdf.set_draw_color(*BDR)
+        pdf.rect(MARGIN,y0,PW-2*MARGIN,20,"FD")
+        pdf.set_font("Helvetica","",8); pdf.set_text_color(*MUT)
+        pdf.set_xy(MARGIN+6,y0+3)
+        pdf.cell(0,4,_p(f"${amount:.0f} invested {period} ago, equal-weight across {len(results)} coins, would have become:"))
+        pdf.set_font("Helvetica","B",16); pdf.set_text_color(*(GRN if pct>=0 else RED))
+        pdf.set_xy(MARGIN+6,y0+9)
+        pdf.cell(0,8,_p(f"${value:,.2f}  ({'+' if pct>=0 else ''}{pct:.1f}%)"))
+        pdf.set_y(y0+22)
+
+    pdf.ln(6)
+    pdf.set_font("Helvetica","",7); pdf.set_text_color(*MUT)
+    pdf.cell(0,4,_p(f"Generated by Crypto Sniper  |  crypto-sniper.app  |  {now_str}  |  Not financial advice."),align="C")
+
+    pdf_bytes = pdf.output()
+    _fname = basket_label.replace(" ", "-").lower()
+    return _FResponse(
+        content=bytes(pdf_bytes),
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="crypto-sniper-basket-{_fname}.pdf"',
+            "Access-Control-Expose-Headers": "Content-Disposition",
+        }
+    )
+
+
 # ── DEX Analyse ───────────────────────────────────────────────────────────────
 class DexAnalyseRequest(BaseModel):
     query: str          # contract address (0x...), Solana pubkey, or DexScreener pair URL
