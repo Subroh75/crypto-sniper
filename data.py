@@ -1800,16 +1800,41 @@ def _fred_latest(series_id: str) -> Optional[float]:
         return None
 
 def _fred_yoy_pct(series_id: str) -> Optional[float]:
-    """Year-over-year % change for a monthly series (e.g. CPI)."""
-    obs = _fred_series(series_id, limit=13)
-    if len(obs) < 13:
+    """
+    Year-over-year % change for a monthly series (e.g. CPI).
+
+    Matches the year-ago value by calendar date rather than by list
+    position. Confirmed live against real FRED data: CPIAUCSL can have a
+    "." (not-yet-revised) placeholder at an arbitrary point in the recent
+    window, not just the newest month — e.g. a gap at 2025-10 while
+    2025-05 through 2025-11 otherwise had real values. _fred_series()
+    filters "." out, which shifts every later index by one and would
+    silently return None under simple obs[12] positional indexing even
+    though the actual year-ago value was present, just one slot further
+    back than expected. Fetches a larger buffer (18, not 13) and searches
+    for the matching year+month explicitly so an isolated gap doesn't
+    break the calculation.
+    """
+    obs = _fred_series(series_id, limit=18)
+    if len(obs) < 2:
         return None
     try:
-        latest = float(obs[0]["value"])
-        year_ago = float(obs[12]["value"])
-        if year_ago == 0:
+        from datetime import datetime
+        latest = obs[0]
+        latest_date = datetime.strptime(latest["date"], "%Y-%m-%d")
+        latest_val = float(latest["value"])
+        target_year, target_month = latest_date.year - 1, latest_date.month
+
+        year_ago_val = None
+        for o in obs[1:]:
+            d = datetime.strptime(o["date"], "%Y-%m-%d")
+            if d.year == target_year and d.month == target_month:
+                year_ago_val = float(o["value"])
+                break
+
+        if year_ago_val is None or year_ago_val == 0:
             return None
-        return round((latest - year_ago) / year_ago * 100, 2)
+        return round((latest_val - year_ago_val) / year_ago_val * 100, 2)
     except (KeyError, ValueError):
         return None
 
