@@ -333,13 +333,23 @@ async def kronos(req: KronosRequest):
     import asyncio
     symbol = req.symbol.upper().strip()
     try:
+        # Always fetch real OHLCV — needed by the real Kronos-mini model
+        # (kronos_real.py) regardless of whether the frontend already sent
+        # signal_data. A fetch failure here just means the real-model path
+        # gets skipped in favour of the LLM/heuristic fallback, not a
+        # request failure.
+        try:
+            ohlcv_bars = get_ohlcv(symbol, req.interval)
+        except Exception as _e:
+            logger.warning(f"/kronos OHLCV fetch failed for {symbol}: {_e}")
+            ohlcv_bars = None
+
         if req.signal_data:
             signal_ctx = dict(req.signal_data)
         else:
-            ohlcv = get_ohlcv(symbol, req.interval)
             quote = get_quote(symbol)
-            indicators = get_indicators(symbol, req.interval, bars=ohlcv)
-            sig = calculate_signals(ohlcv, quote, indicators)
+            indicators = get_indicators(symbol, req.interval, bars=ohlcv_bars)
+            sig = calculate_signals(ohlcv_bars, quote, indicators)
             signal_ctx = {"symbol":symbol,"interval":req.interval,"close":sig.close,"rsi":sig.rsi,"adx":sig.adx,"ema_stack":sig.ema_stack,"signal":sig.signal_label,"total":sig.total,"direction":sig.direction,"change_24h":quote.get("change_24h",0)}
 
         # Always set interval from the request explicitly — signal_data sent
@@ -352,7 +362,7 @@ async def kronos(req: KronosRequest):
         try:
             forecast, agents_raw = await asyncio.wait_for(
                 asyncio.gather(
-                    run_kronos_forecast(symbol, signal_ctx),
+                    run_kronos_forecast(symbol, signal_ctx, ohlcv=ohlcv_bars),
                     run_agent_council(symbol, signal_ctx),  # agents run without Kronos enrichment initially
                 ),
                 timeout=45,
