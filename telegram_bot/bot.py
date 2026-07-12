@@ -54,37 +54,34 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-BOT_TOKEN     = os.environ["BOT_TOKEN"]
+BOT_TOKEN = os.environ["BOT_TOKEN"]
 ADMIN_CHAT_ID = int(os.environ.get("ADMIN_CHAT_ID", "5861457546"))
 
 FREE_GEM_DAILY_LIMIT = 2
-MAX_WATCHES          = 5
+MAX_WATCHES = 5
 
 # ConversationHandler states
-AWAITING_EMAIL  = 1
+AWAITING_EMAIL = 1
 AWAITING_SYMBOL = 2
-AWAITING_DEX    = 3
+AWAITING_DEX = 3
 
 # Menu button labels (must match keyboards.py exactly)
-MENU_SIGNAL  = "📡 Live Signal"
-MENU_DEX     = "💎 DEX Gem Scan"
-MENU_SWEEP   = "📊 Last Sweep"
-MENU_RECORD  = "📈 Track Record"
+MENU_SIGNAL = "📡 Live Signal"
+MENU_DEX = "💎 DEX Gem Scan"
+MENU_SWEEP = "📊 Last Sweep"
+MENU_RECORD = "📈 Track Record"
 MENU_ACCOUNT = "⚙️ My Account"
-MENU_HELP    = "❓ Help"
-
+MENU_HELP = "❓ Help"
 
 # ─────────────────────────────────────────────
-#  Helpers
+# Helpers
 # ─────────────────────────────────────────────
 
 async def _typing(update: Update):
     await update.effective_chat.send_action("typing")
 
-
 def _is_valid_email(s: str) -> bool:
     return bool(re.match(r"[^@\s]+@[^@\s]+\.[^@\s]+", s.strip()))
-
 
 def _is_address(s: str) -> bool:
     s = s.strip()
@@ -94,12 +91,10 @@ def _is_address(s: str) -> bool:
         return True
     return False
 
-
 def _get_tier(db_user: dict | None) -> str:
     if not db_user:
         return "free"
     return (db_user.get("tier") or "free").lower()
-
 
 def _get_lang(db_user: dict | None, tg_user=None) -> str:
     """Resolve language: DB preference > Telegram locale > English."""
@@ -109,7 +104,6 @@ def _get_lang(db_user: dict | None, tg_user=None) -> str:
         return resolve_lang(tg_user.language_code)
     return "en"
 
-
 def _split_msg(msg: str, limit: int = 4096) -> list[str]:
     chunks = []
     while msg:
@@ -117,13 +111,12 @@ def _split_msg(msg: str, limit: int = 4096) -> list[str]:
         msg = msg[limit:]
     return chunks
 
-
 # ─────────────────────────────────────────────
-#  /start — onboarding
+# /start — onboarding
 # ─────────────────────────────────────────────
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user    = update.effective_user
+    user = update.effective_user
     chat_id = update.effective_chat.id
 
     await upsert_user(user.id, user.first_name, user.username)
@@ -138,7 +131,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if db_user and db_user.get("email"):
         # Returning user — show menu immediately
-        tier  = (db_user.get("tier") or "free").upper()
+        tier = (db_user.get("tier") or "free").upper()
         email = db_user["email"]
         msg = t("welcome_back", lang, name=user.first_name, email=email, tier=tier)
         await update.message.reply_text(
@@ -155,11 +148,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     return ConversationHandler.END
 
-
 async def receive_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text    = update.message.text.strip()
+    text = update.message.text.strip()
     db_user = await get_user(update.effective_user.id)
-    lang    = _get_lang(db_user, update.effective_user)
+    lang = _get_lang(db_user, update.effective_user)
 
     if not _is_valid_email(text):
         await update.message.reply_text(
@@ -175,39 +167,36 @@ async def receive_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     return ConversationHandler.END
 
-
 async def skip_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db_user = await get_user(update.effective_user.id)
-    lang    = _get_lang(db_user, update.effective_user)
+    lang = _get_lang(db_user, update.effective_user)
     await update.message.reply_text(
         t("help", lang),
         reply_markup=main_menu_keyboard()
     )
     return ConversationHandler.END
 
-
 # ─────────────────────────────────────────────
-#  /help
+# /help
 # ─────────────────────────────────────────────
 
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db_user = await get_user(update.effective_user.id)
-    lang    = _get_lang(db_user, update.effective_user)
+    lang = _get_lang(db_user, update.effective_user)
     await update.message.reply_text(
         t("help", lang),
         reply_markup=main_menu_keyboard()
     )
 
-
 # ─────────────────────────────────────────────
-#  /analyse — CEX signal
+# /analyse — CEX signal
 # ─────────────────────────────────────────────
 
 async def analyse_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    db_user  = await get_user(update.effective_user.id)
-    lang     = _get_lang(db_user, update.effective_user)
-    args     = context.args
-    symbol   = args[0].upper() if args else None
+    db_user = await get_user(update.effective_user.id)
+    lang = _get_lang(db_user, update.effective_user)
+    args = context.args
+    symbol = args[0].upper() if args else None
     interval = args[1].upper() if len(args) > 1 else "1H"
 
     if not symbol:
@@ -225,9 +214,8 @@ async def analyse_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=signal_inline_keyboard(symbol, interval)
     )
 
-
 # ─────────────────────────────────────────────
-#  /status
+# /status
 # ─────────────────────────────────────────────
 
 async def status_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -240,29 +228,28 @@ async def status_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    lang          = _get_lang(db_user, update.effective_user)
-    email         = db_user.get("email") or "not linked"
-    tier          = (db_user.get("tier") or "free").upper()
-    verified      = db_user.get("verified_at") or "—"
+    lang = _get_lang(db_user, update.effective_user)
+    email = db_user.get("email") or "not linked"
+    tier = (db_user.get("tier") or "free").upper()
+    verified = db_user.get("verified_at") or "—"
     scans_today, _ = await get_gem_scan_count(update.effective_user.id)
-    scan_limit    = "Unlimited" if tier.lower() != "free" else f"{scans_today}/{FREE_GEM_DAILY_LIMIT}"
+    scan_limit = "Unlimited" if tier.lower() != "free" else f"{scans_today}/{FREE_GEM_DAILY_LIMIT}"
 
     has_email = bool(db_user.get("email"))
     await update.message.reply_text(
         f"ACCOUNT\n"
         f"──────────────────────\n"
-        f"Name:       {db_user.get('first_name','')}\n"
-        f"Email:      {email}\n"
-        f"Tier:       {tier}\n"
-        f"Linked:     {verified[:10] if verified != '—' else '—'}\n"
-        f"DEX scans:  {scan_limit} today\n\n"
+        f"Name: {db_user.get('first_name','')}\n"
+        f"Email: {email}\n"
+        f"Tier: {tier}\n"
+        f"Linked: {verified[:10] if verified != '—' else '—'}\n"
+        f"DEX scans: {scan_limit} today\n\n"
         f"Upgrade: https://crypto-sniper.app",
         reply_markup=account_inline_keyboard(has_email)
     )
 
-
 # ─────────────────────────────────────────────
-#  /link
+# /link
 # ─────────────────────────────────────────────
 
 async def link_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -277,9 +264,8 @@ async def link_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     return AWAITING_EMAIL
 
-
 # ─────────────────────────────────────────────
-#  /gems — last DEX sweep
+# /gems — last DEX sweep
 # ─────────────────────────────────────────────
 
 async def gems_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -309,16 +295,15 @@ async def gems_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"[/gems] Send failed: {e}")
         await update.message.reply_text("Failed to retrieve results. Try again shortly.")
 
-
 # ─────────────────────────────────────────────
-#  /gem — on-demand DEX scan
+# /gem — on-demand DEX scan
 # ─────────────────────────────────────────────
 
 async def gem_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user    = update.effective_user
+    user = update.effective_user
     chat_id = update.effective_chat.id
     db_user = await get_user(user.id)
-    lang    = _get_lang(db_user, user)
+    lang = _get_lang(db_user, user)
 
     if not context.args:
         await update.message.reply_text(
@@ -327,12 +312,12 @@ async def gem_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    query           = context.args[0].strip()
+    query = context.args[0].strip()
     preferred_chain = context.args[1].lower() if len(context.args) > 1 else None
 
     await upsert_user(user.id, user.first_name, user.username)
     db_user = await get_user(user.id)
-    tier    = _get_tier(db_user)
+    tier = _get_tier(db_user)
 
     if tier == "free":
         scans_today, _ = await get_gem_scan_count(user.id)
@@ -346,9 +331,8 @@ async def gem_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await increment_gem_scan(user.id)
     await gem_lookup(query, context.bot, chat_id, preferred_chain=preferred_chain)
 
-
 # ─────────────────────────────────────────────
-#  /record — signal track record
+# /record — signal track record
 # ─────────────────────────────────────────────
 
 async def record_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -362,9 +346,8 @@ async def record_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=record_inline_keyboard(current=arg or "all")
     )
 
-
 # ─────────────────────────────────────────────
-#  Watchlist commands
+# Watchlist commands
 # ─────────────────────────────────────────────
 
 async def watch_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -399,19 +382,19 @@ async def watch_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     symbol = "?"
-    chain  = "unknown"
+    chain = "unknown"
     try:
         import aiohttp
         async with aiohttp.ClientSession() as session:
             url = f"https://api.dexscreener.com/latest/dex/search?q={address}"
             async with session.get(url, timeout=aiohttp.ClientTimeout(total=8)) as resp:
                 if resp.status == 200:
-                    data  = await resp.json()
+                    data = await resp.json()
                     pairs = data.get("pairs") or []
                     if pairs:
-                        p      = pairs[0]
+                        p = pairs[0]
                         symbol = p.get("baseToken", {}).get("symbol", "?")
-                        chain  = p.get("chainId", "unknown")
+                        chain = p.get("chainId", "unknown")
     except Exception:
         pass
 
@@ -430,7 +413,6 @@ async def watch_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             "Already watching that address.\n/mywatches — view your list"
         )
-
 
 async def unwatch_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
@@ -453,7 +435,6 @@ async def unwatch_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "That address isn't on your watchlist.\n/mywatches — see what you're watching"
         )
 
-
 async def mywatches_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     watches = await get_watches(update.effective_user.id)
     if not watches:
@@ -465,35 +446,34 @@ async def mywatches_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     lines = [f"YOUR WATCHLIST ({len(watches)}/{MAX_WATCHES})", "─" * 28]
     for i, w in enumerate(watches, 1):
-        addr  = w["address"]
+        addr = w["address"]
         short = f"{addr[:8]}...{addr[-6:]}" if len(addr) > 16 else addr
-        sym   = w.get("symbol", "?")
+        sym = w.get("symbol", "?")
         chain = (w.get("chain") or "?").upper()
-        lines.append(f"#{i}  {sym}  {chain}\n    {short}")
+        lines.append(f"#{i} {sym} {chain}\n   {short}")
     lines.append("\n/unwatch <address> — remove one")
     await update.message.reply_text(
         "\n".join(lines),
         reply_markup=main_menu_keyboard()
     )
 
-
 async def chains_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chain_info = {
-        "bsc":      ("BNB Chain",  "🟡", "$50K liq  $100K vol"),
-        "base":     ("Base",       "🔵", "$75K liq  $150K vol"),
-        "ethereum": ("Ethereum",   "⬡",  "$150K liq $300K vol"),
-        "solana":   ("Solana",     "🟣", "$50K liq  $100K vol  24h min age"),
-        "arbitrum": ("Arbitrum",   "🔷", "$75K liq  $150K vol"),
+        "bsc": ("BNB Chain", "🟡", "$50K liq $100K vol"),
+        "base": ("Base", "🔵", "$75K liq $150K vol"),
+        "ethereum": ("Ethereum", "⬡", "$150K liq $300K vol"),
+        "solana": ("Solana", "🟣", "$50K liq $100K vol 24h min age"),
+        "arbitrum": ("Arbitrum", "🔷", "$75K liq $150K vol"),
     }
     lines = ["DEX SCANNER — ACTIVE CHAINS", "─" * 30]
     for chain_id in SUPPORTED_CHAINS:
         info = chain_info.get(chain_id, (chain_id.upper(), "🔗", ""))
         name, emoji, thresholds = info
-        lines.append(f"{emoji} {name}\n   ✅ Active  ·  {thresholds}")
+        lines.append(f"{emoji} {name}\n   ✅ Active · {thresholds}")
     lines.append(
         "\n─" + "─" * 29 + "\n"
         "Data: DexScreener · GoPlus · GeckoTerminal\n"
-        "Sweep: daily at 8 AM AEST  ·  1D candles only\n"
+        "Sweep: daily at 8 AM AEST · 1D candles only\n"
         "/gems — latest sweep results"
     )
     await update.message.reply_text(
@@ -501,9 +481,8 @@ async def chains_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=main_menu_keyboard()
     )
 
-
 # ─────────────────────────────────────────────
-#  /volscan — on-demand vol scan
+# /volscan — on-demand vol scan
 # ─────────────────────────────────────────────
 
 async def volscan_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -514,7 +493,7 @@ async def volscan_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     from datetime import datetime, timezone
 
     await update.message.reply_text(
-        "Scanning for high-volume coins...  this takes ~30s.",
+        "Scanning for high-volume coins... this takes ~30s.",
         reply_markup=main_menu_keyboard()
     )
 
@@ -540,16 +519,15 @@ async def volscan_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=main_menu_keyboard()
         )
 
-
 # ─────────────────────────────────────────────
-#  Menu button tap handler
+# Menu button tap handler
 # ─────────────────────────────────────────────
 
 async def menu_tap(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle persistent keyboard button taps by routing to the right action."""
-    text    = update.message.text.strip()
+    text = update.message.text.strip()
     db_user = await get_user(update.effective_user.id)
-    lang    = _get_lang(db_user, update.effective_user)
+    lang = _get_lang(db_user, update.effective_user)
 
     if text == MENU_SIGNAL:
         await update.message.reply_text(
@@ -590,17 +568,16 @@ async def menu_tap(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Not a menu button — fall through to AI agent
     await handle_message(update, context)
 
-
 # ─────────────────────────────────────────────
-#  Callback query handler (inline buttons)
+# Callback query handler (inline buttons)
 # ─────────────────────────────────────────────
 
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query    = update.callback_query
-    data     = query.data
-    chat_id  = query.message.chat_id
-    db_user  = await get_user(query.from_user.id)
-    lang     = _get_lang(db_user, query.from_user)
+    query = update.callback_query
+    data = query.data
+    chat_id = query.message.chat_id
+    db_user = await get_user(query.from_user.id)
+    lang = _get_lang(db_user, query.from_user)
 
     await query.answer()  # dismiss loading spinner
 
@@ -650,7 +627,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         action = parts[1]
 
         if action in ("refresh", "tf"):
-            symbol   = parts[2]
+            symbol = parts[2]
             interval = parts[3]
             await query.message.reply_text(f"Scanning {symbol}/{interval}...")
             result = await fetch_analysis(symbol, interval)
@@ -672,7 +649,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # ── Gem/DEX buttons ─────────────────────────────────────────────
     if data.startswith("gem:"):
-        parts  = data.split(":")
+        parts = data.split(":")
         action = parts[1]
 
         if action == "refresh":
@@ -682,7 +659,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if action == "watch":
             address = parts[2]
-            symbol  = parts[3] if len(parts) > 3 else "?"
+            symbol = parts[3] if len(parts) > 3 else "?"
             await upsert_user(query.from_user.id, query.from_user.first_name, query.from_user.username)
             existing = await get_watches(query.from_user.id)
             if len(existing) >= MAX_WATCHES:
@@ -717,8 +694,8 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # ── Record buttons ──────────────────────────────────────────────
     if data.startswith("rec:show:"):
         source = data.split(":")[-1]
-        src    = None if source == "all" else source
-        msg    = format_record_message(source=src)
+        src = None if source == "all" else source
+        msg = format_record_message(source=src)
         await context.bot.send_message(
             chat_id=chat_id,
             text=msg,
@@ -733,14 +710,13 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-
 # ─────────────────────────────────────────────
-#  Free-text handler — AI agent
+# Free-text handler — AI agent
 # ─────────────────────────────────────────────
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user    = update.effective_user
-    text    = update.message.text.strip()
+    user = update.effective_user
+    text = update.message.text.strip()
     db_user = await get_user(user.id)
 
     if not db_user:
@@ -752,8 +728,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Check if we're waiting for a symbol or DEX address from menu tap
     awaiting = context.user_data.pop("awaiting", None)
     if awaiting == "symbol":
-        parts    = text.upper().split()
-        symbol   = parts[0]
+        parts = text.upper().split()
+        symbol = parts[0]
         interval = parts[1] if len(parts) > 1 else "1H"
         await _typing(update)
         msg = await update.message.reply_text(f"Scanning {symbol}/{interval}...")
@@ -771,7 +747,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await _typing(update)
     await save_message(user.id, "user", text)
-    history  = await get_history(user.id, limit=16)
+    history = await get_history(user.id, limit=16)
     response = await get_agent_response(text, history[:-1], db_user, lang=lang)
 
     # Check for ANALYSE trigger
@@ -792,7 +768,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if esc_summary:
         transcript = await get_transcript(user.id, limit=20)
         await save_escalation(user.id, esc_summary, transcript)
-        user_name  = db_user.get("first_name", str(user.id)) if db_user else str(user.id)
+        user_name = db_user.get("first_name", str(user.id)) if db_user else str(user.id)
         user_email = (db_user.get("email") or "") if db_user else ""
         await escalate(user.id, user_name, user_email, esc_summary, transcript, bot=context.bot)
         esc_msg = (
@@ -813,28 +789,25 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=main_menu_keyboard()
     )
 
-
 # ─────────────────────────────────────────────
-#  Error handler
+# Error handler
 # ─────────────────────────────────────────────
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
     logger.error(f"Exception: {context.error}", exc_info=context.error)
 
-
 # ─────────────────────────────────────────────
-#  Helpers
+# Helpers
 # ─────────────────────────────────────────────
 
 def _seconds_to_next_hour() -> int:
     from datetime import datetime, timezone
-    now      = datetime.now(timezone.utc)
+    now = datetime.now(timezone.utc)
     secs_past = now.minute * 60 + now.second
     secs_until_next = 3600 - secs_past
     if secs_past <= 120:
         return 30
     return max(30, secs_until_next - 2)
-
 
 def _seconds_to_next_daily_dex() -> int:
     """Seconds until next 22:00 UTC (8 AM AEST) — DEX daily scan trigger."""
@@ -846,9 +819,8 @@ def _seconds_to_next_daily_dex() -> int:
     secs = int((target - now).total_seconds())
     return max(30, secs)
 
-
 # ─────────────────────────────────────────────
-#  Post-init: DB + JobQueue
+# Post-init: DB + JobQueue
 # ─────────────────────────────────────────────
 
 async def post_init(application: Application):
@@ -859,7 +831,7 @@ async def post_init(application: Application):
     logger.info("Signal tracker DB initialised")
 
     job_queue = application.job_queue
-    first_in  = _seconds_to_next_hour()
+    first_in = _seconds_to_next_hour()
 
     job_queue.run_repeating(
         hourly_scan_job,
@@ -872,7 +844,7 @@ async def post_init(application: Application):
     dex_first_in = _seconds_to_next_daily_dex()
     job_queue.run_repeating(
         dex_scan_job,
-        interval=86400,          # once per day
+        interval=86400,  # once per day
         first=dex_first_in,
         name="dex_scanner",
         data={"chat_id": ADMIN_CHAT_ID},
@@ -899,30 +871,32 @@ async def post_init(application: Application):
     )
     logger.info(f"Vol spike poller scheduled — first run in {spike_first_in}s (every hour)")
 
-    # Trend Radar — Vol Filter scan every hour, 3min after the hour mark
-    # 8h cooldown per coin prevents spam regardless of scan frequency
+    # Trend Radar — Kalman filter scan every 6 hours, matching kalman_scanner.py's
+    # own docstring. This had drifted to hourly (interval=3600), which was the
+    # main contributor to signal noise across the bot — see OPEN_TASKS.md for
+    # the longer-term plan to retire this in favour of the swarm's KalmanAgent
+    # once its Orchestrator is stable enough to broadcast on its own.
     radar_first_in = first_in + 180
     job_queue.run_repeating(
         trend_radar_job,
-        interval=3600,           # every hour
+        interval=21600,  # every 6 hours
         first=radar_first_in,
         name="trend_radar",
     )
-    logger.info(f"Trend Radar (Vol Filter) scheduled — first run in {radar_first_in}s (every 1h)")
+    logger.info(f"Trend Radar (Kalman) scheduled — first run in {radar_first_in}s (every 6h)")
 
     # Trend Radar outcome checker — runs once daily at 22:00 UTC (same as daily scan)
     outcome_first_in = _seconds_to_next_daily_dex()
     job_queue.run_repeating(
         trend_radar_outcome_checker,
         interval=86400,
-        first=outcome_first_in + 120,   # 2min after daily scan to avoid collision
+        first=outcome_first_in + 120,  # 2min after daily scan to avoid collision
         name="trend_radar_outcomes",
     )
     logger.info(f"Trend Radar outcome checker scheduled — first run in {outcome_first_in + 120}s (daily)")
 
-
 # ─────────────────────────────────────────────
-#  Main
+# Main
 # ─────────────────────────────────────────────
 
 def main():
@@ -937,7 +911,7 @@ def main():
     conv = ConversationHandler(
         entry_points=[
             CommandHandler("start", start),
-            CommandHandler("link",  link_cmd),
+            CommandHandler("link", link_cmd),
         ],
         states={
             AWAITING_EMAIL: [
@@ -953,18 +927,18 @@ def main():
     app.add_handler(CallbackQueryHandler(button_callback))
 
     # Commands
-    app.add_handler(CommandHandler("help",      help_cmd))
-    app.add_handler(CommandHandler("analyse",   analyse_cmd))
-    app.add_handler(CommandHandler("analyze",   analyse_cmd))
-    app.add_handler(CommandHandler("status",    status_cmd))
-    app.add_handler(CommandHandler("gem",       gem_cmd))
-    app.add_handler(CommandHandler("gems",      gems_cmd))
-    app.add_handler(CommandHandler("watch",     watch_cmd))
-    app.add_handler(CommandHandler("unwatch",   unwatch_cmd))
+    app.add_handler(CommandHandler("help", help_cmd))
+    app.add_handler(CommandHandler("analyse", analyse_cmd))
+    app.add_handler(CommandHandler("analyze", analyse_cmd))
+    app.add_handler(CommandHandler("status", status_cmd))
+    app.add_handler(CommandHandler("gem", gem_cmd))
+    app.add_handler(CommandHandler("gems", gems_cmd))
+    app.add_handler(CommandHandler("watch", watch_cmd))
+    app.add_handler(CommandHandler("unwatch", unwatch_cmd))
     app.add_handler(CommandHandler("mywatches", mywatches_cmd))
-    app.add_handler(CommandHandler("chains",    chains_cmd))
-    app.add_handler(CommandHandler("record",    record_cmd))
-    app.add_handler(CommandHandler("volscan",   volscan_cmd))
+    app.add_handler(CommandHandler("chains", chains_cmd))
+    app.add_handler(CommandHandler("record", record_cmd))
+    app.add_handler(CommandHandler("volscan", volscan_cmd))
 
     # Menu taps + free-text (menu_tap routes known labels, falls through to AI)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, menu_tap))
@@ -972,7 +946,6 @@ def main():
 
     logger.info("Crypto Sniper bot polling...")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
-
 
 if __name__ == "__main__":
     main()
